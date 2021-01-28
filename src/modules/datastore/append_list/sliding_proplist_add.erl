@@ -23,8 +23,8 @@
 %% API
 %%=====================================================================
 
--spec insert_elements(sliding_proplist:sentinel(), sliding_proplist:list_node(), [sliding_proplist:element()]) -> 
-    {ok, [sliding_proplist:key()]}.
+-spec insert_elements(sliding_proplist:sentinel(), sliding_proplist:list_node(), 
+    [sliding_proplist:element()]) -> {ok, [sliding_proplist:key()]}.
 insert_elements(Sentinel, FirstNode, Batch) ->
     #sentinel{max_elements_per_node = MaxElementsPerNode} = Sentinel,
 
@@ -42,11 +42,13 @@ insert_elements(Sentinel, FirstNode, Batch) ->
 %%=====================================================================
 
 %% @private
--spec add_unique_elements(sliding_proplist:list_node(), [sliding_proplist:element()], pos_integer()) -> 
-    {sliding_proplist:list_node(), [sliding_proplist:element()]}.
+-spec add_unique_elements(sliding_proplist:list_node(), [sliding_proplist:element()], 
+    pos_integer()) -> {sliding_proplist:list_node(), [sliding_proplist:element()]}.
 add_unique_elements(FirstNode, [] = _Elements, _MaxElementsPerNode) ->
     {FirstNode, []};
-add_unique_elements(#node{elements = ElementsInFirstNode} = FirstNode, [{MinInBatch, _} | _] = Elements, MaxElementsPerNode) ->
+add_unique_elements(#node{} = FirstNode, Elements,  MaxElementsPerNode) ->
+    #node{elements = ElementsInFirstNode} = FirstNode,
+    [{MinInBatch, _} | _] = Elements,
     ToFill = MaxElementsPerNode - maps:size(ElementsInFirstNode),
     {ElementsToAdd, ElementsTail} = split_list(Elements, ToFill),
     Node = FirstNode#node{
@@ -55,13 +57,16 @@ add_unique_elements(#node{elements = ElementsInFirstNode} = FirstNode, [{MinInBa
             maps:from_list(ElementsToAdd)
         )
     },
+    % fixme analyze this - it seems to be the same
     case maps:size(ElementsInFirstNode) > 0 andalso MinInBatch > lists:min(maps:keys(ElementsInFirstNode)) of
         true -> ok;
         false ->
             % update `min_in_newer` value in all nodes that have minimal key greater that minimal 
             % key in batch (may happen when adding elements with lower keys than existing ones)
             case maps:size(ElementsInFirstNode) > 0 andalso lists:min(maps:keys(ElementsInFirstNode)) > MinInBatch of
-                true -> ok = sliding_proplist_utils:adjust_min_in_newer(Node#node.prev, MinInBatch, false);
+                true -> 
+                    ok = sliding_proplist_utils:adjust_min_in_newer(
+                        Node#node.prev, MinInBatch, false);
                 false -> ok
             end
     end, 
@@ -75,7 +80,8 @@ add_unique_elements(#node{elements = ElementsInFirstNode} = FirstNode, [{MinInBa
 %% Creates new nodes if necessary.
 %% @end
 %%--------------------------------------------------------------------
--spec add_to_beginning(sliding_proplist:sentinel(), [sliding_proplist:element()], sliding_proplist:list_node()) -> ok.
+-spec add_to_beginning(sliding_proplist:sentinel(), [sliding_proplist:element()], 
+    sliding_proplist:list_node()) -> ok.
 add_to_beginning(#sentinel{structure_id = StructId} = Sentinel, [], #node{node_id = NodeId} = Node) ->
     sliding_proplist_persistence:save_node(NodeId, Node),
     sliding_proplist_persistence:save_node(StructId, Sentinel#sentinel{first = NodeId}),
@@ -95,8 +101,8 @@ add_to_beginning(Sentinel, [{Min, _} | _] = Batch, PrevNode) ->
 
 
 %% @private
--spec prepare_new_first_node(sliding_proplist:id(), [sliding_proplist:element()], PrevNode :: sliding_proplist:list_node()) -> 
-    NewNode :: sliding_proplist:list_node().
+-spec prepare_new_first_node(sliding_proplist:id(), [sliding_proplist:element()], 
+    PrevNode :: sliding_proplist:list_node()) -> NewNode :: sliding_proplist:list_node().
 prepare_new_first_node(StructureId, ElementsList, #node{
     node_id = PrevNodeId, 
     node_number = PrevNodeNum
@@ -114,11 +120,19 @@ prepare_new_first_node(StructureId, ElementsList, #node{
 
 
 %% @private
--spec overwrite_existing_elements(sliding_proplist:list_node(), Batch :: [sliding_proplist:element()]) -> 
-    {sliding_proplist:list_node(), UniqueElements :: [sliding_proplist:element()], OverwrittenElements :: [sliding_proplist:element()]}.
+-spec overwrite_existing_elements(
+    sliding_proplist:list_node(), 
+    Batch :: [sliding_proplist:element()]
+) -> 
+    {
+        sliding_proplist:list_node(), 
+        UniqueElements :: [sliding_proplist:element()], 
+        OverwrittenElements :: [sliding_proplist:element()]
+    }.
 overwrite_existing_elements(FirstNode, [{MinInBatch, _} | _] = Batch) ->
     #node{max_in_older = MaxInOlder, prev = Prev} = FirstNode,
-    {NewNode, RemainingElements, Overwritten} = overwrite_existing_elements_in_node(FirstNode, Batch),
+    {NewNode, RemainingElements, Overwritten} = 
+        overwrite_existing_elements_in_node(FirstNode, Batch),
     case MaxInOlder == undefined orelse MinInBatch > MaxInOlder of
         true -> {NewNode, RemainingElements, Overwritten};
         false ->
@@ -129,8 +143,14 @@ overwrite_existing_elements(FirstNode, [{MinInBatch, _} | _] = Batch) ->
 
 
 %% @private
--spec overwrite_existing_elements_in_prev_nodes(sliding_proplist:list_node() | sliding_proplist:id() | undefined, Batch :: [sliding_proplist:element()]) -> 
-    {UniqueElements :: [sliding_proplist:element()], OverwrittenElements :: [sliding_proplist:element()]}.
+-spec overwrite_existing_elements_in_prev_nodes(
+    sliding_proplist:list_node() | sliding_proplist:node_id() | undefined, 
+    Batch :: [sliding_proplist:element()]
+) -> 
+    {
+        UniqueElements :: [sliding_proplist:element()], 
+        OverwrittenElements :: [sliding_proplist:element()]
+    }.
 overwrite_existing_elements_in_prev_nodes(undefined, Batch) ->
     {Batch, []};
 overwrite_existing_elements_in_prev_nodes(_, []) ->
@@ -155,8 +175,15 @@ overwrite_existing_elements_in_prev_nodes(NodeId, Batch) ->
 
 
 %% @private
--spec overwrite_existing_elements_in_node(sliding_proplist:list_node(), Batch :: [sliding_proplist:element()]) -> 
-    {sliding_proplist:list_node(), UniqueElements :: [sliding_proplist:element()], CommonElements :: [sliding_proplist:element()]}.
+-spec overwrite_existing_elements_in_node(
+    sliding_proplist:list_node(), 
+    Batch :: [sliding_proplist:element()]
+) -> 
+    {
+        sliding_proplist:list_node(), 
+        UniqueElements :: [sliding_proplist:element()], 
+        CommonElements :: [sliding_proplist:element()]
+    }.
 overwrite_existing_elements_in_node(Node, Batch) ->
     #node{elements = Elements} = Node,
     {Common, ReversedRemainingElements} = split_common_and_unique_elements(Batch, Elements),
@@ -165,8 +192,14 @@ overwrite_existing_elements_in_node(Node, Batch) ->
 
 
 %% @private
--spec split_common_and_unique_elements([sliding_proplist:element()], #{sliding_proplist:key() => sliding_proplist:value()}) -> 
-    {ExistingElements :: [sliding_proplist:element()], RemainingElements :: [sliding_proplist:element()]}.
+-spec split_common_and_unique_elements(
+    [sliding_proplist:element()], 
+    sliding_proplist:elements_map()
+) -> 
+    {
+        ExistingElements :: [sliding_proplist:element()], 
+        RemainingElements :: [sliding_proplist:element()]
+    }.
 split_common_and_unique_elements(Batch, ElementsInNode) ->
     BatchKeys = [Key || {Key, _} <- Batch],
     CommonKeys = lists:sort(maps:keys(maps:with(BatchKeys, ElementsInNode))),

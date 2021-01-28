@@ -20,13 +20,15 @@
 -export([fold/4, fold/6, get_elements/3, get_highest/1, get_max_key/1]).
 
 
-% This record is used as cache during listing. Holds information where listing should continue.
+% This record is used as cache during listing. Holds information where fold should continue.
 -record(listing_state, {
     structure_id :: sliding_proplist:id() | undefined,
-    last_node_id :: sliding_proplist:id() | undefined,
-    last_listed_key :: integer() | undefined,
+    last_node_id :: sliding_proplist:node_id() | undefined,
+    last_listed_key :: sliding_proplist:key() | undefined,
     % Node number of last node that was encountered during elements listing.
-    last_node_number :: non_neg_integer() | undefined,
+    % By remembering this value it is possible to find where fold should 
+    % continue after last encountered node was deleted.
+    last_node_number :: sliding_proplist:node_number() | undefined,
     direction =  back_from_newest :: direction(),
     finished = false :: boolean()
 }).
@@ -81,18 +83,18 @@ fold(#listing_state{
     end.
 
 
--spec fold(sliding_proplist:id(), sliding_proplist:node_id(), batch_size(), direction(), fold_fun(), term()) -> 
-    fold_result() | {error, term()}.
-fold(Id, StartingNodeId, Size, Direction, FoldFun, Acc0) when is_binary(Id) ->
+-spec fold(sliding_proplist:id(), sliding_proplist:node_id(), batch_size(), direction(), 
+    fold_fun(), term()) -> fold_result() | {error, term()}.
+fold(StructureId, StartingNodeId, Size, Direction, FoldFun, Acc0) when is_binary(StructureId) ->
     State = #listing_state{
-        structure_id = Id,
+        structure_id = StructureId,
         last_node_id = StartingNodeId,
         direction = Direction
     },
     fold(State, Size, FoldFun, Acc0).
 
 
--spec get_elements(sliding_proplist:id() | undefined, [sliding_proplist:key()], direction()) -> 
+-spec get_elements(sliding_proplist:node_id() | undefined, [sliding_proplist:key()], direction()) -> 
     [sliding_proplist:element()].
 get_elements(undefined, _Keys, _Direction) ->
     [];
@@ -109,7 +111,8 @@ get_elements(NodeId, Keys, Direction) ->
     end.
 
 
--spec get_highest(undefined | sliding_proplist:id()) -> {ok, sliding_proplist:element()} | {error, term()}.
+-spec get_highest(undefined | sliding_proplist:node_id()) -> 
+    {ok, sliding_proplist:element()} | {error, term()}.
 get_highest(undefined) -> {error, not_found};
 get_highest(NodeId) ->
     case sliding_proplist_persistence:get_node(NodeId) of
@@ -125,7 +128,8 @@ get_highest(NodeId) ->
     end.
 
 
--spec get_max_key(undefined | sliding_proplist:id()) -> {ok, sliding_proplist:key()} | {error, term()}.
+-spec get_max_key(undefined | sliding_proplist:node_id()) -> 
+    {ok, sliding_proplist:key()} | {error, term()}.
 get_max_key(undefined) -> {error, not_found};
 get_max_key(NodeId) ->
     case sliding_proplist_persistence:get_node(NodeId) of
@@ -141,8 +145,8 @@ get_max_key(NodeId) ->
 %%=====================================================================
 
 %% @private
--spec select_not_listed_elements(state(), sliding_proplist:elements_map(), sliding_proplist:node_number()) -> 
-    [sliding_proplist:element()].
+-spec select_not_listed_elements(state(), sliding_proplist:elements_map(), 
+    sliding_proplist:node_number()) -> [sliding_proplist:element()].
 select_not_listed_elements(#listing_state{
     last_listed_key = LastKey,
     last_node_number = LastNodeNum,
@@ -155,8 +159,10 @@ select_not_listed_elements(#listing_state{
             % elements with keys less than those already listed
             % (higher when listing forward from oldest) 
             case Direction of
-                back_from_newest -> maps:filter(fun(Key, _) -> Key < LastKey end, OrigElements);
-                forward_from_oldest -> maps:filter(fun(Key, _) -> Key > LastKey end, OrigElements)
+                back_from_newest -> maps:filter(fun(Key, _) -> 
+                    Key < LastKey end, OrigElements);
+                forward_from_oldest -> maps:filter(fun(Key, _) -> 
+                    Key > LastKey end, OrigElements)
             end
     end,
     case Direction of
@@ -185,8 +191,10 @@ find_node(State) ->
     case sliding_proplist_persistence:get_node(NodeId) of
         {ok, #node{node_number = NodeNum} = Node}  ->
             NodeFound = case Direction of
-                back_from_newest -> not (is_integer(LastNodeNum) andalso NodeNum > LastNodeNum);
-                forward_from_oldest -> not (is_integer(LastNodeNum) andalso NodeNum < LastNodeNum)
+                back_from_newest -> 
+                    not (is_integer(LastNodeNum) andalso NodeNum > LastNodeNum);
+                forward_from_oldest -> 
+                    not (is_integer(LastNodeNum) andalso NodeNum < LastNodeNum)
             end,
             case NodeFound of
                 true -> Node;
@@ -206,7 +214,8 @@ find_node(State) ->
 
 
 %% @private
--spec apply_fold_fun(fold_fun(), term(), [sliding_proplist:element()]) -> {continue | stop, [term()]}.
+-spec apply_fold_fun(fold_fun(), term(), [sliding_proplist:element()]) -> 
+    {continue | stop, [term()]}.
 apply_fold_fun(FoldFun, Acc0, OriginalElements) ->
     lists:foldl(fun
         (_Elem, {stop, Acc}) -> {stop, Acc};
@@ -219,8 +228,8 @@ apply_fold_fun(FoldFun, Acc0, OriginalElements) ->
 
 
 %% @private
--spec select_elements_from_node(sliding_proplist:list_node(), [sliding_proplist:key()], direction()) ->
-    {[sliding_proplist:element()], [sliding_proplist:key()]}.
+-spec select_elements_from_node(sliding_proplist:list_node(), [sliding_proplist:key()], 
+    direction()) -> {[sliding_proplist:element()], [sliding_proplist:key()]}.
 select_elements_from_node(#node{elements = Elements} = Node, Keys, Direction) ->
     Selected = maps:with(Keys, Elements),
     RemainingKeys = Keys -- maps:keys(Selected),
@@ -228,7 +237,8 @@ select_elements_from_node(#node{elements = Elements} = Node, Keys, Direction) ->
 
 
 %% @private
--spec filter_keys(direction(), sliding_proplist:list_node(), [sliding_proplist:key()]) -> [sliding_proplist:key()].
+-spec filter_keys(direction(), sliding_proplist:list_node(), [sliding_proplist:key()]) -> 
+    [sliding_proplist:key()].
 filter_keys(back_from_newest, #node{max_in_older = Max}, Keys) ->
     [Key || Key <- Keys, Key =< Max];
 filter_keys(forward_from_oldest, #node{min_in_newer = Min}, Keys) ->
@@ -236,6 +246,7 @@ filter_keys(forward_from_oldest, #node{min_in_newer = Min}, Keys) ->
 
 
 %% @private
--spec select_neighbour(direction(), sliding_proplist:list_node()) -> sliding_proplist:id().
+-spec select_neighbour(direction(), sliding_proplist:list_node()) -> 
+    sliding_proplist:node_id().
 select_neighbour(back_from_newest, #node{prev = Prev}) -> Prev;
 select_neighbour(forward_from_oldest, #node{next = Next}) -> Next.

@@ -27,26 +27,25 @@ sliding_proplist_test_() ->
         fun setup/0,
         fun teardown/1,
         [
-            % fixme nazwy funkcji nie odpowiadają nazwom właściwym
             {"test_create_and_destroy", fun test_create_and_destroy/0},
-            {"test_add_elements_one_node", fun test_add_elements_one_node/0},
-            {"test_add_elements_multi_nodes", fun test_add_elements_multi_nodes/0},
-            {"test_add_only_existing", fun test_add_only_existing_elements/0},
-            {"test_add_with_overwrite", fun test_add_with_overwrite/0},
+            {"test_insert_elements_one_node", fun test_insert_elements_one_node/0},
+            {"test_insert_elements_multi_nodes", fun test_insert_elements_multi_nodes/0},
+            {"test_insert_elements_only_existing", fun test_insert_elements_only_existing_elements/0},
+            {"test_insert_elements_with_overwrite", fun test_insert_elements_with_overwrite/0},
             {"test_list_with_listing_state", fun test_list_with_listing_state/0},
             {"test_list_with_listing_state_start_from_last", fun test_list_with_listing_state_start_from_last/0},
-            {"test_list_with_fold_fun", fun test_list_with_fold_fun/0},
-            {"test_list_with_fold_fun_stop", fun test_list_with_fold_fun_stop/0},
-            {"test_delete_consecutive_elems_between_nodes", fun test_delete_consecutive_elems_between_nodes/0},
-            {"test_delete_non_consecutive_elems_between_nodes", fun test_delete_non_consecutive_elems_between_nodes/0},
-            {"test_delete_all_elems_in_first_node", fun test_delete_all_elems_in_first_node/0},
-            {"test_delete_elems_all_but_first_node", fun test_delete_elems_all_but_first_node/0},
-            {"test_first_node_merge_during_delete", fun test_first_node_merge_during_delete/0},
-            {"test_delete_elems_one_by_one_descending", fun test_delete_elems_one_by_one_descending/0},
-            {"test_delete_elems_one_by_one_ascending", fun test_delete_elems_one_by_one_ascending/0},
-            {"test_delete_elems_structure_not_sorted", fun test_delete_elems_structure_not_sorted/0},
-            {"test_merge_nodes_during_delete_structure_not_sorted", fun test_merge_nodes_during_delete_structure_not_sorted/0},
-            {"test_delete_between_listings", fun test_delete_between_listings/0},
+            {"test_fold_elements", fun test_fold_elements/0},
+            {"test_fold_elements_stop", fun test_fold_elements_stop/0},
+            {"test_remove_consecutive_elements_between_nodes", fun test_remove_consecutive_elements_between_nodes/0},
+            {"test_remove_non_consecutive_elements_between_nodes", fun test_remove_non_consecutive_elements_between_nodes/0},
+            {"test_remove_all_elements_in_first_node", fun test_remove_all_elements_in_first_node/0},
+            {"test_remove_elements_all_but_first_node", fun test_remove_elements_all_but_first_node/0},
+            {"test_first_node_merge_during_remove", fun test_first_node_merge_during_remove/0},
+            {"test_remove_elements_one_by_one_descending", fun test_remove_elements_one_by_one_descending/0},
+            {"test_remove_elements_one_by_one_ascending", fun test_remove_elements_one_by_one_ascending/0},
+            {"test_remove_elements_structure_not_sorted", fun test_remove_elements_structure_not_sorted/0},
+            {"test_merge_nodes_during_remove_structure_not_sorted", fun test_merge_nodes_during_remove_structure_not_sorted/0},
+            {"test_remove_elements_between_listings", fun test_remove_elements_between_listings/0},
             {"test_get_elements", fun test_get_elements/0},
             {"test_get_elements_structure_not_sorted", fun test_get_elements_structure_not_sorted/0},
             {"test_get_elements_forward_from_oldest", fun test_get_elements_forward_from_oldest/0},
@@ -56,18 +55,18 @@ sliding_proplist_test_() ->
             {"test_get_max_key", fun test_get_max_key/0},
             {"test_get_max_key_structure_not_sorted", fun test_get_max_key_structure_not_sorted/0},
     
-            {"test_nodes_created_after_add", fun test_nodes_created_after_add/0},
-            {"test_min_in_newer_after_add", fun test_min_in_newer_after_add/0},
-            {"test_min_in_newer_after_add_reversed", fun test_min_in_newer_after_add_reversed/0},
-            {"test_max_in_older_after_add", fun test_max_in_older_after_add/0},
-            {"test_max_in_older_after_add_reversed", fun test_max_in_older_after_add_reversed/0},
-            {"test_node_num_after_add", fun test_node_num_after_add/0},
-            {"test_nodes_elements_after_add", fun test_nodes_elements_after_add/0},
-            {"test_nodes_elements_after_add_reversed", fun test_nodes_elements_after_add_reversed/0},
-            {"test_nodes_deleted_after_delete_elems", fun test_nodes_deleted_after_delete_elems/0},
-            {"test_nodes_after_delete_elems_from_last_node", fun test_nodes_after_delete_elems_from_last_node/0},
-            {"test_min_in_newer_after_delete_elems", fun test_min_in_newer_after_delete_elems/0},
-            {"test_max_in_older_after_delete_elems", fun test_max_in_older_after_delete_elems/0}
+            {"test_nodes_created_after_insert_elements", fun test_nodes_created_after_insert_elements/0},
+            {"test_min_in_newer_after_insert_elements", fun test_min_in_newer_after_insert_elements/0},
+            {"test_min_in_newer_after_insert_elements_reversed", fun test_min_in_newer_after_insert_elements_reversed/0},
+            {"test_max_in_older_after_insert_elements", fun test_max_in_older_after_insert_elements/0},
+            {"test_max_in_older_after_insert_elements_reversed", fun test_max_in_older_after_insert_elements_reversed/0},
+            {"test_node_num_after_insert_elements", fun test_node_num_after_insert_elements/0},
+            {"test_nodes_elements_after_insert_elements", fun test_nodes_elements_after_insert_elements/0},
+            {"test_nodes_elements_after_insert_elements_reversed", fun test_nodes_elements_after_insert_elements_reversed/0},
+            {"test_nodes_removed_after_remove_elements", fun test_nodes_removed_after_remove_elements/0},
+            {"test_nodes_after_remove_elements_from_last_node", fun test_nodes_after_remove_elements_from_last_node/0},
+            {"test_min_in_newer_after_remove_elements", fun test_min_in_newer_after_remove_elements/0},
+            {"test_max_in_older_after_remove_elements", fun test_max_in_older_after_remove_elements/0}
         ]
     }.
 
@@ -90,7 +89,7 @@ test_create_and_destroy() ->
     ?assertEqual([], ets:tab2list(sliding_proplist_persistence)).
 
 
-test_add_elements_one_node() ->
+test_insert_elements_one_node() ->
     ?assertEqual({error, not_found}, sliding_proplist:insert_unique_sorted_elements(<<"dummy_id">>, prepare_batch(1, 100))),
     ?assertMatch({error, not_found}, sliding_proplist:list(<<"dummy_id">>, 100)),
     ?assertEqual({error, not_found}, sliding_proplist:insert_unique_sorted_elements(<<"dummy_id">>, [])),
@@ -99,14 +98,14 @@ test_add_elements_one_node() ->
     ?assertMatch({done, [{1, <<"1">>}]}, sliding_proplist:list(Id, 100)).
 
 
-test_add_elements_multi_nodes() ->
+test_insert_elements_multi_nodes() ->
     {ok, Id} = sliding_proplist:create(10),
     Batch = prepare_batch(10, 30),
     sliding_proplist:insert_unique_sorted_elements(Id, Batch),
     ?assertMatch({done, Batch}, sliding_proplist:list(Id, 100)).
 
 
-test_add_only_existing_elements() ->
+test_insert_elements_only_existing_elements() ->
     {ok, Id} = sliding_proplist:create(10),
     Batch = prepare_batch(10, 30),
     ?assertEqual({ok, []}, sliding_proplist:insert_unique_sorted_elements(Id, Batch)),
@@ -114,7 +113,7 @@ test_add_only_existing_elements() ->
     ?assertMatch({done, Batch}, sliding_proplist:list(Id, 100)).
 
 
-test_add_with_overwrite() ->
+test_insert_elements_with_overwrite() ->
     {ok, Id} = sliding_proplist:create(10),
     Batch1 = prepare_batch(10, 30),
     ?assertEqual({ok, []}, sliding_proplist:insert_unique_sorted_elements(Id, Batch1)),
@@ -158,7 +157,7 @@ test_list_with_listing_state_start_from_last() ->
     ?assertMatch({done, [{30, <<"30">>}]}, sliding_proplist:list(FinalListingState, 1)).
 
 
-test_list_with_fold_fun() ->
+test_fold_elements() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
     FinalListingState = lists:foldl(fun(X, ListingState) ->
@@ -171,7 +170,7 @@ test_list_with_fold_fun() ->
         FinalListingState, 1, fun({_Key, Value}, Acc) -> {ok, [Value | Acc]} end, [])).
 
 
-test_list_with_fold_fun_stop() ->
+test_fold_elements_stop() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 30)),
     Expected1 = lists:seq(1, 7),
@@ -190,7 +189,7 @@ test_list_with_fold_fun_stop() ->
     ).
 
 
-test_delete_consecutive_elems_between_nodes() ->
+test_remove_consecutive_elements_between_nodes() ->
     ?assertEqual({error, not_found}, sliding_proplist:remove_elements(<<"dummy_id">>, [])),
     {ok, Id} = sliding_proplist:create(10),
     ?assertEqual(ok, sliding_proplist:remove_elements(Id, [])),
@@ -204,7 +203,7 @@ test_delete_consecutive_elems_between_nodes() ->
     ?assertMatch({done, Expected1}, sliding_proplist:list(Id, 100)).
 
 
-test_delete_non_consecutive_elems_between_nodes() ->
+test_remove_non_consecutive_elements_between_nodes() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
     sliding_proplist:remove_elements(Id, lists:seq(1,100, 2)),
@@ -212,7 +211,7 @@ test_delete_non_consecutive_elems_between_nodes() ->
     ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
-test_delete_all_elems_in_first_node() ->
+test_remove_all_elements_in_first_node() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
     sliding_proplist:remove_elements(Id, [30]),
@@ -223,7 +222,7 @@ test_delete_all_elems_in_first_node() ->
     ?assertMatch({done, Expected1}, sliding_proplist:list(Id, 100)).
 
 
-test_delete_elems_all_but_first_node() ->
+test_remove_elements_all_but_first_node() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
     sliding_proplist:remove_elements(Id, lists:seq(10, 29)),
@@ -231,7 +230,7 @@ test_delete_elems_all_but_first_node() ->
     ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
-test_first_node_merge_during_delete() ->
+test_first_node_merge_during_remove() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 31)),
     sliding_proplist:remove_elements(Id, lists:seq(10, 30)),
@@ -239,7 +238,7 @@ test_first_node_merge_during_delete() ->
     ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
-test_delete_elems_one_by_one_descending() ->
+test_remove_elements_one_by_one_descending() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 31)),
     lists:foreach(fun(Elem) ->
@@ -249,7 +248,7 @@ test_delete_elems_one_by_one_descending() ->
     ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
-test_delete_elems_one_by_one_ascending() ->
+test_remove_elements_one_by_one_ascending() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 31)),
     lists:foreach(fun(Elem) ->
@@ -259,7 +258,7 @@ test_delete_elems_one_by_one_ascending() ->
     ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
-test_delete_elems_structure_not_sorted() ->
+test_remove_elements_structure_not_sorted() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(20, 31)),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 20)),
@@ -270,7 +269,7 @@ test_delete_elems_structure_not_sorted() ->
     ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
-test_merge_nodes_during_delete_structure_not_sorted() ->
+test_merge_nodes_during_remove_structure_not_sorted() ->
     {ok, Id} = sliding_proplist:create(1),
     lists:foreach(fun(Elem) ->
         sliding_proplist:insert_unique_sorted_elements(Id, Elem)
@@ -280,7 +279,7 @@ test_merge_nodes_during_delete_structure_not_sorted() ->
     ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
-test_delete_between_listings() ->
+test_remove_elements_between_listings() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
     {more, _, ListingState} = sliding_proplist:list(Id, 2),
@@ -396,7 +395,7 @@ test_get_structure_not_sorted_forward_from_oldest() ->
     ?assertEqual([{1, <<"1">>}, {100, <<"100">>}], lists:sort(Result1)).
 
 
-test_nodes_created_after_add() ->
+test_nodes_created_after_insert_elements() ->
     {ok, Id} = sliding_proplist:create(1),
     ?assertMatch({ok, #sentinel{first = undefined, last = undefined}}, sliding_proplist_persistence:get_node(Id)),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 1)),
@@ -411,7 +410,7 @@ test_nodes_created_after_add() ->
     ?assertMatch({ok, #node{next = undefined, prev = LastNodeId}}, sliding_proplist_persistence:get_node(FirstNodeId)).
 
 
-test_min_in_newer_after_add() ->
+test_min_in_newer_after_insert_elements() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
@@ -422,7 +421,7 @@ test_min_in_newer_after_add() ->
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
-test_min_in_newer_after_add_reversed() ->
+test_min_in_newer_after_insert_elements_reversed() ->
     {ok, Id} = sliding_proplist:create(10),
     lists:foreach(fun(Elem) ->
         sliding_proplist:insert_unique_sorted_elements(Id, Elem)
@@ -435,7 +434,7 @@ test_min_in_newer_after_add_reversed() ->
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
-test_max_in_older_after_add() ->
+test_max_in_older_after_insert_elements() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
@@ -446,7 +445,7 @@ test_max_in_older_after_add() ->
     end, lists:zip(NodesIds, ExpectedMaxInOlder)).
 
 
-test_max_in_older_after_add_reversed() ->
+test_max_in_older_after_insert_elements_reversed() ->
     {ok, Id} = sliding_proplist:create(10),
     lists:foreach(fun(Elem) ->
         sliding_proplist:insert_unique_sorted_elements(Id, Elem)
@@ -459,7 +458,7 @@ test_max_in_older_after_add_reversed() ->
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
-test_node_num_after_add() ->
+test_node_num_after_insert_elements() ->
     {ok, Id} = sliding_proplist:create(1),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 10)),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
@@ -472,7 +471,7 @@ test_node_num_after_add() ->
     end, FirstNodeNum, NodeIds).
 
 
-test_nodes_elements_after_add() ->
+test_nodes_elements_after_insert_elements() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
@@ -484,7 +483,7 @@ test_nodes_elements_after_add() ->
     end, lists:zip(NodesIds, ExpectedElementsPerNode)).
 
 
-test_nodes_elements_after_add_reversed() ->
+test_nodes_elements_after_insert_elements_reversed() ->
     {ok, Id} = sliding_proplist:create(10),
     lists:foreach(fun(Elem) ->
         sliding_proplist:insert_unique_sorted_elements(Id, Elem)
@@ -498,7 +497,7 @@ test_nodes_elements_after_add_reversed() ->
     end, lists:zip(NodesIds, ExpectedElementsPerNode)).
 
 
-test_nodes_deleted_after_delete_elems() ->
+test_nodes_removed_after_remove_elements() ->
     {ok, Id} = sliding_proplist:create(1),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 3)),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
@@ -513,7 +512,7 @@ test_nodes_deleted_after_delete_elems() ->
     ?assertMatch({ok, #sentinel{first = Node3, last = Node3}}, sliding_proplist_persistence:get_node(Id)).
 
     
-test_nodes_after_delete_elems_from_last_node() ->
+test_nodes_after_remove_elements_from_last_node() ->
     {ok, Id} = sliding_proplist:create(1),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 3)),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
@@ -529,7 +528,7 @@ test_nodes_after_delete_elems_from_last_node() ->
     ?assertMatch({ok, #sentinel{first = Node2, last = Node2}}, sliding_proplist_persistence:get_node(Id)).
 
 
-test_min_in_newer_after_delete_elems() ->
+test_min_in_newer_after_remove_elements() ->
     {ok, Id} = sliding_proplist:create(1),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(2, 10)),
     sliding_proplist:insert_unique_sorted_elements(Id, {1, <<"1">>}),
@@ -542,7 +541,7 @@ test_min_in_newer_after_delete_elems() ->
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
-test_max_in_older_after_delete_elems() ->
+test_max_in_older_after_remove_elements() ->
     {ok, Id} = sliding_proplist:create(1),
     sliding_proplist:insert_unique_sorted_elements(Id, {10, <<"10">>}),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 9)),

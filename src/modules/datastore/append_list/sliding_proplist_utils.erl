@@ -32,7 +32,8 @@
 %% keys, @see `sliding_proplist` module doc) at most one node will be updated.
 %% @end
 %%--------------------------------------------------------------------
--spec adjust_min_in_newer(sliding_proplist:id() | undefined, sliding_proplist:key(), CheckToTheEnd :: boolean()) -> ok.
+-spec adjust_min_in_newer(sliding_proplist:node_id() | undefined | sliding_proplist:list_node(), 
+    sliding_proplist:key(), CheckToTheEnd :: boolean()) -> ok.
 adjust_min_in_newer(undefined, _CurrentMin, _CheckToTheEnd) ->
     ok;
 adjust_min_in_newer(#node{} = Node, CurrentMin, CheckToTheEnd) ->
@@ -62,7 +63,8 @@ adjust_min_in_newer(NodeId, CurrentMin, CheckToTheEnd) ->
 %% increasing keys, @see `sliding_proplist` module doc) at most one node will be updated.
 %% @end
 %%--------------------------------------------------------------------
--spec adjust_max_in_older(undefined | sliding_proplist:id() | sliding_proplist:list_node(), sliding_proplist:key() | undefined) -> ok.
+-spec adjust_max_in_older(undefined | sliding_proplist:node_id() | sliding_proplist:list_node(), 
+    sliding_proplist:key() | undefined) -> ok.
 adjust_max_in_older(undefined, _) ->
     ok;
 adjust_max_in_older(#node{} = Node, CurrentMax) ->
@@ -89,7 +91,8 @@ adjust_max_in_older(NodeId, CurrentMax) ->
 %% and given node.
 %% @end
 %%--------------------------------------------------------------------
--spec get_max_key_in_prev_nodes(undefined | sliding_proplist:list_node()) -> sliding_proplist:key() | undefined.
+-spec get_max_key_in_prev_nodes(undefined | sliding_proplist:list_node()) -> 
+    sliding_proplist:key() | undefined.
 get_max_key_in_prev_nodes(undefined) -> undefined;
 get_max_key_in_prev_nodes(#node{elements = Elements, max_in_older = MaxInOlder}) ->
     case maps:size(Elements) of
@@ -104,6 +107,6 @@ get_max_key_in_prev_nodes(#node{elements = Elements, max_in_older = MaxInOlder})
 
 
 -spec get_starting_node_id(sliding_proplist_get:direction(), sliding_proplist:sentinel()) -> 
-    sliding_proplist:id() | undefined.
+    sliding_proplist:node_id() | undefined.
 get_starting_node_id(back_from_newest, #sentinel{first = First}) -> First;
 get_starting_node_id(forward_from_oldest, #sentinel{last = Last}) -> Last.

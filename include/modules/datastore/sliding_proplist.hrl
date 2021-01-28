@@ -28,9 +28,9 @@
 
 -record(node, {
     structure_id :: sliding_proplist:id(),
-    node_id :: sliding_proplist:id(),
-    prev = undefined :: sliding_proplist:id() | undefined,
-    next = undefined :: sliding_proplist:id() | undefined,
+    node_id :: sliding_proplist:node_id(),
+    prev = undefined :: sliding_proplist:node_id() | undefined,
+    next = undefined :: sliding_proplist:node_id() | undefined,
     elements = #{} :: sliding_proplist:elements_map(),
     min_in_newer :: sliding_proplist:key() | undefined,
     max_in_older :: sliding_proplist:key() | undefined,

@@ -60,6 +60,8 @@
 
 -include("modules/datastore/sliding_proplist.hrl").
 
+% fixme keep min in node?
+
 %% API
 -export([
     create/1,
@@ -77,18 +79,18 @@
 
 -compile({no_auto_import, [get/1]}).
 
-% id that allows for finding entities (nodes, sentinel) in persistence.
+% id of a sliding proplist instance.
 -type id() :: binary().
--type node_id() :: binary(). % fixme + opis powyżej
+% id of individual node in a sliding proplist
+-type node_id() :: binary().
 % this type represents keys of elements which are stored as data.
 -type key() :: integer().
 % this type represents values of elements which are stored as data.
 -type value() :: binary().
 % representation of one element in sliding proplist (key-value pair)
 -type element() :: {key(), value()}.
-% Each new node have number exactly 1 higher than previous one. 
+% Each new node have number exactly 1 higher than previous first one. 
 % Because of that number of next node is always higher that number of prev node.
-% fixme
 -type node_number() :: non_neg_integer().
 -type elements_map() :: #{sliding_proplist:key() => sliding_proplist:value()}.
 
@@ -97,7 +99,7 @@
 
 -define(LIST_FOLD_FUN, fun(Elem, Acc) -> {ok, [Elem | Acc]} end).
 
--export_type([id/0, key/0, value/0, element/0, node_number/0, elements_map/0]).
+-export_type([id/0, node_id/0, key/0, value/0, element/0, node_number/0, elements_map/0]).
 -export_type([sentinel/0, list_node/0]).
 
 %%=====================================================================
@@ -135,7 +137,8 @@ insert_unique_sorted_elements(StructureId, Batch) ->
     case sliding_proplist_persistence:get_node(StructureId) of
         {ok, #sentinel{first = FirstNodeId} = Sentinel} ->
             {ok, UpdatedSentinel, FirstNode} = fetch_or_create_first_node(Sentinel, FirstNodeId),
-            sliding_proplist_add:insert_elements(UpdatedSentinel, FirstNode, utils:ensure_list(Batch));
+            sliding_proplist_add:insert_elements(
+                UpdatedSentinel, FirstNode, utils:ensure_list(Batch));
         {error, _} = Error -> Error
     end.
 
@@ -153,22 +156,12 @@ remove_elements(StructureId, Elements) ->
         {ok, #sentinel{last = undefined}} -> ok;
         {ok, #sentinel{last = Last} = Sentinel} ->
             {ok, LastNode} = sliding_proplist_persistence:get_node(Last),
-            sliding_proplist_delete:delete_elements(Sentinel, LastNode, utils:ensure_list(Elements));
+            sliding_proplist_delete:delete_elements(
+                Sentinel, LastNode, utils:ensure_list(Elements));
         {error, _} = Error -> Error
     end.
 
 
-% fixme order not true
-% fixme fold -> list
-%%--------------------------------------------------------------------
-%% @doc
-%% Folds on elements in sliding proplist instance. When elements where added as recommended (i.e with increasing keys,  % fixme lists
-%% consult module doc) elements are listed in the following order: 
-%%  * starting from beginning (StartFrom = first) -> returns elements reversed to adding order (descending) % fixme Startfrom
-%%  * starting from end (StartFrom = last) -> return elements in the same order as they were added (ascending) 
-%% When elements are not added in recommended order there is no guarantee about listing order.
-%% @end
-%%--------------------------------------------------------------------
 -spec list(id() | sliding_proplist_get:state(), sliding_proplist_get:batch_size()) ->
     sliding_proplist_get:fold_result([element()]) | {error, term()}.
 list(Id, Size) when is_binary(Id) ->
@@ -177,6 +170,17 @@ list(State, Size) ->
     fold_elements(State, Size, ?LIST_FOLD_FUN, []).
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% List elements in sliding proplist instance. When elements where added as recommended 
+%% (i.e with increasing keys, consult module doc) elements are listed in the following order: 
+%%  * starting from beginning (Direction = back_from_newest) -> 
+%%      returns elements in the same order as they were added (ascending)
+%%  * starting from end (Direction = forward_from_oldest) -> 
+%%      returns elements reversed to adding order (descending)  
+%% When elements are not added in recommended order there is no guarantee about listing order.
+%% @end
+%%--------------------------------------------------------------------
 -spec list(id(), sliding_proplist_get:batch_size(), sliding_proplist_get:direction()) ->
     sliding_proplist_get:fold_result([element()]) | {error, term()}.
 list(Id, Size, Direction) when is_binary(Id) and is_atom(Direction) ->
@@ -184,16 +188,20 @@ list(Id, Size, Direction) when is_binary(Id) and is_atom(Direction) ->
 
 
 
-% fixme doc?
--spec fold_elements(id() | sliding_proplist_get:state(), sliding_proplist_get:batch_size(), sliding_proplist_get:fold_fun(), term()) ->
+-spec fold_elements(
+    id() | sliding_proplist_get:state(), 
+    sliding_proplist_get:batch_size(), 
+    sliding_proplist_get:fold_fun(), 
+    term()
+) ->
     sliding_proplist_get:fold_result() | {error, term()}.
 fold_elements(Id, Size, FoldFun, Acc0) when is_binary(Id) and is_function(FoldFun, 2) ->
     fold_elements(Id, Size, back_from_newest, FoldFun, Acc0);
 fold_elements(State, Size, FoldFun, Acc0) when is_function(FoldFun, 2) ->
     sliding_proplist_get:fold(State, Size, FoldFun, Acc0).
 
--spec fold_elements(id(), sliding_proplist_get:batch_size(), sliding_proplist_get:direction(), sliding_proplist_get:fold_fun(), term()) ->
-    sliding_proplist_get:fold_result() | {error, term()}.
+-spec fold_elements(id(), sliding_proplist_get:batch_size(), sliding_proplist_get:direction(), 
+    sliding_proplist_get:fold_fun(), term()) -> sliding_proplist_get:fold_result() | {error, term()}.
 fold_elements(Id, Size, Direction, FoldFun, Acc0) when is_binary(Id) ->
     case sliding_proplist_persistence:get_node(Id) of
         {ok, #sentinel{} = Sentinel} ->
@@ -205,11 +213,8 @@ fold_elements(Id, Size, Direction, FoldFun, Acc0) when is_binary(Id) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Retrieves elements value from the sliding proplist instance. When elements where added as recommended (i.e with increasing keys, 
-%% consult module doc) elements are returned in the following order: 
-%%  * starting from beginning (StartFrom = first) -> returns elements reversed to adding order (descending)
-%%  * starting from end (StartFrom = last) -> return elements in the same order as they were added (ascending) % fixme direction
-%% If elements were not added in recommended order there is no guarantee about returned elements order.
+%% Retrieves elements value from the sliding proplist instance. 
+%% There is no guarantee about returned elements order.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_elements(id(), key() | [key()]) -> {ok, [element()]} | {error, term()}.
