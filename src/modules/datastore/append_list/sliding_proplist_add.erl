@@ -47,23 +47,35 @@ insert_elements(Sentinel, FirstNode, Batch) ->
 add_unique_elements(FirstNode, [] = _Elements, _MaxElementsPerNode) ->
     {FirstNode, []};
 add_unique_elements(#node{} = FirstNode, Elements,  MaxElementsPerNode) ->
-    #node{elements = ElementsInFirstNode} = FirstNode,
+    #node{
+        elements = ElementsInFirstNode, min_in_node = MinInNode, max_in_node = MaxInNodeBefore
+    } = FirstNode,
     [{MinInBatch, _} | _] = Elements,
     ToFill = MaxElementsPerNode - maps:size(ElementsInFirstNode),
     {ElementsToAdd, ElementsTail} = split_list(Elements, ToFill),
+    NewMaxInNode = case ToFill == 0 of
+        true -> MaxInNodeBefore;
+        false ->
+            {MaxInAddedElements, _} = lists:last(ElementsToAdd),
+            case MaxInNodeBefore of
+                undefined -> MaxInAddedElements;
+                _ -> max(MaxInNodeBefore, MaxInAddedElements)
+            end
+    end,
     Node = FirstNode#node{
         elements = maps:merge(
             ElementsInFirstNode,
             maps:from_list(ElementsToAdd)
-        )
+        ),
+        min_in_node = min(MinInNode, MinInBatch), % undefined is always greater than any number
+        max_in_node = NewMaxInNode
     },
-    % fixme analyze this - it seems to be the same
-    case maps:size(ElementsInFirstNode) > 0 andalso MinInBatch > lists:min(maps:keys(ElementsInFirstNode)) of
+    case maps:size(ElementsInFirstNode) > 0 andalso MinInBatch > MinInNode of
         true -> ok;
         false ->
             % update `min_in_newer` value in all nodes that have minimal key greater that minimal 
             % key in batch (may happen when adding elements with lower keys than existing ones)
-            case maps:size(ElementsInFirstNode) > 0 andalso lists:min(maps:keys(ElementsInFirstNode)) > MinInBatch of
+            case maps:size(ElementsInFirstNode) > 0 of
                 true -> 
                     ok = sliding_proplist_utils:adjust_min_in_newer(
                         Node#node.prev, MinInBatch, false);
@@ -102,20 +114,24 @@ add_to_beginning(Sentinel, [{Min, _} | _] = Batch, PrevNode) ->
 
 %% @private
 -spec prepare_new_first_node(sliding_proplist:id(), [sliding_proplist:element()], 
-    PrevNode :: sliding_proplist:list_node()) -> NewNode :: sliding_proplist:list_node().
+    PrevNode :: sliding_proplist:list_node()) -> NewFirstNode :: sliding_proplist:list_node().
 prepare_new_first_node(StructureId, ElementsList, #node{
     node_id = PrevNodeId, 
     node_number = PrevNodeNum
 } = PrevNode) ->
     NodeNum = PrevNodeNum + 1,
-    Max = sliding_proplist_utils:get_max_key_in_prev_nodes(PrevNode),
+    MaxInOlder = sliding_proplist_utils:get_max_key_in_prev_nodes(PrevNode),
+    [{Min, _} | _] = ElementsList,
+    {Max, _} = lists:last(ElementsList),
     #node{
         node_id = datastore_key:adjacent_from_digest([NodeNum], StructureId),
         structure_id = StructureId,
         prev = PrevNodeId,
-        max_in_older = Max,
+        max_in_older = MaxInOlder,
         node_number = NodeNum,
-        elements = maps:from_list(ElementsList)
+        elements = maps:from_list(ElementsList),
+        min_in_node = Min,
+        max_in_node = Max
     }.
 
 

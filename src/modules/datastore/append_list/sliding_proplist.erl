@@ -6,10 +6,11 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module implements datastore internal structure that allows for 
-%%% storing elements in key -> value format. It allows for proplist-like operations.
-%%% It is optimized for inserting new elements with keys in ascending order and deleting 
-%%% those that were added first (like in FIFO queue). % fixme explain sliding?
+%%% This module implements a datastore internal structure that allows elements to be 
+%%% stored as {key, value} - similar to a proplist. It has been optimized for inserting 
+%%% elements with increasing keys and removing the oldest ones. Therefore, when used 
+%%% optimally, it looks like a sliding window as elements are inserted on one side and 
+%%% removed on the other.
 %%% 
 %%% Because there is no limit to the amount of stored elements, to allow for saving 
 %%% this structure in datastore, it is implemented as a bidirectional linked list, 
@@ -60,7 +61,6 @@
 
 -include("modules/datastore/sliding_proplist.hrl").
 
-% fixme keep min in node?
 
 %% API
 -export([

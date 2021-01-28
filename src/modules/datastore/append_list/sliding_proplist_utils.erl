@@ -37,14 +37,14 @@
 adjust_min_in_newer(undefined, _CurrentMin, _CheckToTheEnd) ->
     ok;
 adjust_min_in_newer(#node{} = Node, CurrentMin, CheckToTheEnd) ->
-    #node{node_id = NodeId, min_in_newer = PreviousMinInNewer} = Node,
+    #node{node_id = NodeId, min_in_newer = PreviousMinInNewer, min_in_node = MinInNode} = Node,
     case PreviousMinInNewer of
         CurrentMin -> ok;
         _ -> sliding_proplist_persistence:save_node(NodeId, Node#node{min_in_newer = CurrentMin})
     end,
     Min = case maps:size(Node#node.elements) of
         0 -> CurrentMin;
-        _ -> min(CurrentMin, lists:min(maps:keys(Node#node.elements)))
+        _ -> min(CurrentMin, MinInNode)
     end,
     case CheckToTheEnd orelse (PreviousMinInNewer =/= CurrentMin orelse CurrentMin > Min) of
         true -> adjust_min_in_newer(Node#node.prev, Min, CheckToTheEnd);
@@ -68,12 +68,13 @@ adjust_min_in_newer(NodeId, CurrentMin, CheckToTheEnd) ->
 adjust_max_in_older(undefined, _) ->
     ok;
 adjust_max_in_older(#node{} = Node, CurrentMax) ->
-    #node{node_id = NodeId, next = Next, max_in_older = PreviousMaxInOlder} = Node,
+    #node{
+        node_id = NodeId, next = Next, max_in_older = PreviousMaxInOlder, max_in_node = MaxInNode
+    } = Node,
     case CurrentMax of
         PreviousMaxInOlder -> ok;
         _ ->
             sliding_proplist_persistence:save_node(NodeId, Node#node{max_in_older = CurrentMax}),
-            MaxInNode = lists:max(maps:keys(Node#node.elements)),
             case CurrentMax of
                 undefined -> adjust_max_in_older(Next, MaxInNode);
                 _ -> adjust_max_in_older(Next, max(CurrentMax, MaxInNode))
@@ -87,18 +88,17 @@ adjust_max_in_older(NodeId, CurrentMax) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Based on `max_in_older` value and maximum key in given node, this 
-%% function returns highest key in all nodes to the right (pointed by prev) 
+%% function returns highest key in all nodes to the older (pointed by prev) 
 %% and given node.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_max_key_in_prev_nodes(undefined | sliding_proplist:list_node()) -> 
     sliding_proplist:key() | undefined.
 get_max_key_in_prev_nodes(undefined) -> undefined;
-get_max_key_in_prev_nodes(#node{elements = Elements, max_in_older = MaxInOlder}) ->
-    case maps:size(Elements) of
-        0 -> MaxInOlder;
+get_max_key_in_prev_nodes(#node{max_in_older = MaxInOlder, max_in_node = MaxInNode}) ->
+    case MaxInNode of
+        undefined -> MaxInOlder;
         _ ->
-            MaxInNode = lists:max(maps:keys(Elements)),
             case MaxInOlder of
                 undefined -> MaxInNode;
                 _ -> max(MaxInNode, MaxInOlder)

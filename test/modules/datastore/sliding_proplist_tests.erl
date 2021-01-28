@@ -66,7 +66,12 @@ sliding_proplist_test_() ->
             {"test_nodes_removed_after_remove_elements", fun test_nodes_removed_after_remove_elements/0},
             {"test_nodes_after_remove_elements_from_last_node", fun test_nodes_after_remove_elements_from_last_node/0},
             {"test_min_in_newer_after_remove_elements", fun test_min_in_newer_after_remove_elements/0},
-            {"test_max_in_older_after_remove_elements", fun test_max_in_older_after_remove_elements/0}
+            {"test_max_in_older_after_remove_elements", fun test_max_in_older_after_remove_elements/0},
+            {"test_min_in_node", fun test_min_in_node/0},
+            {"test_min_in_node_after_remove_elements", fun test_min_in_node_after_remove_elements/0},
+            {"test_max_in_node", fun test_max_in_node/0},
+            {"test_max_in_node_after_remove_elements", fun test_max_in_node_after_remove_elements/0},
+            {"test_min_max_in_node_after_remove_elements_merge_nodes", fun test_min_max_in_node_after_remove_elements_merge_nodes/0}
         ]
     }.
 
@@ -552,7 +557,63 @@ test_max_in_older_after_remove_elements() ->
     lists:foreach(fun({NodeId, Expected}) ->
         ?assertMatch({ok, #node{max_in_older = Expected}}, sliding_proplist_persistence:get_node(NodeId))
     end, lists:zip(NodesIds, ExpectedMaxInOlder)).
-    
+
+
+test_min_in_node() ->
+    {ok, Id} = sliding_proplist:create(10),
+    sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    NodesIds = get_nodes_ids(FirstNodeId),
+    ExpectedMinsInNode = lists:seq(91, 1, -10),
+    lists:foreach(fun({NodeId, Expected}) ->
+        ?assertMatch({ok, #node{min_in_node = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+    end, lists:zip(NodesIds, ExpectedMinsInNode)).
+
+
+test_min_in_node_after_remove_elements() ->
+    {ok, Id} = sliding_proplist:create(10),
+    sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    NodesIds = get_nodes_ids(FirstNodeId),
+    sliding_proplist:remove_elements(Id, lists:seq(1, 91, 10)),
+    ExpectedMinsInNode = lists:seq(92, 2, -10),
+    lists:foreach(fun({NodeId, Expected}) ->
+        ?assertMatch({ok, #node{min_in_node = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+    end, lists:zip(NodesIds, ExpectedMinsInNode)).
+
+
+test_max_in_node() ->
+    {ok, Id} = sliding_proplist:create(10),
+    sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    NodesIds = get_nodes_ids(FirstNodeId),
+    ExpectedMaxsInNode = lists:seq(100, 10, -10),
+    lists:foreach(fun({NodeId, Expected}) ->
+        ?assertMatch({ok, #node{max_in_node = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+    end, lists:zip(NodesIds, ExpectedMaxsInNode)).
+
+
+test_max_in_node_after_remove_elements() ->
+    {ok, Id} = sliding_proplist:create(10),
+    sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    NodesIds = get_nodes_ids(FirstNodeId),
+    sliding_proplist:remove_elements(Id, lists:seq(10, 100, 10)),
+    ExpectedMaxsInNode = lists:seq(99, 9, -10),
+    lists:foreach(fun({NodeId, Expected}) ->
+        ?assertMatch({ok, #node{max_in_node = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+    end, lists:zip(NodesIds, ExpectedMaxsInNode)).
+
+
+test_min_max_in_node_after_remove_elements_merge_nodes() ->
+    {ok, Id} = sliding_proplist:create(10),
+    sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
+    sliding_proplist:remove_elements(Id, lists:seq(1, 100) -- [8]),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #node{min_in_node = MinInNode, max_in_node = MaxInNode}} = sliding_proplist_persistence:get_node(FirstNodeId),
+    ?assertEqual(8, MinInNode),
+    ?assertEqual(8, MaxInNode).
+
 -endif.
 
 

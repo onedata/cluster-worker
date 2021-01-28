@@ -116,11 +116,17 @@ get_elements(NodeId, Keys, Direction) ->
 get_highest(undefined) -> {error, not_found};
 get_highest(NodeId) ->
     case sliding_proplist_persistence:get_node(NodeId) of
-        {ok, #node{elements = Elements, max_in_older = MaxInOlder, prev = Prev}} ->
-            case {Prev == undefined, maps:size(Elements) > 0 andalso lists:max(maps:keys(Elements))} of
-                {true, false} -> {error, not_found};
-                {true, MaxKeyInNode} -> {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
-                {false, MaxKeyInNode} when MaxKeyInNode > MaxInOlder ->
+        {ok, Node} ->
+            #node{
+                elements = Elements, 
+                max_in_older = MaxInOlder, 
+                prev = Prev, 
+                max_in_node = MaxKeyInNode
+            } = Node,
+            case {Prev == undefined, MaxKeyInNode == undefined} of
+                {true, true} -> {error, not_found};
+                {true, false} -> {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
+                {false, false} when MaxKeyInNode > MaxInOlder ->
                     {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
                 {false, _} -> get_highest(Prev)
             end;

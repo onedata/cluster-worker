@@ -190,6 +190,7 @@ handle_deletion_finished(CurrentNode, PrevNode, MaxInOlderBefore) ->
 -spec update_current_node(sliding_proplist:list_node(), sliding_proplist:elements_map(), 
     sliding_proplist:list_node() | undefined) -> sliding_proplist:list_node().
 update_current_node(CurrentNode, NewElements, PrevNode) ->
+    #node{min_in_node = MinInNode, max_in_node = MaxInNode} = CurrentNode,
     PrevNodeId = case PrevNode of
         undefined -> undefined;
         #node{} -> PrevNode#node.node_id
@@ -197,7 +198,9 @@ update_current_node(CurrentNode, NewElements, PrevNode) ->
     CurrentNode#node{
         elements = NewElements,
         prev = PrevNodeId,
-        max_in_older = sliding_proplist_utils:get_max_key_in_prev_nodes(PrevNode)
+        max_in_older = sliding_proplist_utils:get_max_key_in_prev_nodes(PrevNode),
+        min_in_node = find_extremum(MinInNode, NewElements, min),
+        max_in_node = find_extremum(MaxInNode, NewElements, max)
     }.
 
 
@@ -210,10 +213,20 @@ update_current_node(CurrentNode, NewElements, PrevNode) ->
 ) -> 
     sliding_proplist:list_node().
 merge_nodes(Sentinel, CurrentNode, PrevNode, Elements) ->
+    NewMinInNode = case PrevNode#node.min_in_node < CurrentNode#node.min_in_node of
+        true -> PrevNode#node.min_in_node;
+        false -> find_extremum(CurrentNode#node.min_in_node, Elements, min)
+    end,
+    NewMaxInNode = case PrevNode#node.max_in_node > CurrentNode#node.max_in_node of
+        true -> PrevNode#node.max_in_node;
+        false -> find_extremum(CurrentNode#node.max_in_node, Elements, max)
+    end,
     MergedNode = PrevNode#node{
         elements = Elements,
         next = CurrentNode#node.next,
-        min_in_newer = CurrentNode#node.min_in_newer
+        min_in_newer = CurrentNode#node.min_in_newer,
+        min_in_node = NewMinInNode,
+        max_in_node = NewMaxInNode
     },
     % if this is the first node, modify sentinel
     CurrentNode#node.next == undefined andalso 
@@ -223,3 +236,13 @@ merge_nodes(Sentinel, CurrentNode, PrevNode, Elements) ->
         ),
     sliding_proplist_persistence:delete_node(CurrentNode#node.node_id),
     MergedNode.
+
+
+%% @private
+-spec find_extremum(sliding_proplist:key(), sliding_proplist:elements_map(), min | max) -> 
+    sliding_proplist:key().
+find_extremum(Key, Elements, Operator) ->
+    case maps:find(Key, Elements) of
+        {ok, _} -> Key;
+        error -> lists:Operator(maps:keys(Elements))
+    end.
