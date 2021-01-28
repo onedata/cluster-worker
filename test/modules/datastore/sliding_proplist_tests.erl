@@ -57,17 +57,17 @@ sliding_proplist_test_() ->
             {"test_get_max_key_structure_not_sorted", fun test_get_max_key_structure_not_sorted/0},
     
             {"test_nodes_created_after_add", fun test_nodes_created_after_add/0},
-            {"test_min_on_left_after_add", fun test_min_on_left_after_add/0},
-            {"test_min_on_left_after_add_reversed", fun test_min_on_left_after_add_reversed/0},
-            {"test_max_on_right_after_add", fun test_max_on_right_after_add/0},
-            {"test_max_on_right_after_add_reversed", fun test_max_on_right_after_add_reversed/0},
+            {"test_min_in_newer_after_add", fun test_min_in_newer_after_add/0},
+            {"test_min_in_newer_after_add_reversed", fun test_min_in_newer_after_add_reversed/0},
+            {"test_max_in_older_after_add", fun test_max_in_older_after_add/0},
+            {"test_max_in_older_after_add_reversed", fun test_max_in_older_after_add_reversed/0},
             {"test_node_num_after_add", fun test_node_num_after_add/0},
             {"test_nodes_elements_after_add", fun test_nodes_elements_after_add/0},
             {"test_nodes_elements_after_add_reversed", fun test_nodes_elements_after_add_reversed/0},
             {"test_nodes_deleted_after_delete_elems", fun test_nodes_deleted_after_delete_elems/0},
             {"test_nodes_after_delete_elems_from_last_node", fun test_nodes_after_delete_elems_from_last_node/0},
-            {"test_min_on_left_after_delete_elems", fun test_min_on_left_after_delete_elems/0},
-            {"test_max_on_right_after_delete_elems", fun test_max_on_right_after_delete_elems/0}
+            {"test_min_in_newer_after_delete_elems", fun test_min_in_newer_after_delete_elems/0},
+            {"test_max_in_older_after_delete_elems", fun test_max_in_older_after_delete_elems/0}
         ]
     }.
 
@@ -131,6 +131,7 @@ test_list_with_listing_state() ->
     ?assertMatch({done, []}, sliding_proplist:list(Id, 0)),
     ?assertMatch({done, []}, sliding_proplist:list(Id, 10)),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
+    ?assertMatch({more, [], _}, sliding_proplist:list(Id, 0)),
     FinalListingState = lists:foldl(fun(X, ListingState) ->
         {more, Res, NewListingState} = sliding_proplist:list(ListingState, 1),
         ?assertEqual([{X, integer_to_binary(X)}], Res),
@@ -410,18 +411,18 @@ test_nodes_created_after_add() ->
     ?assertMatch({ok, #node{next = undefined, prev = LastNodeId}}, sliding_proplist_persistence:get_node(FirstNodeId)).
 
 
-test_min_on_left_after_add() ->
+test_min_in_newer_after_add() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMinsOnLeft = [undefined] ++ lists:seq(91, 11, -10),
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{min_on_left = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{min_in_newer = Expected}}, sliding_proplist_persistence:get_node(NodeId))
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
-test_min_on_left_after_add_reversed() ->
+test_min_in_newer_after_add_reversed() ->
     {ok, Id} = sliding_proplist:create(10),
     lists:foreach(fun(Elem) ->
         sliding_proplist:insert_unique_sorted_elements(Id, Elem)
@@ -430,22 +431,22 @@ test_min_on_left_after_add_reversed() ->
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMinsOnLeft = [undefined] ++ lists:duplicate(9, 1),
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{min_on_left = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{min_in_newer = Expected}}, sliding_proplist_persistence:get_node(NodeId))
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
-test_max_on_right_after_add() ->
+test_max_in_older_after_add() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
-    ExpectedMaxOnRight = lists:seq(90, 10, -10) ++ [undefined],
+    ExpectedMaxInOlder = lists:seq(90, 10, -10) ++ [undefined],
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{max_on_right = Expected}}, sliding_proplist_persistence:get_node(NodeId))
-    end, lists:zip(NodesIds, ExpectedMaxOnRight)).
+        ?assertMatch({ok, #node{max_in_older = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+    end, lists:zip(NodesIds, ExpectedMaxInOlder)).
 
 
-test_max_on_right_after_add_reversed() ->
+test_max_in_older_after_add_reversed() ->
     {ok, Id} = sliding_proplist:create(10),
     lists:foreach(fun(Elem) ->
         sliding_proplist:insert_unique_sorted_elements(Id, Elem)
@@ -454,7 +455,7 @@ test_max_on_right_after_add_reversed() ->
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMinsOnLeft = lists:duplicate(9, 100) ++ [undefined],
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{max_on_right = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{max_in_older = Expected}}, sliding_proplist_persistence:get_node(NodeId))
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
@@ -528,7 +529,7 @@ test_nodes_after_delete_elems_from_last_node() ->
     ?assertMatch({ok, #sentinel{first = Node2, last = Node2}}, sliding_proplist_persistence:get_node(Id)).
 
 
-test_min_on_left_after_delete_elems() ->
+test_min_in_newer_after_delete_elems() ->
     {ok, Id} = sliding_proplist:create(1),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(2, 10)),
     sliding_proplist:insert_unique_sorted_elements(Id, {1, <<"1">>}),
@@ -537,21 +538,21 @@ test_min_on_left_after_delete_elems() ->
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMinsOnLeft = [undefined] ++ lists:seq(10, 3, -1),
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{min_on_left = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{min_in_newer = Expected}}, sliding_proplist_persistence:get_node(NodeId))
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
-test_max_on_right_after_delete_elems() ->
+test_max_in_older_after_delete_elems() ->
     {ok, Id} = sliding_proplist:create(1),
     sliding_proplist:insert_unique_sorted_elements(Id, {10, <<"10">>}),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 9)),
     sliding_proplist:remove_elements(Id, [10]),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
-    ExpectedMaxOnRight = lists:seq(8, 1, -1) ++ [undefined],
+    ExpectedMaxInOlder = lists:seq(8, 1, -1) ++ [undefined],
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{max_on_right = Expected}}, sliding_proplist_persistence:get_node(NodeId))
-    end, lists:zip(NodesIds, ExpectedMaxOnRight)).
+        ?assertMatch({ok, #node{max_in_older = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+    end, lists:zip(NodesIds, ExpectedMaxInOlder)).
     
 -endif.
 

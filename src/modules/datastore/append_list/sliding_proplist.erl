@@ -41,15 +41,15 @@
 %%% resulting structure after deletions, as it would require additional fetch 
 %%% of next node.
 %%%
-%%% Each node stores also value `min_on_left`. It represents minimal key 
+%%% Each node stores also value `min_in_newer`. It represents minimal key 
 %%% in all nodes, that are newer (are pointed by `next`) than this node. 
 %%% It is used during deletion  - it allows to determine whether it is 
 %%% necessary to fetch next nodes and allows to finish deletion without 
 %%% traversing all list nodes. This is why it is optimal to have 
 %%% increasing keys.
 %%%
-%%% In each node there is also value `max_on_right`. It works similarly to 
-%%% `min_on_left` but it represents maximum key in all nodes, that are 
+%%% In each node there is also value `max_in_older`. It works similarly to 
+%%% `min_in_newer` but it represents maximum key in all nodes, that are 
 %%% older (are pointed by `prev`) than this node. 
 %%% It is used to optimize functions finding elements (`get/2`, `get_highest/1`) 
 %%% and also when overwriting existing elements during addition.
@@ -65,7 +65,6 @@
     create/1,
     destroy/1
 ]).
-% fixme min_on_left -> min_in_newer?
 
 -export([
     insert_unique_sorted_elements/2, 

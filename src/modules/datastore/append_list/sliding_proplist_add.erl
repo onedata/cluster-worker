@@ -58,10 +58,10 @@ add_unique_elements(#node{elements = ElementsInFirstNode} = FirstNode, [{MinInBa
     case maps:size(ElementsInFirstNode) > 0 andalso MinInBatch > lists:min(maps:keys(ElementsInFirstNode)) of
         true -> ok;
         false ->
-            % update `min_on_left` value in all nodes that have minimal key greater that minimal 
+            % update `min_in_newer` value in all nodes that have minimal key greater that minimal 
             % key in batch (may happen when adding elements with lower keys than existing ones)
             case maps:size(ElementsInFirstNode) > 0 andalso lists:min(maps:keys(ElementsInFirstNode)) > MinInBatch of
-                true -> ok = sliding_proplist_utils:adjust_min_on_left(Node#node.prev, MinInBatch, false);
+                true -> ok = sliding_proplist_utils:adjust_min_in_newer(Node#node.prev, MinInBatch, false);
                 false -> ok
             end
     end, 
@@ -89,7 +89,7 @@ add_to_beginning(Sentinel, [{Min, _} | _] = Batch, PrevNode) ->
         prepare_new_first_node(StructId, ElementsToAdd, PrevNode),
     sliding_proplist_persistence:save_node(PrevNodeId, PrevNode#node{
         next = NewFirstNodeId,
-        min_on_left = Min
+        min_in_newer = Min
     }),
     add_to_beginning(Sentinel, Tail, NewFirstNode).
 
@@ -107,7 +107,7 @@ prepare_new_first_node(StructureId, ElementsList, #node{
         node_id = datastore_key:adjacent_from_digest([NodeNum], StructureId),
         structure_id = StructureId,
         prev = PrevNodeId,
-        max_on_right = Max,
+        max_in_older = Max,
         node_number = NodeNum,
         elements = maps:from_list(ElementsList)
     }.
@@ -117,9 +117,9 @@ prepare_new_first_node(StructureId, ElementsList, #node{
 -spec overwrite_existing_elements(sliding_proplist:list_node(), Batch :: [sliding_proplist:element()]) -> 
     {sliding_proplist:list_node(), UniqueElements :: [sliding_proplist:element()], OverwrittenElements :: [sliding_proplist:element()]}.
 overwrite_existing_elements(FirstNode, [{MinInBatch, _} | _] = Batch) ->
-    #node{max_on_right = MaxOnRight, prev = Prev} = FirstNode,
+    #node{max_in_older = MaxInOlder, prev = Prev} = FirstNode,
     {NewNode, RemainingElements, Overwritten} = overwrite_existing_elements_in_node(FirstNode, Batch),
-    case MaxOnRight == undefined orelse MinInBatch > MaxOnRight of
+    case MaxInOlder == undefined orelse MinInBatch > MaxInOlder of
         true -> {NewNode, RemainingElements, Overwritten};
         false ->
             {FinalRemainingElements, OverwrittenInPrev} = 
@@ -136,13 +136,13 @@ overwrite_existing_elements_in_prev_nodes(undefined, Batch) ->
 overwrite_existing_elements_in_prev_nodes(_, []) ->
     {[], []};
 overwrite_existing_elements_in_prev_nodes(#node{} = Node, [{MinInBatch, _} | _] = Batch) ->
-    #node{max_on_right = MaxOnRight, prev = Prev} = Node,
+    #node{max_in_older = MaxInOlder, prev = Prev} = Node,
     {NewNode, RemainingElements, Overwritten} = overwrite_existing_elements_in_node(Node, Batch),
     case Overwritten of
         [] -> ok;
         _ -> sliding_proplist_persistence:save_node(Node#node.node_id, NewNode)
     end,
-    case MaxOnRight == undefined orelse MinInBatch > MaxOnRight of
+    case MaxInOlder == undefined orelse MinInBatch > MaxInOlder of
         true -> {RemainingElements, Overwritten};
         false -> 
             {FinalRemainingElements, OverwrittenInPrev} = 

@@ -46,10 +46,37 @@
 
 -spec fold(state() | sliding_proplist:id(), batch_size(), fold_fun(), term()) -> 
     fold_result() | {error, term()}.
-fold(#listing_state{} = InitialState, Size, FoldFun, Acc0) ->
-    case continue_fold(InitialState, Size, FoldFun, Acc0) of
-        {Result, #listing_state{finished = true}} -> {done, Result};
-        {Result, #listing_state{finished = false} = State} -> {more, Result, State};
+fold(#listing_state{finished = true}, _Size, _FoldFun, Acc) ->
+    {done, Acc};
+fold(#listing_state{last_node_id = undefined}, _Size, _FoldFun, Acc) ->
+    {done, Acc};
+fold(#listing_state{last_node_id = NodeId} = State, _Size = 0, _FoldFun, Acc) ->
+    {more, Acc, State#listing_state{last_node_id = NodeId}};
+fold(#listing_state{
+    last_node_id = NodeId,
+    direction = Direction
+} = State, Size, FoldFun, Acc) ->
+    case find_node(State) of
+        #node{elements = AllElementsInNode, node_number = NodeNumber} = Node ->
+            Elements = select_not_listed_elements(State, AllElementsInNode, NodeNumber),
+            NumberOfElementsToTake = min(Size, length(Elements)),
+            {ListedElements, NotListedElements} = lists:split(NumberOfElementsToTake, Elements),
+            NextStartNodeId = case NotListedElements of
+                [] -> select_neighbour(Direction, Node);
+                _ -> NodeId
+            end,
+            {Status, Result} = apply_fold_fun(FoldFun, Acc, ListedElements),
+            Finished = case Status of
+                stop -> true;
+                continue -> false
+            end,
+            {LastListedKey, _} = lists:last(ListedElements),
+            fold(State#listing_state{
+                last_node_id = NextStartNodeId,
+                last_node_number = NodeNumber,
+                last_listed_key = LastListedKey,
+                finished = Finished
+            }, Size - NumberOfElementsToTake, FoldFun, Result);
         {error, _} = Error -> Error
     end.
 
@@ -86,11 +113,11 @@ get_elements(NodeId, Keys, Direction) ->
 get_highest(undefined) -> {error, not_found};
 get_highest(NodeId) ->
     case sliding_proplist_persistence:get_node(NodeId) of
-        {ok, #node{elements = Elements, max_on_right = MaxOnRight, prev = Prev}} ->
+        {ok, #node{elements = Elements, max_in_older = MaxInOlder, prev = Prev}} ->
             case {Prev == undefined, maps:size(Elements) > 0 andalso lists:max(maps:keys(Elements))} of
                 {true, false} -> {error, not_found};
                 {true, MaxKeyInNode} -> {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
-                {false, MaxKeyInNode} when MaxKeyInNode > MaxOnRight ->
+                {false, MaxKeyInNode} when MaxKeyInNode > MaxInOlder ->
                     {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
                 {false, _} -> get_highest(Prev)
             end;
@@ -112,45 +139,6 @@ get_max_key(NodeId) ->
 %%=====================================================================
 %% Internal functions
 %%=====================================================================
-
-% fixme name
-%% @private
--spec continue_fold(state(), batch_size(), fold_fun(), term()) -> 
-    {[sliding_proplist:element()], state()}.
-continue_fold(#listing_state{finished = true} = State, _Size, _FoldFun, Acc) ->
-    {Acc, State};
-continue_fold(#listing_state{last_node_id = undefined} = State, _Size, _FoldFun, Acc) ->
-    {Acc, State#listing_state{finished = true}};
-continue_fold(#listing_state{last_node_id = NodeId} = State, _Size = 0, _FoldFun, Acc) ->
-    {Acc, State#listing_state{last_node_id = NodeId}};
-continue_fold(#listing_state{
-    last_node_id = NodeId,
-    direction = Direction
-} = State, Size, FoldFun, Acc) ->
-    case find_node(State) of
-        #node{elements = AllElementsInNode, node_number = NodeNumber} = Node ->
-            Elements = select_not_listed_elements(State, AllElementsInNode, NodeNumber),
-            NumberOfElementsToTake = min(Size, length(Elements)),
-            {ListedElements, NotListedElements} = lists:split(NumberOfElementsToTake, Elements),
-            NextStartNodeId = case NotListedElements of
-                [] -> select_neighbour(Direction, Node);
-                _ -> NodeId
-            end,
-            {Status, Result} = apply_fold_fun(FoldFun, Acc, ListedElements),
-            Finished = case Status of
-                stop -> true;
-                continue -> false
-            end,
-            {LastListedKey, _} = lists:last(ListedElements),
-            continue_fold(State#listing_state{
-                last_node_id = NextStartNodeId,
-                last_node_number = NodeNumber,
-                last_listed_key = LastListedKey,
-                finished = Finished
-            }, Size - NumberOfElementsToTake, FoldFun, Result);
-        {error, _} = Error -> Error
-    end.
-
 
 %% @private
 -spec select_not_listed_elements(state(), sliding_proplist:elements_map(), sliding_proplist:node_number()) -> 
@@ -241,9 +229,9 @@ select_elements_from_node(#node{elements = Elements} = Node, Keys, Direction) ->
 
 %% @private
 -spec filter_keys(direction(), sliding_proplist:list_node(), [sliding_proplist:key()]) -> [sliding_proplist:key()].
-filter_keys(back_from_newest, #node{max_on_right = Max}, Keys) ->
+filter_keys(back_from_newest, #node{max_in_older = Max}, Keys) ->
     [Key || Key <- Keys, Key =< Max];
-filter_keys(forward_from_oldest, #node{min_on_left = Min}, Keys) ->
+filter_keys(forward_from_oldest, #node{min_in_newer = Min}, Keys) ->
     [Key || Key <- Keys, Key >= Min].
 
 
