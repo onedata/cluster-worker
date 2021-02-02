@@ -118,8 +118,10 @@ decode({Term} = EJson) when is_list(Term) ->
                         {{_, Value}, _} -> Value % Document has timestamp
                     end,
 
-                    RemoteSequences = decode_term(
-                        proplists:get_value(<<"_remote_sequences">>, Term, #{}), #{string => integer}),
+                    RemoteSequences = case lists:keyfind(<<"_remote_sequences">>, 1, Term) of
+                        {_, EncodedRemoteSequences} -> decode_term(EncodedRemoteSequences, #{string => integer});
+                        false -> #{}
+                    end,
 
                     #document{
                         key = Key,
