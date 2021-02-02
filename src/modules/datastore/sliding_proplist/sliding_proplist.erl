@@ -69,12 +69,12 @@
 ]).
 
 -export([
-    insert_unique_sorted_elements/2, 
+    insert_uniquely_sorted_elements/2, 
     remove_elements/2,
-    list/2, list/3,
+    list_elements/2, list_elements/3,
     fold_elements/4, fold_elements/5, 
     get_elements/2, get_elements/3, 
-    get_highest/1, get_max_key/1
+    get_highest_element/1, get_max_key/1
 ]).
 
 -compile({no_auto_import, [get/1]}).
@@ -127,18 +127,18 @@ destroy(StructId) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Adds a Batch of elements to the beginning of a sliding proplist instance.
+%% Adds a Elements to the beginning of a sliding proplist instance.
 %% Returns unordered list of keys that were overwritten.
 %% @end
 %%--------------------------------------------------------------------
--spec insert_unique_sorted_elements(id(), [element()] | element()) -> 
+-spec insert_uniquely_sorted_elements(id(), [element()] | element()) -> 
     {ok, OverwrittenKeys :: [key()]} | {error, term()}.
-insert_unique_sorted_elements(StructureId, Batch) ->
+insert_uniquely_sorted_elements(StructureId, Elements) ->
     case sliding_proplist_persistence:get_node(StructureId) of
         {ok, #sentinel{first = FirstNodeId} = Sentinel} ->
             {ok, UpdatedSentinel, FirstNode} = fetch_or_create_first_node(Sentinel, FirstNodeId),
             sliding_proplist_add:insert_elements(
-                UpdatedSentinel, FirstNode, utils:ensure_list(Batch));
+                UpdatedSentinel, FirstNode, utils:ensure_list(Elements));
         {error, _} = Error -> Error
     end.
 
@@ -162,11 +162,11 @@ remove_elements(StructureId, Elements) ->
     end.
 
 
--spec list(id() | sliding_proplist_get:state(), sliding_proplist_get:batch_size()) ->
+-spec list_elements(id() | sliding_proplist_get:state(), sliding_proplist_get:batch_size()) ->
     sliding_proplist_get:fold_result([element()]) | {error, term()}.
-list(Id, Size) when is_binary(Id) ->
-    list(Id, Size, back_from_newest);
-list(State, Size) ->
+list_elements(Id, Size) when is_binary(Id) ->
+    list_elements(Id, Size, back_from_newest);
+list_elements(State, Size) ->
     fold_elements(State, Size, ?LIST_FOLD_FUN, []).
 
 
@@ -181,9 +181,9 @@ list(State, Size) ->
 %% When elements are not added in recommended order there is no guarantee about listing order.
 %% @end
 %%--------------------------------------------------------------------
--spec list(id(), sliding_proplist_get:batch_size(), sliding_proplist_get:direction()) ->
+-spec list_elements(id(), sliding_proplist_get:batch_size(), sliding_proplist_get:direction()) ->
     sliding_proplist_get:fold_result([element()]) | {error, term()}.
-list(Id, Size, Direction) when is_binary(Id) and is_atom(Direction) ->
+list_elements(Id, Size, Direction) when is_binary(Id) and is_atom(Direction) ->
     fold_elements(Id, Size, Direction, ?LIST_FOLD_FUN, []).
 
 
@@ -235,10 +235,10 @@ get_elements(StructureId, Keys, Direction) ->
     end.
 
 
--spec get_highest(id()) -> {ok, element()} | {error, term()}.
-get_highest(StructureId) ->
+-spec get_highest_element(id()) -> {ok, element()} | {error, term()}.
+get_highest_element(StructureId) ->
     case sliding_proplist_persistence:get_node(StructureId) of
-        {ok, Sentinel} -> sliding_proplist_get:get_highest(Sentinel#sentinel.first);
+        {ok, Sentinel} -> sliding_proplist_get:get_highest_element(Sentinel#sentinel.first);
         {error, _} = Error -> Error
     end.
 

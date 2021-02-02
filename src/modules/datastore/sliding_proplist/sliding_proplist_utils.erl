@@ -37,10 +37,10 @@
 adjust_min_in_newer(undefined, _CurrentMin, _CheckToTheEnd) ->
     ok;
 adjust_min_in_newer(#node{} = Node, CurrentMin, CheckToTheEnd) ->
-    #node{node_id = NodeId, min_in_newer = PreviousMinInNewer, min_in_node = MinInNode} = Node,
+    #node{node_id = NodeId, min_in_newer_nodes = PreviousMinInNewer, min_in_node = MinInNode} = Node,
     case PreviousMinInNewer of
         CurrentMin -> ok;
-        _ -> sliding_proplist_persistence:save_node(NodeId, Node#node{min_in_newer = CurrentMin})
+        _ -> sliding_proplist_persistence:save_node(NodeId, Node#node{min_in_newer_nodes = CurrentMin})
     end,
     Min = case maps:size(Node#node.elements) of
         0 -> CurrentMin;
@@ -69,12 +69,12 @@ adjust_max_in_older(undefined, _) ->
     ok;
 adjust_max_in_older(#node{} = Node, CurrentMax) ->
     #node{
-        node_id = NodeId, next = Next, max_in_older = PreviousMaxInOlder, max_in_node = MaxInNode
+        node_id = NodeId, next = Next, max_in_older_nodes = PreviousMaxInOlder, max_in_node = MaxInNode
     } = Node,
     case CurrentMax of
         PreviousMaxInOlder -> ok;
         _ ->
-            sliding_proplist_persistence:save_node(NodeId, Node#node{max_in_older = CurrentMax}),
+            sliding_proplist_persistence:save_node(NodeId, Node#node{max_in_older_nodes = CurrentMax}),
             case CurrentMax of
                 undefined -> adjust_max_in_older(Next, MaxInNode);
                 _ -> adjust_max_in_older(Next, max(CurrentMax, MaxInNode))
@@ -95,7 +95,7 @@ adjust_max_in_older(NodeId, CurrentMax) ->
 -spec get_max_key_in_prev_nodes(undefined | sliding_proplist:list_node()) -> 
     sliding_proplist:key() | undefined.
 get_max_key_in_prev_nodes(undefined) -> undefined;
-get_max_key_in_prev_nodes(#node{max_in_older = MaxInOlder, max_in_node = MaxInNode}) ->
+get_max_key_in_prev_nodes(#node{max_in_older_nodes = MaxInOlder, max_in_node = MaxInNode}) ->
     case MaxInNode of
         undefined -> MaxInOlder;
         _ ->

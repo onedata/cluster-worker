@@ -17,7 +17,7 @@
 -include("modules/datastore/sliding_proplist.hrl").
 
 %% API
--export([fold/4, fold/6, get_elements/3, get_highest/1, get_max_key/1]).
+-export([fold/4, fold/6, get_elements/3, get_highest_element/1, get_max_key/1]).
 
 
 % This record is used as cache during listing. Holds information where fold should continue.
@@ -111,15 +111,15 @@ get_elements(NodeId, Keys, Direction) ->
     end.
 
 
--spec get_highest(undefined | sliding_proplist:node_id()) -> 
+-spec get_highest_element(undefined | sliding_proplist:node_id()) -> 
     {ok, sliding_proplist:element()} | {error, term()}.
-get_highest(undefined) -> {error, not_found};
-get_highest(NodeId) ->
+get_highest_element(undefined) -> {error, not_found};
+get_highest_element(NodeId) ->
     case sliding_proplist_persistence:get_node(NodeId) of
         {ok, Node} ->
             #node{
                 elements = Elements, 
-                max_in_older = MaxInOlder, 
+                max_in_older_nodes = MaxInOlder, 
                 prev = Prev, 
                 max_in_node = MaxKeyInNode
             } = Node,
@@ -128,7 +128,7 @@ get_highest(NodeId) ->
                 {true, false} -> {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
                 {false, false} when MaxKeyInNode > MaxInOlder ->
                     {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
-                {false, _} -> get_highest(Prev)
+                {false, _} -> get_highest_element(Prev)
             end;
         {error, _} = Error -> Error
     end.
@@ -157,18 +157,18 @@ select_not_listed_elements(#listing_state{
     last_listed_key = LastKey,
     last_node_number = LastNodeNum,
     direction = Direction
-}, OrigElements, NodeNumber) ->
+}, OrigElementsMap, NodeNumber) ->
     Elements = case LastKey == undefined orelse LastNodeNum =/= NodeNumber of
-        true -> OrigElements;
+        true -> OrigElementsMap;
         false ->
             % when node since last listing was not deleted select only 
             % elements with keys less than those already listed
             % (higher when listing forward from oldest) 
             case Direction of
                 back_from_newest -> maps:filter(fun(Key, _) -> 
-                    Key < LastKey end, OrigElements);
+                    Key < LastKey end, OrigElementsMap);
                 forward_from_oldest -> maps:filter(fun(Key, _) -> 
-                    Key > LastKey end, OrigElements)
+                    Key > LastKey end, OrigElementsMap)
             end
     end,
     case Direction of
@@ -245,9 +245,9 @@ select_elements_from_node(#node{elements = Elements} = Node, Keys, Direction) ->
 %% @private
 -spec filter_keys(direction(), sliding_proplist:list_node(), [sliding_proplist:key()]) -> 
     [sliding_proplist:key()].
-filter_keys(back_from_newest, #node{max_in_older = Max}, Keys) ->
+filter_keys(back_from_newest, #node{max_in_older_nodes = Max}, Keys) ->
     [Key || Key <- Keys, Key =< Max];
-filter_keys(forward_from_oldest, #node{min_in_newer = Min}, Keys) ->
+filter_keys(forward_from_oldest, #node{min_in_newer_nodes = Min}, Keys) ->
     [Key || Key <- Keys, Key >= Min].
 
 

@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This file contains datastore append list records definitions.
+%%% This file contains datastore sliding proplist records definitions.
 %%% For detailed description checkout {@link sliding_proplist} module.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -29,14 +29,14 @@
 -record(node, {
     structure_id :: sliding_proplist:id(),
     node_id :: sliding_proplist:node_id(),
+    node_number :: sliding_proplist:node_number(),
     prev = undefined :: sliding_proplist:node_id() | undefined,
     next = undefined :: sliding_proplist:node_id() | undefined,
     elements = #{} :: sliding_proplist:elements_map(),
     max_in_node :: sliding_proplist:key() | undefined,
     min_in_node :: sliding_proplist:key() | undefined,
-    min_in_newer :: sliding_proplist:key() | undefined,
-    max_in_older :: sliding_proplist:key() | undefined,
-    node_number :: sliding_proplist:node_number()
+    min_in_newer_nodes :: sliding_proplist:key() | undefined,
+    max_in_older_nodes :: sliding_proplist:key() | undefined
 }).
 
 -endif.
