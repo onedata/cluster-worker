@@ -269,7 +269,6 @@
             {max_key_tp_mem, 100},
 
             %% Should cache fold link token be cached by cache writer
-            %% Warning: other possibility is use cache_list_dir_token flag - do not use both
             {cache_fold_token, true},
             %% Time of fold link token caching by cache writer
             {fold_cache_timeout, 30000},

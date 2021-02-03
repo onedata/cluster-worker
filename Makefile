@@ -84,3 +84,7 @@ coverage:
 # Dialyzes the project.
 dialyzer:
 	$(REBAR) dialyzer
+
+
+codetag-tracker:
+	./bamboos/scripts/codetag-tracker.sh --branch=${BRANCH} --excluded-dirs=node_package
