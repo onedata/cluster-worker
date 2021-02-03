@@ -640,10 +640,6 @@ handle_info({nodedown, Node}, State) ->
                 [{nodedown, Node}]);
         true ->
             ok
-        % TODO maybe node_manager should be restarted along with all workers to
-        % avoid desynchronization of modules between nodes.
-%%             ?error("Connection to cluster manager lost, restarting node"),
-%%             throw(connection_to_cm_lost)
     end,
     {noreply, State};
 
@@ -797,13 +793,9 @@ cluster_init_step(?DB_AND_WORKERS_READY) ->
     end),
     async;
 cluster_init_step(?START_LISTENERS) ->
-    ?info("Starting listeners..."),
     lists:foreach(fun(Module) ->
-        ok = erlang:apply(Module, start, []),
-        ?info("   * ~p started", [Module])
-    end, node_manager:listeners()),
-    ?info("Listeners started successfully"),
-    ok;
+        ok = erlang:apply(Module, start, [])
+    end, node_manager:listeners());
 cluster_init_step(?CLUSTER_READY) ->
     ?info("Cluster initialized successfully"),
     gen_server2:cast(?NODE_MANAGER_NAME, node_initialized),
