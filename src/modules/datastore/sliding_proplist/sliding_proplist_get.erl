@@ -99,7 +99,7 @@ fold(StructureId, StartingNodeId, Size, Direction, FoldFun, Acc0) when is_binary
 get_elements(undefined, _Keys, _Direction) ->
     [];
 get_elements(NodeId, Keys, Direction) ->
-    case sliding_proplist_persistence:get_node(NodeId) of
+    case sliding_proplist_persistence:get_record(NodeId) of
         {ok, Node} ->
             {Selected, RemainingKeys} = select_elements_from_node(Node, Keys, Direction),
             case RemainingKeys of
@@ -115,7 +115,7 @@ get_elements(NodeId, Keys, Direction) ->
     {ok, sliding_proplist:element()} | {error, term()}.
 get_highest_element(undefined) -> {error, not_found};
 get_highest_element(NodeId) ->
-    case sliding_proplist_persistence:get_node(NodeId) of
+    case sliding_proplist_persistence:get_record(NodeId) of
         {ok, Node} ->
             #node{
                 elements = Elements, 
@@ -138,7 +138,7 @@ get_highest_element(NodeId) ->
     {ok, sliding_proplist:key()} | {error, term()}.
 get_max_key(undefined) -> {error, not_found};
 get_max_key(NodeId) ->
-    case sliding_proplist_persistence:get_node(NodeId) of
+    case sliding_proplist_persistence:get_record(NodeId) of
         {ok, Node} -> case sliding_proplist_utils:get_max_key_in_prev_nodes(Node) of
             undefined -> {error, not_found};
             Res -> {ok, Res}
@@ -194,7 +194,7 @@ find_node(State) ->
         structure_id = StructId, 
         direction = Direction
     } = State,
-    case sliding_proplist_persistence:get_node(NodeId) of
+    case sliding_proplist_persistence:get_record(NodeId) of
         {ok, #node{node_number = NodeNum} = Node}  ->
             NodeFound = case Direction of
                 back_from_newest -> 
@@ -210,7 +210,7 @@ find_node(State) ->
                     })
             end;
         {error, not_found} ->
-            {ok, Sentinel} = sliding_proplist_persistence:get_node(StructId),
+            {ok, Sentinel} = sliding_proplist_persistence:get_record(StructId),
             StartingNodeId = sliding_proplist_utils:get_starting_node_id(Direction, Sentinel),
             case StartingNodeId of
                 undefined -> {error, not_found};

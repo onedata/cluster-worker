@@ -42,17 +42,17 @@
 %%% resulting structure after deletions, as it would require additional fetch 
 %%% of next node.
 %%%
-%%% Each node stores also value `min_in_newer`. It represents minimal key 
+%%% Each node stores also value `min_in_newer_nodes`. It represents minimal key 
 %%% in all nodes, that are newer (are pointed by `next`) than this node. 
 %%% It is used during deletion  - it allows to determine whether it is 
 %%% necessary to fetch next nodes and allows to finish deletion without 
 %%% traversing all list nodes. This is why it is optimal to have 
 %%% increasing keys.
 %%%
-%%% In each node there is also value `max_in_older`. It works similarly to 
-%%% `min_in_newer` but it represents maximum key in all nodes, that are 
+%%% In each node there is also value `max_in_older_nodes`. It works similarly to 
+%%% `min_in_newer_nodes` but it represents maximum key in all nodes, that are 
 %%% older (are pointed by `prev`) than this node. 
-%%% It is used to optimize functions finding elements (`get/2`, `get_highest/1`) 
+%%% It is used to optimize functions finding elements (`get_elements/2`, `get_highest_element/1`) 
 %%% and also when overwriting existing elements during addition.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -110,16 +110,16 @@
 create(MaxElementsPerNode) ->
     Id = datastore_key:new(),
     Sentinel = #sentinel{structure_id = Id, max_elements_per_node = MaxElementsPerNode},
-    sliding_proplist_persistence:save_node(Id, Sentinel),
+    sliding_proplist_persistence:save_record(Id, Sentinel),
     {ok, Id}.
 
 
 -spec destroy(id()) -> ok | {error, term()}.
 destroy(StructId) ->
-    case sliding_proplist_persistence:get_node(StructId) of
+    case sliding_proplist_persistence:get_record(StructId) of
         {ok, Sentinel} ->
             delete_all_nodes(Sentinel#sentinel.first),
-            true = sliding_proplist_persistence:delete_node(Sentinel#sentinel.structure_id),
+            true = sliding_proplist_persistence:delete_record(Sentinel#sentinel.structure_id),
             ok;
         {error, not_found} -> ok
     end.
@@ -134,7 +134,7 @@ destroy(StructId) ->
 -spec insert_uniquely_sorted_elements(id(), [element()] | element()) -> 
     {ok, OverwrittenKeys :: [key()]} | {error, term()}.
 insert_uniquely_sorted_elements(StructureId, Elements) ->
-    case sliding_proplist_persistence:get_node(StructureId) of
+    case sliding_proplist_persistence:get_record(StructureId) of
         {ok, #sentinel{first = FirstNodeId} = Sentinel} ->
             {ok, UpdatedSentinel, FirstNode} = fetch_or_create_first_node(Sentinel, FirstNodeId),
             sliding_proplist_add:insert_elements(
@@ -147,15 +147,16 @@ insert_uniquely_sorted_elements(StructureId, Elements) ->
 %% @doc
 %% Deletes given elements from the sliding proplist instance. 
 %% Elements that were not found are ignored.
+%% Returns list of keys that were not found.
 %% Returns {error, not_found} when there is no such instance.
 %% @end
 %%--------------------------------------------------------------------
--spec remove_elements(id(), key() | [key()]) -> ok | {error, term()}.
+-spec remove_elements(id(), key() | [key()]) -> {ok, [key()]} | {error, term()}.
 remove_elements(StructureId, Elements) ->
-    case sliding_proplist_persistence:get_node(StructureId) of
+    case sliding_proplist_persistence:get_record(StructureId) of
         {ok, #sentinel{last = undefined}} -> ok;
         {ok, #sentinel{last = Last} = Sentinel} ->
-            {ok, LastNode} = sliding_proplist_persistence:get_node(Last),
+            {ok, LastNode} = sliding_proplist_persistence:get_record(Last),
             sliding_proplist_delete:delete_elements(
                 Sentinel, LastNode, utils:ensure_list(Elements));
         {error, _} = Error -> Error
@@ -203,7 +204,7 @@ fold_elements(State, Size, FoldFun, Acc0) when is_function(FoldFun, 2) ->
 -spec fold_elements(id(), sliding_proplist_get:batch_size(), sliding_proplist_get:direction(), 
     sliding_proplist_get:fold_fun(), term()) -> sliding_proplist_get:fold_result() | {error, term()}.
 fold_elements(Id, Size, Direction, FoldFun, Acc0) when is_binary(Id) ->
-    case sliding_proplist_persistence:get_node(Id) of
+    case sliding_proplist_persistence:get_record(Id) of
         {ok, #sentinel{} = Sentinel} ->
             StartingNodeId = sliding_proplist_utils:get_starting_node_id(Direction, Sentinel),
             sliding_proplist_get:fold(Id, StartingNodeId, Size, Direction, FoldFun, Acc0);
@@ -227,7 +228,7 @@ get_elements(StructureId, Keys) ->
 get_elements(StructureId, Key, Direction) when not is_list(Key) ->
     get_elements(StructureId, [Key], Direction);
 get_elements(StructureId, Keys, Direction) ->
-    case sliding_proplist_persistence:get_node(StructureId) of
+    case sliding_proplist_persistence:get_record(StructureId) of
         {ok, Sentinel} ->
             StartingNodeId = sliding_proplist_utils:get_starting_node_id(Direction, Sentinel), 
             {ok, sliding_proplist_get:get_elements(StartingNodeId, Keys, Direction)};
@@ -237,7 +238,7 @@ get_elements(StructureId, Keys, Direction) ->
 
 -spec get_highest_element(id()) -> {ok, element()} | {error, term()}.
 get_highest_element(StructureId) ->
-    case sliding_proplist_persistence:get_node(StructureId) of
+    case sliding_proplist_persistence:get_record(StructureId) of
         {ok, Sentinel} -> sliding_proplist_get:get_highest_element(Sentinel#sentinel.first);
         {error, _} = Error -> Error
     end.
@@ -245,7 +246,7 @@ get_highest_element(StructureId) ->
 
 -spec get_max_key(id()) -> {ok, key()} | {error, term()}.
 get_max_key(StructureId) ->
-    case sliding_proplist_persistence:get_node(StructureId) of
+    case sliding_proplist_persistence:get_record(StructureId) of
         {ok, Sentinel} -> sliding_proplist_get:get_max_key(Sentinel#sentinel.first);
         {error, _} = Error -> Error
     end.
@@ -259,8 +260,8 @@ get_max_key(StructureId) ->
 delete_all_nodes(undefined) ->
     ok;
 delete_all_nodes(NodeId) ->
-    {ok, #node{prev = Prev}} = sliding_proplist_persistence:get_node(NodeId),
-    sliding_proplist_persistence:delete_node(NodeId),
+    {ok, #node{prev = Prev}} = sliding_proplist_persistence:get_record(NodeId),
+    sliding_proplist_persistence:delete_record(NodeId),
     delete_all_nodes(Prev).
 
 
@@ -269,10 +270,10 @@ delete_all_nodes(NodeId) ->
     {ok, sentinel(), list_node()} | {error, term()}.
 fetch_or_create_first_node(#sentinel{structure_id = StructureId} = Sentinel, undefined) ->
     NodeId = datastore_key:new(),
-    Sentinel1 = Sentinel#sentinel{first = NodeId, last = NodeId},
-    sliding_proplist_persistence:save_node(StructureId, Sentinel1),
+    UpdatedSentinel = Sentinel#sentinel{first = NodeId, last = NodeId},
+    sliding_proplist_persistence:save_record(StructureId, UpdatedSentinel),
     FirstNode = #node{node_id = NodeId, structure_id = StructureId, node_number = 0},
-    {ok, Sentinel1, FirstNode};
+    {ok, UpdatedSentinel, FirstNode};
 fetch_or_create_first_node(Sentinel, FirstNodeId) ->
-    {ok, FirstNode} = sliding_proplist_persistence:get_node(FirstNodeId),
+    {ok, FirstNode} = sliding_proplist_persistence:get_record(FirstNodeId),
     {ok, Sentinel, FirstNode}.

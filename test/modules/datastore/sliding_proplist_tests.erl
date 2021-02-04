@@ -44,6 +44,7 @@ sliding_proplist_test_() ->
             {"test_remove_elements_one_by_one_descending", fun test_remove_elements_one_by_one_descending/0},
             {"test_remove_elements_one_by_one_ascending", fun test_remove_elements_one_by_one_ascending/0},
             {"test_remove_elements_structure_not_sorted", fun test_remove_elements_structure_not_sorted/0},
+            {"test_remove_elements_returned_ignored_keys", fun test_remove_elements_returned_ignored_keys/0},
             {"test_merge_nodes_during_remove_structure_not_sorted", fun test_merge_nodes_during_remove_structure_not_sorted/0},
             {"test_remove_elements_between_listings", fun test_remove_elements_between_listings/0},
             {"test_get_elements", fun test_get_elements/0},
@@ -274,6 +275,16 @@ test_remove_elements_structure_not_sorted() ->
     ?assertMatch({done, Expected}, sliding_proplist:list_elements(Id, 100)).
 
 
+test_remove_elements_returned_ignored_keys() ->
+    {ok, Id} = sliding_proplist:create(10),
+    sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(20, 31)),
+    sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(10, 20)),
+    ?assertEqual({ok, []}, sliding_proplist:remove_elements(Id, [22])),
+    ?assertEqual({ok, [22]}, sliding_proplist:remove_elements(Id, [22])),
+    ?assertEqual({ok, lists:seq(1,9) ++ [22]}, sliding_proplist:remove_elements(Id, lists:seq(1,25))),
+    ?assertEqual({ok, lists:seq(100, 120)}, sliding_proplist:remove_elements(Id, lists:seq(100,120))).
+
+
 test_merge_nodes_during_remove_structure_not_sorted() ->
     {ok, Id} = sliding_proplist:create(1),
     lists:foreach(fun(Elem) ->
@@ -345,7 +356,7 @@ test_get_max_key_structure_not_sorted() ->
 
 
 test_get_elements() ->
-    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(<<"dummy_id">>), 8),
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_record(<<"dummy_id">>), 8),
     {ok, Id} = sliding_proplist:create(10),
     ?assertEqual({ok, []}, sliding_proplist:get_elements(Id, 8)),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
@@ -373,7 +384,7 @@ test_get_elements_structure_not_sorted() ->
 
 
 test_get_elements_forward_from_oldest() ->
-    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(<<"dummy_id">>), 8),
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_record(<<"dummy_id">>), 8),
     {ok, Id} = sliding_proplist:create(10),
     ?assertEqual({ok, []}, sliding_proplist:get_elements(Id, 8, forward_from_oldest)),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
@@ -402,27 +413,27 @@ test_get_structure_not_sorted_forward_from_oldest() ->
 
 test_nodes_created_after_insert_elements() ->
     {ok, Id} = sliding_proplist:create(1),
-    ?assertMatch({ok, #sentinel{first = undefined, last = undefined}}, sliding_proplist_persistence:get_node(Id)),
+    ?assertMatch({ok, #sentinel{first = undefined, last = undefined}}, sliding_proplist_persistence:get_record(Id)),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 1)),
-    ?assertNotMatch({ok, #sentinel{last = undefined}}, sliding_proplist_persistence:get_node(Id)),
-    {ok, #sentinel{last = LastNodeId}} = sliding_proplist_persistence:get_node(Id),
-    ?assertMatch({ok, #sentinel{first = LastNodeId}}, sliding_proplist_persistence:get_node(Id)),
-    ?assertMatch({ok, #node{next = undefined, prev = undefined}}, sliding_proplist_persistence:get_node(LastNodeId)),
+    ?assertNotMatch({ok, #sentinel{last = undefined}}, sliding_proplist_persistence:get_record(Id)),
+    {ok, #sentinel{last = LastNodeId}} = sliding_proplist_persistence:get_record(Id),
+    ?assertMatch({ok, #sentinel{first = LastNodeId}}, sliding_proplist_persistence:get_record(Id)),
+    ?assertMatch({ok, #node{next = undefined, prev = undefined}}, sliding_proplist_persistence:get_record(LastNodeId)),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(2, 2)),
-    ?assertNotMatch({ok, #sentinel{first = LastNodeId}}, sliding_proplist_persistence:get_node(Id)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
-    ?assertMatch({ok, #node{next = FirstNodeId, prev = undefined}}, sliding_proplist_persistence:get_node(LastNodeId)),
-    ?assertMatch({ok, #node{next = undefined, prev = LastNodeId}}, sliding_proplist_persistence:get_node(FirstNodeId)).
+    ?assertNotMatch({ok, #sentinel{first = LastNodeId}}, sliding_proplist_persistence:get_record(Id)),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
+    ?assertMatch({ok, #node{next = FirstNodeId, prev = undefined}}, sliding_proplist_persistence:get_record(LastNodeId)),
+    ?assertMatch({ok, #node{next = undefined, prev = LastNodeId}}, sliding_proplist_persistence:get_record(FirstNodeId)).
 
 
 test_min_in_newer_after_insert_elements() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMinsOnLeft = [undefined] ++ lists:seq(91, 11, -10),
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{min_in_newer_nodes = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{min_in_newer_nodes = Expected}}, sliding_proplist_persistence:get_record(NodeId))
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
@@ -431,22 +442,22 @@ test_min_in_newer_after_insert_elements_reversed() ->
     lists:foreach(fun(Elem) ->
         sliding_proplist:insert_uniquely_sorted_elements(Id, Elem)
     end, prepare_batch(100, 1, -1)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMinsOnLeft = [undefined] ++ lists:duplicate(9, 1),
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{min_in_newer_nodes = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{min_in_newer_nodes = Expected}}, sliding_proplist_persistence:get_record(NodeId))
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
 test_max_in_older_after_insert_elements() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMaxInOlder = lists:seq(90, 10, -10) ++ [undefined],
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{max_in_older_nodes = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{max_in_older_nodes = Expected}}, sliding_proplist_persistence:get_record(NodeId))
     end, lists:zip(NodesIds, ExpectedMaxInOlder)).
 
 
@@ -455,22 +466,22 @@ test_max_in_older_after_insert_elements_reversed() ->
     lists:foreach(fun(Elem) ->
         sliding_proplist:insert_uniquely_sorted_elements(Id, Elem)
     end, prepare_batch(100, 1, -1)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMinsOnLeft = lists:duplicate(9, 100) ++ [undefined],
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{max_in_older_nodes = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{max_in_older_nodes = Expected}}, sliding_proplist_persistence:get_record(NodeId))
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
 test_node_num_after_insert_elements() ->
     {ok, Id} = sliding_proplist:create(1),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 10)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
-    {ok, #node{prev = PrevNodeId, node_number = FirstNodeNum}} = sliding_proplist_persistence:get_node(FirstNodeId),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
+    {ok, #node{prev = PrevNodeId, node_number = FirstNodeNum}} = sliding_proplist_persistence:get_record(FirstNodeId),
     NodeIds = get_nodes_ids(PrevNodeId),
     lists:foldl(fun(NodeId, NextNodeNum) ->
-        {ok, #node{node_number = Num}} = sliding_proplist_persistence:get_node(NodeId),
+        {ok, #node{node_number = Num}} = sliding_proplist_persistence:get_record(NodeId),
         ?assert(Num < NextNodeNum),
         Num
     end, FirstNodeNum, NodeIds).
@@ -479,11 +490,11 @@ test_node_num_after_insert_elements() ->
 test_nodes_elements_after_insert_elements() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedElementsPerNode = lists:map(fun(A) -> maps:from_list(prepare_batch(10*(A-1) + 1, 10*A)) end, lists:seq(10,1, -1)),
     lists:foreach(fun({NodeId, Expected}) ->
-        {ok, #node{elements = ElementsInNode}} = sliding_proplist_persistence:get_node(NodeId),
+        {ok, #node{elements = ElementsInNode}} = sliding_proplist_persistence:get_record(NodeId),
         ?assertEqual(Expected, ElementsInNode)
     end, lists:zip(NodesIds, ExpectedElementsPerNode)).
 
@@ -493,11 +504,11 @@ test_nodes_elements_after_insert_elements_reversed() ->
     lists:foreach(fun(Elem) ->
         sliding_proplist:insert_uniquely_sorted_elements(Id, Elem)
     end, prepare_batch(100, 1, -1)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedElementsPerNode = lists:map(fun(A) -> maps:from_list(prepare_batch(10*(A-1) + 1, 10*A)) end, lists:seq(1,10)),
     lists:foreach(fun({NodeId, Expected}) ->
-        {ok, #node{elements = ElementsInNode}} = sliding_proplist_persistence:get_node(NodeId),
+        {ok, #node{elements = ElementsInNode}} = sliding_proplist_persistence:get_record(NodeId),
         ?assertEqual(Expected, ElementsInNode)
     end, lists:zip(NodesIds, ExpectedElementsPerNode)).
 
@@ -505,32 +516,32 @@ test_nodes_elements_after_insert_elements_reversed() ->
 test_nodes_removed_after_remove_elements() ->
     {ok, Id} = sliding_proplist:create(1),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 3)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     [Node1, Node2, Node3] = get_nodes_ids(FirstNodeId),
     sliding_proplist:remove_elements(Id, [2]),
-    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(Node2)),
-    ?assertMatch({ok, #node{next = Node1}}, sliding_proplist_persistence:get_node(Node3)),
-    ?assertMatch({ok, #node{prev = Node3}}, sliding_proplist_persistence:get_node(Node1)),
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_record(Node2)),
+    ?assertMatch({ok, #node{next = Node1}}, sliding_proplist_persistence:get_record(Node3)),
+    ?assertMatch({ok, #node{prev = Node3}}, sliding_proplist_persistence:get_record(Node1)),
     sliding_proplist:remove_elements(Id, [3]),
-    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(Node1)),
-    ?assertMatch({ok, #node{next = undefined}}, sliding_proplist_persistence:get_node(Node3)),
-    ?assertMatch({ok, #sentinel{first = Node3, last = Node3}}, sliding_proplist_persistence:get_node(Id)).
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_record(Node1)),
+    ?assertMatch({ok, #node{next = undefined}}, sliding_proplist_persistence:get_record(Node3)),
+    ?assertMatch({ok, #sentinel{first = Node3, last = Node3}}, sliding_proplist_persistence:get_record(Id)).
 
     
 test_nodes_after_remove_elements_from_last_node() ->
     {ok, Id} = sliding_proplist:create(1),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 3)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     [Node1, Node2, Node3] = get_nodes_ids(FirstNodeId),
     sliding_proplist:remove_elements(Id, [1]),
-    ?assertMatch({ok, #node{prev = undefined, next = Node1}}, sliding_proplist_persistence:get_node(Node2)),
-    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(Node3)),
-    ?assertMatch({ok, #node{prev = Node2, next = undefined}}, sliding_proplist_persistence:get_node(Node1)),
+    ?assertMatch({ok, #node{prev = undefined, next = Node1}}, sliding_proplist_persistence:get_record(Node2)),
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_record(Node3)),
+    ?assertMatch({ok, #node{prev = Node2, next = undefined}}, sliding_proplist_persistence:get_record(Node1)),
     sliding_proplist:remove_elements(Id, [3]),
-    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(Node3)),
-    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(Node1)),
-    ?assertMatch({ok, #node{next = undefined, prev = undefined}}, sliding_proplist_persistence:get_node(Node2)),
-    ?assertMatch({ok, #sentinel{first = Node2, last = Node2}}, sliding_proplist_persistence:get_node(Id)).
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_record(Node3)),
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_record(Node1)),
+    ?assertMatch({ok, #node{next = undefined, prev = undefined}}, sliding_proplist_persistence:get_record(Node2)),
+    ?assertMatch({ok, #sentinel{first = Node2, last = Node2}}, sliding_proplist_persistence:get_record(Id)).
 
 
 test_min_in_newer_after_remove_elements() ->
@@ -538,11 +549,11 @@ test_min_in_newer_after_remove_elements() ->
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(2, 10)),
     sliding_proplist:insert_uniquely_sorted_elements(Id, {1, <<"1">>}),
     sliding_proplist:remove_elements(Id, [1]),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMinsOnLeft = [undefined] ++ lists:seq(10, 3, -1),
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{min_in_newer_nodes = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{min_in_newer_nodes = Expected}}, sliding_proplist_persistence:get_record(NodeId))
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
@@ -551,57 +562,57 @@ test_max_in_older_after_remove_elements() ->
     sliding_proplist:insert_uniquely_sorted_elements(Id, {10, <<"10">>}),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 9)),
     sliding_proplist:remove_elements(Id, [10]),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMaxInOlder = lists:seq(8, 1, -1) ++ [undefined],
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{max_in_older_nodes = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{max_in_older_nodes = Expected}}, sliding_proplist_persistence:get_record(NodeId))
     end, lists:zip(NodesIds, ExpectedMaxInOlder)).
 
 
 test_min_in_node() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMinsInNode = lists:seq(91, 1, -10),
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{min_in_node = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{min_in_node = Expected}}, sliding_proplist_persistence:get_record(NodeId))
     end, lists:zip(NodesIds, ExpectedMinsInNode)).
 
 
 test_min_in_node_after_remove_elements() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     sliding_proplist:remove_elements(Id, lists:seq(1, 91, 10)),
     ExpectedMinsInNode = lists:seq(92, 2, -10),
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{min_in_node = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{min_in_node = Expected}}, sliding_proplist_persistence:get_record(NodeId))
     end, lists:zip(NodesIds, ExpectedMinsInNode)).
 
 
 test_max_in_node() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMaxsInNode = lists:seq(100, 10, -10),
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{max_in_node = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{max_in_node = Expected}}, sliding_proplist_persistence:get_record(NodeId))
     end, lists:zip(NodesIds, ExpectedMaxsInNode)).
 
 
 test_max_in_node_after_remove_elements() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     sliding_proplist:remove_elements(Id, lists:seq(10, 100, 10)),
     ExpectedMaxsInNode = lists:seq(99, 9, -10),
     lists:foreach(fun({NodeId, Expected}) ->
-        ?assertMatch({ok, #node{max_in_node = Expected}}, sliding_proplist_persistence:get_node(NodeId))
+        ?assertMatch({ok, #node{max_in_node = Expected}}, sliding_proplist_persistence:get_record(NodeId))
     end, lists:zip(NodesIds, ExpectedMaxsInNode)).
 
 
@@ -609,8 +620,8 @@ test_min_max_in_node_after_remove_elements_merge_nodes() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
     sliding_proplist:remove_elements(Id, lists:seq(1, 100) -- [8]),
-    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
-    {ok, #node{min_in_node = MinInNode, max_in_node = MaxInNode}} = sliding_proplist_persistence:get_node(FirstNodeId),
+    {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
+    {ok, #node{min_in_node = MinInNode, max_in_node = MaxInNode}} = sliding_proplist_persistence:get_record(FirstNodeId),
     ?assertEqual(8, MinInNode),
     ?assertEqual(8, MaxInNode).
 
@@ -635,6 +646,6 @@ prepare_batch(Start, End, Step, ValueFun) ->
 
 get_nodes_ids(undefined) -> [];
 get_nodes_ids(NodeId) ->
-    {ok, #node{prev = PrevNodeId}} = sliding_proplist_persistence:get_node(NodeId),
+    {ok, #node{prev = PrevNodeId}} = sliding_proplist_persistence:get_record(NodeId),
     [NodeId] ++ get_nodes_ids(PrevNodeId).
     

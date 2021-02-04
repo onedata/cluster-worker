@@ -33,8 +33,8 @@
     prev = undefined :: sliding_proplist:node_id() | undefined,
     next = undefined :: sliding_proplist:node_id() | undefined,
     elements = #{} :: sliding_proplist:elements_map(),
-    max_in_node :: sliding_proplist:key() | undefined,
     min_in_node :: sliding_proplist:key() | undefined,
+    max_in_node :: sliding_proplist:key() | undefined,
     min_in_newer_nodes :: sliding_proplist:key() | undefined,
     max_in_older_nodes :: sliding_proplist:key() | undefined
 }).
