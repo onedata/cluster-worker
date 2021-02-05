@@ -55,34 +55,37 @@ delete_elements_in_nodes(_Sentinel, _CurrentNode, [], _PrevNode) ->
 delete_elements_in_nodes(Sentinel, #node{} = CurrentNode, KeysToDelete, PrevNode) ->
     #sentinel{max_elements_per_node = MaxElementsPerNode} = Sentinel,
     #node{elements = ElementsBeforeDeletion, next = NextNodeId} = CurrentNode,
-    NewElements = maps:without(KeysToDelete, ElementsBeforeDeletion),
+    ElementsAfterDelete = maps:without(KeysToDelete, ElementsBeforeDeletion),
     ElementsInPreviousNode = case PrevNode of
         undefined  -> #{};
         _ -> PrevNode#node.elements
     end,
     NewKeysToDelete = KeysToDelete -- maps:keys(ElementsBeforeDeletion),
-    ShouldMergeNodes = PrevNode =/= undefined andalso 
-        maps:size(ElementsInPreviousNode) + maps:size(NewElements) =< 0.5 * MaxElementsPerNode,
-    {UpdatedCurrentNode, NextNodeOrId} = case ShouldMergeNodes of
-        false -> 
-            case maps:size(NewElements) == 0 of
-                true -> delete_node(Sentinel, CurrentNode, NextNodeId, PrevNode);
-                false -> {update_current_node(CurrentNode, NewElements, PrevNode), NextNodeId}
-            end;
-        true -> 
-            MergedNode = merge_nodes(
-                Sentinel, CurrentNode, PrevNode, maps:merge(ElementsInPreviousNode, NewElements)),
-            NextNode = update_next_node_pointer(NextNodeId, MergedNode#node.node_id),
-            {MergedNode, NextNode}
+    {UpdatedCurrentNode, NextNodeOrId} = case maps:size(ElementsAfterDelete) == 0 of
+        true ->
+            delete_node(Sentinel, CurrentNode, NextNodeId, PrevNode);
+        false ->
+            ShouldMergeNodes = PrevNode =/= undefined andalso
+                maps:size(ElementsInPreviousNode) + maps:size(ElementsAfterDelete) =< 0.5 * MaxElementsPerNode,
+            case ShouldMergeNodes of
+                true ->
+                    MergedNode = merge_nodes(
+                        Sentinel, CurrentNode, PrevNode, maps:merge(ElementsInPreviousNode, ElementsAfterDelete)),
+                    NextNode = update_next_node_pointer(NextNodeId, MergedNode#node.node_id),
+                    {MergedNode, NextNode};
+                false -> 
+                    {adjust_current_node_after_deletion(CurrentNode, ElementsAfterDelete, PrevNode), NextNodeId}
+            end
     end,
-    UpdatedCurrentNode =/= undefined andalso 
+     % UpdatedCurrentNode is undefined, if CurrentNode was the last one in the structure and it was deleted
+    UpdatedCurrentNode =/= undefined andalso
         sliding_proplist_persistence:save_record(UpdatedCurrentNode#node.node_id, UpdatedCurrentNode),
     ShouldStop = NewKeysToDelete == [] orelse 
         (UpdatedCurrentNode =/= undefined andalso 
             UpdatedCurrentNode#node.min_in_newer_nodes > lists:max(NewKeysToDelete)),
     case ShouldStop of
         true -> 
-            MaxInOlderBefore = sliding_proplist_utils:get_max_key_in_prev_nodes(CurrentNode),
+            MaxInOlderBefore = sliding_proplist_utils:get_max_key_in_current_and_older_nodes(CurrentNode),
             case UpdatedCurrentNode of
                 undefined ->
                     % this will always save updated next node
@@ -181,16 +184,16 @@ handle_deletion_finished(CurrentNode, PrevNode, MaxInOlderBefore) ->
     PrevNode =/= undefined andalso 
         sliding_proplist_utils:adjust_min_in_newer(PrevNode#node.node_id, Min, true),
     % if MaxInOlder did not change, there is no need to update this value in the next nodes
-    case sliding_proplist_utils:get_max_key_in_prev_nodes(CurrentNode) of
+    case sliding_proplist_utils:get_max_key_in_current_and_older_nodes(CurrentNode) of
         MaxInOlderBefore -> ok;
         CurrentMax -> sliding_proplist_utils:adjust_max_in_older(Next, CurrentMax)
     end.
 
 
 %% @private
--spec update_current_node(sliding_proplist:list_node(), sliding_proplist:elements_map(), 
+-spec adjust_current_node_after_deletion(sliding_proplist:list_node(), sliding_proplist:elements_map(), 
     sliding_proplist:list_node() | undefined) -> sliding_proplist:list_node().
-update_current_node(CurrentNode, NewElementsMap, PrevNode) ->
+adjust_current_node_after_deletion(CurrentNode, NewElementsMap, PrevNode) ->
     #node{min_in_node = MinInNode, max_in_node = MaxInNode} = CurrentNode,
     PrevNodeId = case PrevNode of
         undefined -> undefined;
@@ -199,7 +202,7 @@ update_current_node(CurrentNode, NewElementsMap, PrevNode) ->
     CurrentNode#node{
         elements = NewElementsMap,
         prev = PrevNodeId,
-        max_in_older_nodes = sliding_proplist_utils:get_max_key_in_prev_nodes(PrevNode),
+        max_in_older_nodes = sliding_proplist_utils:get_max_key_in_current_and_older_nodes(PrevNode),
         min_in_node = find_extremum(MinInNode, NewElementsMap, min),
         max_in_node = find_extremum(MaxInNode, NewElementsMap, max)
     }.

@@ -177,7 +177,7 @@ prepare_new_first_node(StructureId, ElementsList, #node{
     node_number = PrevNodeNum
 } = PrevNode) ->
     NodeNum = PrevNodeNum + 1,
-    MaxInOlder = sliding_proplist_utils:get_max_key_in_prev_nodes(PrevNode),
+    MaxInOlder = sliding_proplist_utils:get_max_key_in_current_and_older_nodes(PrevNode),
     [{Min, _} | _] = ElementsList,
     {Max, _} = lists:last(ElementsList),
     #node{

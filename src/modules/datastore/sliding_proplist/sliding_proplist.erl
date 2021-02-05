@@ -74,7 +74,7 @@
     list_elements/2, list_elements/3,
     fold_elements/4, fold_elements/5, 
     get_elements/2, get_elements/3, 
-    get_highest_element/1, get_max_key/1
+    get_highest_element/1, get_smallest_key/1
 ]).
 
 -compile({no_auto_import, [get/1]}).
@@ -244,10 +244,10 @@ get_highest_element(StructureId) ->
     end.
 
 
--spec get_max_key(id()) -> {ok, key()} | {error, term()}.
-get_max_key(StructureId) ->
+-spec get_smallest_key(id()) -> {ok, key()} | {error, term()}.
+get_smallest_key(StructureId) ->
     case sliding_proplist_persistence:get_record(StructureId) of
-        {ok, Sentinel} -> sliding_proplist_get:get_max_key(Sentinel#sentinel.first);
+        {ok, Sentinel} -> sliding_proplist_get:get_smallest_key(Sentinel#sentinel.last);
         {error, _} = Error -> Error
     end.
 

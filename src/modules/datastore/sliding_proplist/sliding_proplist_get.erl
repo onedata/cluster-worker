@@ -17,7 +17,7 @@
 -include("modules/datastore/sliding_proplist.hrl").
 
 %% API
--export([fold/4, fold/6, get_elements/3, get_highest_element/1, get_max_key/1]).
+-export([fold/4, fold/6, get_elements/3, get_highest_element/1, get_smallest_key/1]).
 
 
 % This record is used as cache during listing. Holds information where fold should continue.
@@ -72,7 +72,12 @@ fold(#listing_state{
                 stop -> true;
                 continue -> false
             end,
-            {LastListedKey, _} = lists:last(ListedElements),
+            LastListedKey = case NumberOfElementsToTake == 0 of
+                true -> State#listing_state.last_listed_key;
+                false ->
+                    {K, _} = lists:last(ListedElements),
+                    K
+            end,
             fold(State#listing_state{
                 last_node_id = NextStartNodeId,
                 last_node_number = NodeNumber,
@@ -101,8 +106,9 @@ get_elements(undefined, _Keys, _Direction) ->
 get_elements(NodeId, Keys, Direction) ->
     case sliding_proplist_persistence:get_record(NodeId) of
         {ok, Node} ->
-            {Selected, RemainingKeys} = select_elements_from_node(Node, Keys, Direction),
-            case RemainingKeys of
+            {Selected, RemainingKeys} = select_elements_from_node(Node, Keys),
+            FilteredRemainingKeys = filter_keys(Direction, Node, RemainingKeys),
+            case FilteredRemainingKeys of
                 [] -> Selected;
                 _ -> Selected ++ get_elements(
                     select_neighbour(Direction, Node), RemainingKeys, Direction)
@@ -134,12 +140,12 @@ get_highest_element(NodeId) ->
     end.
 
 
--spec get_max_key(undefined | sliding_proplist:node_id()) -> 
+-spec get_smallest_key(undefined | sliding_proplist:node_id()) -> 
     {ok, sliding_proplist:key()} | {error, term()}.
-get_max_key(undefined) -> {error, not_found};
-get_max_key(NodeId) ->
+get_smallest_key(undefined) -> {error, not_found};
+get_smallest_key(NodeId) ->
     case sliding_proplist_persistence:get_record(NodeId) of
-        {ok, Node} -> case sliding_proplist_utils:get_max_key_in_prev_nodes(Node) of
+        {ok, Node} -> case sliding_proplist_utils:get_min_key_in_current_and_newer_nodes(Node) of
             undefined -> {error, not_found};
             Res -> {ok, Res}
         end;
@@ -222,24 +228,21 @@ find_node(State) ->
 %% @private
 -spec apply_fold_fun(fold_fun(), term(), [sliding_proplist:element()]) -> 
     {continue | stop, [term()]}.
-apply_fold_fun(FoldFun, Acc0, OriginalElements) ->
-    lists:foldl(fun
-        (_Elem, {stop, Acc}) -> {stop, Acc};
-        (E, {continue, Acc}) ->
-            case FoldFun(E, Acc) of
-                stop -> {stop, Acc};
-                {ok, Res} -> {continue, Res}
-            end
-    end, {continue, Acc0}, OriginalElements).
+apply_fold_fun(_FoldFun, Acc, []) -> {continue, Acc};
+apply_fold_fun(FoldFun, Acc, [E | Tail]) ->
+    case FoldFun(E, Acc) of
+        stop -> {stop, Acc};
+        {ok, Res} -> apply_fold_fun(FoldFun, Res, Tail)
+    end.
 
 
 %% @private
--spec select_elements_from_node(sliding_proplist:list_node(), [sliding_proplist:key()], 
-    direction()) -> {[sliding_proplist:element()], [sliding_proplist:key()]}.
-select_elements_from_node(#node{elements = Elements} = Node, Keys, Direction) ->
+-spec select_elements_from_node(sliding_proplist:list_node(), [sliding_proplist:key()]) -> 
+    {[sliding_proplist:element()], [sliding_proplist:key()]}.
+select_elements_from_node(#node{elements = Elements}, Keys) ->
     Selected = maps:with(Keys, Elements),
     RemainingKeys = Keys -- maps:keys(Selected),
-    {maps:to_list(Selected), filter_keys(Direction, Node, RemainingKeys)}.
+    {maps:to_list(Selected), RemainingKeys}.
 
 
 %% @private
