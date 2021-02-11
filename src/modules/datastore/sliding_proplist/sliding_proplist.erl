@@ -52,7 +52,7 @@
 %%% In each node there is also value `max_in_older_nodes`. It works similarly to 
 %%% `min_in_newer_nodes` but it represents maximum key in all nodes, that are 
 %%% older (are pointed by `prev`) than this node. 
-%%% It is used to optimize functions finding elements (`get_elements/2`, `get_highest_element/1`) 
+%%% It is used to optimize function finding elements (`get_elements/2`) 
 %%% and also when overwriting existing elements during addition.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -74,7 +74,7 @@
     list_elements/2, list_elements/3,
     fold_elements/4, fold_elements/5, 
     get_elements/2, get_elements/3, 
-    get_highest_element/1, get_smallest_key/1
+    get_smallest_key/1
 ]).
 
 -compile({no_auto_import, [get/1]}).
@@ -188,7 +188,14 @@ list_elements(Id, Size, Direction) when is_binary(Id) and is_atom(Direction) ->
     fold_elements(Id, Size, Direction, ?LIST_FOLD_FUN, []).
 
 
-
+%%--------------------------------------------------------------------
+%% @doc
+%% Folds on elements in a sliding proplist instance. When there is more elements in sliding 
+%% proplist than given Size, returns opaque record which can be used to continue folding. 
+%% If elements where deleted between such folds (and this deletion resulted in nodes 
+%% merging), some elements may be folded on once more.
+%% @end
+%%--------------------------------------------------------------------
 -spec fold_elements(
     id() | sliding_proplist_get:state(), 
     sliding_proplist_get:batch_size(), 
@@ -232,14 +239,6 @@ get_elements(StructureId, Keys, Direction) ->
         {ok, Sentinel} ->
             StartingNodeId = sliding_proplist_utils:get_starting_node_id(Direction, Sentinel), 
             {ok, sliding_proplist_get:get_elements(StartingNodeId, Keys, Direction)};
-        {error, _} = Error -> Error
-    end.
-
-
--spec get_highest_element(id()) -> {ok, element()} | {error, term()}.
-get_highest_element(StructureId) ->
-    case sliding_proplist_persistence:get_record(StructureId) of
-        {ok, Sentinel} -> sliding_proplist_get:get_highest_element(Sentinel#sentinel.first);
         {error, _} = Error -> Error
     end.
 

@@ -17,7 +17,7 @@
 -include("modules/datastore/sliding_proplist.hrl").
 
 %% API
--export([fold/4, fold/6, get_elements/3, get_highest_element/1, get_smallest_key/1]).
+-export([fold/4, fold/6, get_elements/3, get_smallest_key/1]).
 
 
 % This record is used as cache during listing. Holds information where fold should continue.
@@ -46,8 +46,7 @@
 %% API
 %%=====================================================================
 
--spec fold(state() | sliding_proplist:id(), batch_size(), fold_fun(), term()) -> 
-    fold_result() | {error, term()}.
+-spec fold(state() | sliding_proplist:id(), batch_size(), fold_fun(), term()) -> fold_result().
 fold(#listing_state{finished = true}, _Size, _FoldFun, Acc) ->
     {done, Acc};
 fold(#listing_state{last_node_id = undefined}, _Size, _FoldFun, Acc) ->
@@ -84,7 +83,7 @@ fold(#listing_state{
                 last_listed_key = LastListedKey,
                 finished = Finished
             }, Size - NumberOfElementsToTake, FoldFun, Result);
-        {error, _} = Error -> Error
+        {error, not_found} -> {done, Acc}
     end.
 
 
@@ -114,29 +113,6 @@ get_elements(NodeId, Keys, Direction) ->
                     select_neighbour(Direction, Node), RemainingKeys, Direction)
             end;
         {error, not_found} -> []
-    end.
-
-
--spec get_highest_element(undefined | sliding_proplist:node_id()) -> 
-    {ok, sliding_proplist:element()} | {error, term()}.
-get_highest_element(undefined) -> {error, not_found};
-get_highest_element(NodeId) ->
-    case sliding_proplist_persistence:get_record(NodeId) of
-        {ok, Node} ->
-            #node{
-                elements = Elements, 
-                max_in_older_nodes = MaxInOlder, 
-                prev = Prev, 
-                max_in_node = MaxKeyInNode
-            } = Node,
-            case {Prev == undefined, MaxKeyInNode == undefined} of
-                {true, true} -> {error, not_found};
-                {true, false} -> {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
-                {false, false} when MaxKeyInNode > MaxInOlder ->
-                    {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
-                {false, _} -> get_highest_element(Prev)
-            end;
-        {error, _} = Error -> Error
     end.
 
 
@@ -188,8 +164,8 @@ select_not_listed_elements(#listing_state{
 %% @doc
 %% This function returns Node based on information included in ListingState.
 %% If node with given id exists it is returned. If not (it was deleted in 
-%% meantime) first node with number less (greater when listing started from 
-%% last node) than `last_node_num` is returned.
+%% meantime) this function will recursively try to find first node with number 
+%% less (greater when listing started from last node) than `last_node_num`.
 %% @end
 %%--------------------------------------------------------------------
 -spec find_node(#listing_state{}) -> sliding_proplist:list_node() | {error, term()}.
@@ -202,18 +178,19 @@ find_node(State) ->
     } = State,
     case sliding_proplist_persistence:get_record(NodeId) of
         {ok, #node{node_number = NodeNum} = Node}  ->
-            NodeFound = case Direction of
+            NodeHasCorrectNum = case Direction of
                 back_from_newest -> 
                     not (is_integer(LastNodeNum) andalso NodeNum > LastNodeNum);
                 forward_from_oldest -> 
                     not (is_integer(LastNodeNum) andalso NodeNum < LastNodeNum)
             end,
-            case NodeFound of
+            case NodeHasCorrectNum of
                 true -> Node;
                 false ->
-                    find_node(State#listing_state{
-                        last_node_id = select_neighbour(Direction, Node)
-                    })
+                    case select_neighbour(Direction, Node) of
+                        undefined -> {error, not_found};
+                        Neighbour -> find_node(State#listing_state{last_node_id = Neighbour})
+                    end
             end;
         {error, not_found} ->
             {ok, Sentinel} = sliding_proplist_persistence:get_record(StructId),
@@ -256,6 +233,6 @@ filter_keys(forward_from_oldest, #node{min_in_newer_nodes = Min}, Keys) ->
 
 %% @private
 -spec select_neighbour(direction(), sliding_proplist:list_node()) -> 
-    sliding_proplist:node_id().
+    sliding_proplist:node_id() | undefined.
 select_neighbour(back_from_newest, #node{prev = Prev}) -> Prev;
 select_neighbour(forward_from_oldest, #node{next = Next}) -> Next.

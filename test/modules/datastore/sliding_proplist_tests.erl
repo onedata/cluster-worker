@@ -48,12 +48,12 @@ sliding_proplist_test_() ->
             {"test_merge_nodes_during_remove_structure_not_sorted", fun test_merge_nodes_during_remove_structure_not_sorted/0},
             {"test_remove_elements_between_listings", fun test_remove_elements_between_listings/0},
             {"test_merge_nodes_between_listings", fun test_merge_nodes_between_listings/0},
+            {"test_remove_elements_between_listings_no_more_elements_to_list", fun test_remove_elements_between_listings_no_more_elements_to_list/0},
+            {"test_remove_all_elements_between_listings", fun test_remove_all_elements_between_listings/0},
             {"test_get_elements", fun test_get_elements/0},
             {"test_get_elements_structure_not_sorted", fun test_get_elements_structure_not_sorted/0},
             {"test_get_elements_forward_from_oldest", fun test_get_elements_forward_from_oldest/0},
             {"test_get_structure_not_sorted_forward_from_oldest", fun test_get_structure_not_sorted_forward_from_oldest/0},
-            {"test_get_highest", fun test_get_highest/0},
-            {"test_get_highest_structure_not_sorted", fun test_get_highest_structure_not_sorted/0},
             {"test_get_smallest_key", fun test_get_smallest_key/0},
             {"test_get_smallest_key_structure_not_sorted", fun test_get_smallest_key_structure_not_sorted/0},
     
@@ -320,28 +320,20 @@ test_merge_nodes_between_listings() ->
     ?assertMatch({done, Expected}, sliding_proplist:list_elements(ListingState, 100)).
 
 
-test_get_highest() ->
-    ?assertEqual({error, not_found}, sliding_proplist:get_highest_element(<<"dummy_id">>)),
+test_remove_elements_between_listings_no_more_elements_to_list() ->
     {ok, Id} = sliding_proplist:create(10),
-    ?assertEqual({error, not_found}, sliding_proplist:get_highest_element(Id)),
-    sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
-    ?assertEqual({ok, {100, <<"100">>}}, sliding_proplist:get_highest_element(Id)),
-    sliding_proplist:remove_elements(Id, lists:seq(2, 99)),
-    ?assertEqual({ok, {100, <<"100">>}}, sliding_proplist:get_highest_element(Id)),
-    sliding_proplist:remove_elements(Id, [100]),
-    ?assertEqual({ok, {1, <<"1">>}}, sliding_proplist:get_highest_element(Id)),
-    sliding_proplist:remove_elements(Id, [1]),
-    ?assertEqual({error, not_found}, sliding_proplist:get_highest_element(Id)).
+    sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(10, 30)),
+    {more, _, ListingState} = sliding_proplist:list_elements(Id, 18),
+    sliding_proplist:remove_elements(Id, lists:seq(1,20)),
+    ?assertMatch({done, []}, sliding_proplist:list_elements(ListingState, 100)).
 
-    
-test_get_highest_structure_not_sorted() ->
+
+test_remove_all_elements_between_listings() ->
     {ok, Id} = sliding_proplist:create(10),
-    lists:foreach(fun(Elem) ->
-        sliding_proplist:insert_uniquely_sorted_elements(Id, Elem)
-    end, prepare_batch(100, 1, -1)),
-    ?assertEqual({ok, {100, <<"100">>}}, sliding_proplist:get_highest_element(Id)),
-    sliding_proplist:remove_elements(Id, lists:seq(2, 99)),
-    ?assertEqual({ok, {100, <<"100">>}}, sliding_proplist:get_highest_element(Id)).
+    sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(10, 30)),
+    {more, _, ListingState} = sliding_proplist:list_elements(Id, 18),
+    sliding_proplist:remove_elements(Id, lists:seq(1,40)),
+    ?assertMatch({done, []}, sliding_proplist:list_elements(ListingState, 100)).
 
 
 test_get_smallest_key() ->

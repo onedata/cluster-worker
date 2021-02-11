@@ -203,6 +203,7 @@ adjust_current_node_after_deletion(CurrentNode, NewElementsMap, PrevNode) ->
         elements = NewElementsMap,
         prev = PrevNodeId,
         max_in_older_nodes = sliding_proplist_utils:get_max_key_in_current_and_older_nodes(PrevNode),
+        % if previous min/max in node was deleted find a new one
         min_in_node = find_extremum(MinInNode, NewElementsMap, min),
         max_in_node = find_extremum(MaxInNode, NewElementsMap, max)
     }.
@@ -219,10 +220,12 @@ adjust_current_node_after_deletion(CurrentNode, NewElementsMap, PrevNode) ->
 merge_nodes(Sentinel, CurrentNode, PrevNode, ElementsMap) ->
     NewMinInNode = case PrevNode#node.min_in_node < CurrentNode#node.min_in_node of
         true -> PrevNode#node.min_in_node;
+        % if previous min in node was deleted find a new one
         false -> find_extremum(CurrentNode#node.min_in_node, ElementsMap, min)
     end,
     NewMaxInNode = case PrevNode#node.max_in_node > CurrentNode#node.max_in_node of
         true -> PrevNode#node.max_in_node;
+        % if previous max in node was deleted find a new one
         false -> find_extremum(CurrentNode#node.max_in_node, ElementsMap, max)
     end,
     MergedNode = PrevNode#node{
