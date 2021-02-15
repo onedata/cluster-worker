@@ -28,10 +28,11 @@
 %% @doc
 %% Deletes given elements from a sliding proplist instance. 
 %% Elements that were not found are ignored.
+%% Returns list of keys that were not found.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_elements(sliding_proplist:sentinel(), sliding_proplist:list_node(), 
-    [sliding_proplist:key()]) -> {ok, [sliding_proplist:key()]}.
+    [sliding_proplist:key()]) -> NotFoundKeys :: [sliding_proplist:key()].
 delete_elements(Sentinel, LastNode, Elements) ->
     delete_elements_in_nodes(Sentinel, LastNode, Elements, undefined).
 
@@ -47,34 +48,29 @@ delete_elements(Sentinel, LastNode, Elements) ->
     [sliding_proplist:key()], 
     PrevNode :: undefined | sliding_proplist:list_node()
 ) -> 
-    {ok, [sliding_proplist:key()]}.
+    NotFoundKeys :: [sliding_proplist:key()].
 delete_elements_in_nodes(_Sentinel, undefined, KeysToDelete, _PrevNode) ->
-    {ok, KeysToDelete};
+    KeysToDelete;
 delete_elements_in_nodes(_Sentinel, _CurrentNode, [], _PrevNode) ->
-    {ok, []};
+    [];
+delete_elements_in_nodes(Sentinel, CurrentNodeId, ElementsToDelete, PrevNode) when is_binary(CurrentNodeId)->
+    {ok, CurrentNode} = sliding_proplist_persistence:get_record(CurrentNodeId),
+    delete_elements_in_nodes(Sentinel, CurrentNode, ElementsToDelete, PrevNode);
 delete_elements_in_nodes(Sentinel, #node{} = CurrentNode, KeysToDelete, PrevNode) ->
-    #sentinel{max_elements_per_node = MaxElementsPerNode} = Sentinel,
     #node{elements = ElementsBeforeDeletion, next = NextNodeId} = CurrentNode,
     ElementsAfterDelete = maps:without(KeysToDelete, ElementsBeforeDeletion),
-    ElementsInPreviousNode = case PrevNode of
-        undefined  -> #{};
-        _ -> PrevNode#node.elements
-    end,
     NewKeysToDelete = KeysToDelete -- maps:keys(ElementsBeforeDeletion),
     {UpdatedCurrentNode, NextNodeOrId} = case maps:size(ElementsAfterDelete) == 0 of
         true ->
             delete_node(Sentinel, CurrentNode, NextNodeId, PrevNode);
         false ->
-            ShouldMergeNodes = PrevNode =/= undefined andalso
-                maps:size(ElementsInPreviousNode) + maps:size(ElementsAfterDelete) =< 0.5 * MaxElementsPerNode,
-            case ShouldMergeNodes of
+            case should_merge_nodes(Sentinel, ElementsAfterDelete, PrevNode) of
                 true ->
-                    MergedNode = merge_nodes(
-                        Sentinel, CurrentNode, PrevNode, maps:merge(ElementsInPreviousNode, ElementsAfterDelete)),
-                    NextNode = update_next_node_pointer(NextNodeId, MergedNode#node.node_id),
+                    MergedNode = merge_nodes(Sentinel, CurrentNode, PrevNode, ElementsAfterDelete),
+                    NextNode = set_prev_pointer_in_node(NextNodeId, MergedNode#node.node_id),
                     {MergedNode, NextNode};
                 false -> 
-                    {adjust_current_node_after_deletion(CurrentNode, ElementsAfterDelete, PrevNode), NextNodeId}
+                    {adjust_node_after_elements_deletion(CurrentNode, ElementsAfterDelete, PrevNode), NextNodeId}
             end
     end,
      % UpdatedCurrentNode is undefined, if CurrentNode was the last one in the structure and it was deleted
@@ -82,31 +78,27 @@ delete_elements_in_nodes(Sentinel, #node{} = CurrentNode, KeysToDelete, PrevNode
         sliding_proplist_persistence:save_record(UpdatedCurrentNode#node.node_id, UpdatedCurrentNode),
     ShouldStop = NewKeysToDelete == [] orelse 
         (UpdatedCurrentNode =/= undefined andalso 
-            UpdatedCurrentNode#node.min_in_newer_nodes > lists:max(NewKeysToDelete)),
+            UpdatedCurrentNode#node.min_key_in_newer_nodes > lists:max(NewKeysToDelete)),
     case ShouldStop of
         true -> 
-            MaxInOlderBefore = sliding_proplist_utils:get_max_key_in_current_and_older_nodes(CurrentNode),
             case UpdatedCurrentNode of
                 undefined ->
                     % this will always save updated next node
-                    ok = sliding_proplist_utils:adjust_max_in_older(NextNodeOrId, undefined);
-                _ -> 
-                    handle_deletion_finished(UpdatedCurrentNode, PrevNode, MaxInOlderBefore),
+                    ok = sliding_proplist_utils:adjust_max_key_in_older_nodes(NextNodeOrId, undefined);
+                _ ->
+                    handle_deletion_finished(UpdatedCurrentNode, PrevNode, 
+                        sliding_proplist_utils:get_max_key_in_current_and_older_nodes(CurrentNode)),
                     % save next node if it was updated
                     case NextNodeOrId of
                         #node{} -> sliding_proplist_persistence:save_record(NextNodeId, NextNodeOrId);
                         _ -> ok
                 end
             end,
-            {ok, NewKeysToDelete};
+            NewKeysToDelete;
         false ->
             delete_elements_in_nodes(Sentinel, NextNodeOrId, NewKeysToDelete, UpdatedCurrentNode)
-    end;
-delete_elements_in_nodes(Sentinel, CurrentNodeId, ElementsToDelete, PrevNode) when is_binary(CurrentNodeId)->
-    {ok, CurrentNode} = sliding_proplist_persistence:get_record(CurrentNodeId),
-    delete_elements_in_nodes(Sentinel, CurrentNode, ElementsToDelete, PrevNode).
-
-
+    end.
+    
 %% @private
 -spec delete_node(
     sliding_proplist:sentinel(), 
@@ -128,7 +120,7 @@ delete_node(Sentinel, #node{node_id = NodeId}, undefined, #node{node_id = PrevNo
     % deleting first node
     sliding_proplist_persistence:save_record(Sentinel#sentinel.structure_id, 
         Sentinel#sentinel{first = PrevNodeId}),
-    UpdatedPrevNode = PrevNode#node{min_in_newer_nodes = undefined, next = undefined},
+    UpdatedPrevNode = PrevNode#node{min_key_in_newer_nodes = undefined, next = undefined},
     sliding_proplist_persistence:delete_record(NodeId),
     {UpdatedPrevNode, undefined};
 delete_node(Sentinel, #node{node_id = NodeId}, NextNodeId, undefined) ->
@@ -146,25 +138,19 @@ delete_node(_Sentinel, #node{node_id = NodeId} = CurrentNode, NextNodeId, PrevNo
     },
     UpdatedPrevNode = PrevNode#node{
         next = NextNodeId,
-        min_in_newer_nodes = CurrentNode#node.min_in_newer_nodes
+        min_key_in_newer_nodes = CurrentNode#node.min_key_in_newer_nodes
     },
     sliding_proplist_persistence:delete_record(NodeId),
     {UpdatedPrevNode, UpdatedNextNode}.
 
 
+%%--------------------------------------------------------------------
 %% @private
--spec update_next_node_pointer(sliding_proplist:node_id() | undefined, sliding_proplist:node_id()) -> 
-    sliding_proplist:list_node() | undefined.
-update_next_node_pointer(undefined, _CurrentNodeId) ->
-    undefined;
-update_next_node_pointer(NextNodeId, CurrentNodeId) ->
-    {ok, NextNode} = sliding_proplist_persistence:get_record(NextNodeId),
-    NextNode#node{
-        prev = CurrentNodeId
-    }.
-
-
-%% @private
+%% @doc
+%% Updates `min_in_newer_nodes` and `max_in_older_nodes` parameters in nodes, 
+%% where it is no longer valid.
+%% @end
+%%--------------------------------------------------------------------
 -spec handle_deletion_finished(sliding_proplist:list_node(), 
     sliding_proplist:list_node() | undefined, sliding_proplist:key()) -> ok.
 handle_deletion_finished(
@@ -178,23 +164,23 @@ handle_deletion_finished(
             N
     end,
     handle_deletion_finished(Node, PrevNode, MaxInOlderBefore);
-handle_deletion_finished(CurrentNode, PrevNode, MaxInOlderBefore) ->
-    #node{min_in_newer_nodes = MinInNewer, elements = Elements, next = Next} = CurrentNode,
-    Min = lists:min([MinInNewer | maps:keys(Elements)]),
+handle_deletion_finished(CurrentNode, PrevNode, MaxInCurrentAndOlderBefore) ->
+    #node{min_key_in_newer_nodes = MinInNewer, min_key_in_node = MinInNode, next = Next} = CurrentNode,
+    Min = min(MinInNewer, MinInNode),
     PrevNode =/= undefined andalso 
-        sliding_proplist_utils:adjust_min_in_newer(PrevNode#node.node_id, Min, true),
+        sliding_proplist_utils:adjust_min_key_in_newer_nodes(PrevNode#node.node_id, Min, true),
     % if MaxInOlder did not change, there is no need to update this value in the next nodes
     case sliding_proplist_utils:get_max_key_in_current_and_older_nodes(CurrentNode) of
-        MaxInOlderBefore -> ok;
-        CurrentMax -> sliding_proplist_utils:adjust_max_in_older(Next, CurrentMax)
+        MaxInCurrentAndOlderBefore -> ok;
+        CurrentMax -> sliding_proplist_utils:adjust_max_key_in_older_nodes(Next, CurrentMax)
     end.
 
 
 %% @private
--spec adjust_current_node_after_deletion(sliding_proplist:list_node(), sliding_proplist:elements_map(), 
+-spec adjust_node_after_elements_deletion(sliding_proplist:list_node(), sliding_proplist:elements_map(), 
     sliding_proplist:list_node() | undefined) -> sliding_proplist:list_node().
-adjust_current_node_after_deletion(CurrentNode, NewElementsMap, PrevNode) ->
-    #node{min_in_node = MinInNode, max_in_node = MaxInNode} = CurrentNode,
+adjust_node_after_elements_deletion(CurrentNode, NewElementsMap, PrevNode) ->
+    #node{min_key_in_node = MinInNode, max_key_in_node = MaxInNode} = CurrentNode,
     PrevNodeId = case PrevNode of
         undefined -> undefined;
         #node{} -> PrevNode#node.node_id
@@ -202,11 +188,22 @@ adjust_current_node_after_deletion(CurrentNode, NewElementsMap, PrevNode) ->
     CurrentNode#node{
         elements = NewElementsMap,
         prev = PrevNodeId,
-        max_in_older_nodes = sliding_proplist_utils:get_max_key_in_current_and_older_nodes(PrevNode),
+        max_key_in_older_nodes = sliding_proplist_utils:get_max_key_in_current_and_older_nodes(PrevNode),
         % if previous min/max in node was deleted find a new one
-        min_in_node = find_extremum(MinInNode, NewElementsMap, min),
-        max_in_node = find_extremum(MaxInNode, NewElementsMap, max)
+        min_key_in_node = find_extremum(MinInNode, NewElementsMap, min),
+        max_key_in_node = find_extremum(MaxInNode, NewElementsMap, max)
     }.
+
+
+%% @private
+-spec should_merge_nodes(sliding_proplist:sentinel(), sliding_proplist:elements_map(), 
+    undefined | sliding_proplist:list_node()) -> boolean().
+should_merge_nodes(_Sentinel, _ElementsAfterDelete, undefined) ->
+    false;
+should_merge_nodes(Sentinel, ElementsAfterDelete, PrevNode) ->
+    #sentinel{max_elements_per_node = MaxElementsPerNode} = Sentinel,
+    #node{elements = ElementsInPrevNode} = PrevNode,
+    maps:size(ElementsInPrevNode) + maps:size(ElementsAfterDelete) =< 0.5 * MaxElementsPerNode.
 
 
 %% @private
@@ -217,23 +214,24 @@ adjust_current_node_after_deletion(CurrentNode, NewElementsMap, PrevNode) ->
     sliding_proplist:elements_map()
 ) -> 
     sliding_proplist:list_node().
-merge_nodes(Sentinel, CurrentNode, PrevNode, ElementsMap) ->
-    NewMinInNode = case PrevNode#node.min_in_node < CurrentNode#node.min_in_node of
-        true -> PrevNode#node.min_in_node;
+merge_nodes(Sentinel, CurrentNode, #node{elements = ElementsMapInPrevNode} = PrevNode, ElementsMap) ->
+    MergedElementsMaps = maps:merge(ElementsMapInPrevNode, ElementsMap),
+    NewMinInNode = case PrevNode#node.min_key_in_node < CurrentNode#node.min_key_in_node of
+        true -> PrevNode#node.min_key_in_node;
         % if previous min in node was deleted find a new one
-        false -> find_extremum(CurrentNode#node.min_in_node, ElementsMap, min)
+        false -> find_extremum(CurrentNode#node.min_key_in_node, ElementsMap, min)
     end,
-    NewMaxInNode = case PrevNode#node.max_in_node > CurrentNode#node.max_in_node of
-        true -> PrevNode#node.max_in_node;
+    NewMaxInNode = case PrevNode#node.max_key_in_node > CurrentNode#node.max_key_in_node of
+        true -> PrevNode#node.max_key_in_node;
         % if previous max in node was deleted find a new one
-        false -> find_extremum(CurrentNode#node.max_in_node, ElementsMap, max)
+        false -> find_extremum(CurrentNode#node.max_key_in_node, ElementsMap, max)
     end,
     MergedNode = PrevNode#node{
-        elements = ElementsMap,
+        elements = MergedElementsMaps,
         next = CurrentNode#node.next,
-        min_in_newer_nodes = CurrentNode#node.min_in_newer_nodes,
-        min_in_node = NewMinInNode,
-        max_in_node = NewMaxInNode
+        min_key_in_newer_nodes = CurrentNode#node.min_key_in_newer_nodes,
+        min_key_in_node = NewMinInNode,
+        max_key_in_node = NewMaxInNode
     },
     % if this is the first node, modify sentinel
     CurrentNode#node.next == undefined andalso 
@@ -243,6 +241,18 @@ merge_nodes(Sentinel, CurrentNode, PrevNode, ElementsMap) ->
         ),
     sliding_proplist_persistence:delete_record(CurrentNode#node.node_id),
     MergedNode.
+
+
+%% @private
+-spec set_prev_pointer_in_node(sliding_proplist:node_id() | undefined, sliding_proplist:node_id()) ->
+    sliding_proplist:list_node() | undefined.
+set_prev_pointer_in_node(undefined, _ValueToSet) ->
+    undefined;
+set_prev_pointer_in_node(NodeId, ValueToSet) ->
+    {ok, Node} = sliding_proplist_persistence:get_record(NodeId),
+    Node#node{
+        prev = ValueToSet
+    }.
 
 
 %% @private

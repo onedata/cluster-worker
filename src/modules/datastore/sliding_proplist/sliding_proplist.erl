@@ -77,8 +77,6 @@
     get_smallest_key/1
 ]).
 
--compile({no_auto_import, [get/1]}).
-
 % id of a sliding proplist instance.
 -type id() :: binary().
 % id of individual node in a sliding proplist
@@ -92,7 +90,7 @@
 % Each new node have number exactly 1 higher than previous first one. 
 % Because of that number of next node is always higher that number of prev node.
 -type node_number() :: non_neg_integer().
--type elements_map() :: #{sliding_proplist:key() => sliding_proplist:value()}.
+-type elements_map() :: #{key() => value()}.
 
 -type sentinel() :: #sentinel{}.
 -type list_node() :: #node{}.
@@ -137,8 +135,8 @@ insert_uniquely_sorted_elements(StructureId, Elements) ->
     case sliding_proplist_persistence:get_record(StructureId) of
         {ok, #sentinel{first = FirstNodeId} = Sentinel} ->
             {ok, UpdatedSentinel, FirstNode} = fetch_or_create_first_node(Sentinel, FirstNodeId),
-            sliding_proplist_add:insert_elements(
-                UpdatedSentinel, FirstNode, utils:ensure_list(Elements));
+            {ok, sliding_proplist_add:insert_elements(
+                UpdatedSentinel, FirstNode, utils:ensure_list(Elements))};
         {error, _} = Error -> Error
     end.
 
@@ -157,8 +155,8 @@ remove_elements(StructureId, Elements) ->
         {ok, #sentinel{last = undefined}} -> ok;
         {ok, #sentinel{last = Last} = Sentinel} ->
             {ok, LastNode} = sliding_proplist_persistence:get_record(Last),
-            sliding_proplist_delete:delete_elements(
-                Sentinel, LastNode, utils:ensure_list(Elements));
+            {ok, sliding_proplist_delete:delete_elements(
+                Sentinel, LastNode, utils:ensure_list(Elements))};
         {error, _} = Error -> Error
     end.
 
@@ -200,7 +198,7 @@ list_elements(Id, Size, Direction) when is_binary(Id) and is_atom(Direction) ->
     id() | sliding_proplist_get:state(), 
     sliding_proplist_get:batch_size(), 
     sliding_proplist_get:fold_fun(), 
-    term()
+    sliding_proplist_get:acc()
 ) ->
     sliding_proplist_get:fold_result() | {error, term()}.
 fold_elements(Id, Size, FoldFun, Acc0) when is_binary(Id) and is_function(FoldFun, 2) ->
@@ -209,7 +207,8 @@ fold_elements(State, Size, FoldFun, Acc0) when is_function(FoldFun, 2) ->
     sliding_proplist_get:fold(State, Size, FoldFun, Acc0).
 
 -spec fold_elements(id(), sliding_proplist_get:batch_size(), sliding_proplist_get:direction(), 
-    sliding_proplist_get:fold_fun(), term()) -> sliding_proplist_get:fold_result() | {error, term()}.
+    sliding_proplist_get:fold_fun(), sliding_proplist_get:acc()) -> 
+    sliding_proplist_get:fold_result() | {error, term()}.
 fold_elements(Id, Size, Direction, FoldFun, Acc0) when is_binary(Id) ->
     case sliding_proplist_persistence:get_record(Id) of
         {ok, #sentinel{} = Sentinel} ->
@@ -221,7 +220,7 @@ fold_elements(Id, Size, Direction, FoldFun, Acc0) when is_binary(Id) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Retrieves elements value from the sliding proplist instance. 
+%% Retrieves elements from the sliding proplist instance. 
 %% There is no guarantee about returned elements order.
 %% @end
 %%--------------------------------------------------------------------

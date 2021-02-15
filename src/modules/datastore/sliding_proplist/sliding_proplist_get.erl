@@ -33,14 +33,15 @@
     finished = false :: boolean()
 }).
 
--type fold_fun() :: fun((sliding_proplist:element(), term()) -> {ok, term()} | stop).
+-type acc() :: term().
+-type fold_fun() :: fun((sliding_proplist:element(), acc()) -> {ok, acc()} | stop).
 -type direction() :: back_from_newest | forward_from_oldest.
 -type batch_size() :: non_neg_integer().
 -type fold_result(Acc) :: {more, Acc, state()} | {done, Acc}.
--type fold_result() :: fold_result(term()).
+-type fold_result() :: fold_result(acc()).
 -opaque state() :: #listing_state{}.
 
--export_type([fold_fun/0, direction/0, batch_size/0, fold_result/0, fold_result/1, state/0]).
+-export_type([fold_fun/0, acc/0, direction/0, batch_size/0, fold_result/0, fold_result/1, state/0]).
 
 %%=====================================================================
 %% API
@@ -106,7 +107,7 @@ get_elements(NodeId, Keys, Direction) ->
     case sliding_proplist_persistence:get_record(NodeId) of
         {ok, Node} ->
             {Selected, RemainingKeys} = select_elements_from_node(Node, Keys),
-            FilteredRemainingKeys = filter_keys(Direction, Node, RemainingKeys),
+            FilteredRemainingKeys = filter_out_not_existing_keys(Direction, Node, RemainingKeys),
             case FilteredRemainingKeys of
                 [] -> Selected;
                 _ -> Selected ++ get_elements(
@@ -204,7 +205,7 @@ find_node(State) ->
 
 %% @private
 -spec apply_fold_fun(fold_fun(), term(), [sliding_proplist:element()]) -> 
-    {continue | stop, [term()]}.
+    {continue | stop, [acc()]}.
 apply_fold_fun(_FoldFun, Acc, []) -> {continue, Acc};
 apply_fold_fun(FoldFun, Acc, [E | Tail]) ->
     case FoldFun(E, Acc) of
@@ -223,11 +224,11 @@ select_elements_from_node(#node{elements = Elements}, Keys) ->
 
 
 %% @private
--spec filter_keys(direction(), sliding_proplist:list_node(), [sliding_proplist:key()]) -> 
+-spec filter_out_not_existing_keys(direction(), sliding_proplist:list_node(), [sliding_proplist:key()]) -> 
     [sliding_proplist:key()].
-filter_keys(back_from_newest, #node{max_in_older_nodes = Max}, Keys) ->
+filter_out_not_existing_keys(back_from_newest, #node{max_key_in_older_nodes = Max}, Keys) ->
     [Key || Key <- Keys, Key =< Max];
-filter_keys(forward_from_oldest, #node{min_in_newer_nodes = Min}, Keys) ->
+filter_out_not_existing_keys(forward_from_oldest, #node{min_key_in_newer_nodes = Min}, Keys) ->
     [Key || Key <- Keys, Key >= Min].
 
 
