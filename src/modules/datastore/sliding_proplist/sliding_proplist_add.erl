@@ -135,7 +135,7 @@ fill_node_with_unique_elements(#node{} = Node, AllElementsToAdd,  MaxElementsPer
             case maps:size(ElementsInNode) > 0 of
                 true -> 
                     ok = sliding_proplist_utils:adjust_min_key_in_newer_nodes(
-                        UpdatedNode#node.prev, MinInBatch, false);
+                        UpdatedNode#node.prev, MinInBatch, basic);
                 false -> ok
             end
     end, 

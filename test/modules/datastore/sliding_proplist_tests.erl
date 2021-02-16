@@ -69,11 +69,11 @@ sliding_proplist_test_() ->
             {"nodes_after_remove_elements_from_last_node", fun nodes_after_remove_elements_from_last_node/0},
             {"min_in_newer_after_remove_elements", fun min_in_newer_after_remove_elements/0},
             {"max_in_older_after_remove_elements", fun max_in_older_after_remove_elements/0},
-            {"min_in_node", fun min_in_node/0},
-            {"min_in_node_after_remove_elements", fun min_in_node_after_remove_elements/0},
-            {"max_in_node", fun max_in_node/0},
-            {"max_in_node_after_remove_elements", fun max_in_node_after_remove_elements/0},
-            {"min_max_in_node_after_remove_elements_merge_nodes", fun min_max_in_node_after_remove_elements_merge_nodes/0}
+            {"min_key_in_node", fun min_key_in_node/0},
+            {"min_key_in_node_after_remove_elements", fun min_key_in_node_after_remove_elements/0},
+            {"max_key_in_node", fun max_key_in_node/0},
+            {"max_key_in_node_after_remove_elements", fun max_key_in_node_after_remove_elements/0},
+            {"min_max_key_in_node_after_remove_elements_merge_nodes", fun min_max_key_in_node_after_remove_elements_merge_nodes/0}
         ]
     }.
 
@@ -575,7 +575,7 @@ max_in_older_after_remove_elements() ->
     end, lists:zip(NodesIds, ExpectedMaxInOlder)).
 
 
-min_in_node() ->
+min_key_in_node() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
@@ -586,7 +586,7 @@ min_in_node() ->
     end, lists:zip(NodesIds, ExpectedMinsInNode)).
 
 
-min_in_node_after_remove_elements() ->
+min_key_in_node_after_remove_elements() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
@@ -598,7 +598,7 @@ min_in_node_after_remove_elements() ->
     end, lists:zip(NodesIds, ExpectedMinsInNode)).
 
 
-max_in_node() ->
+max_key_in_node() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
@@ -609,7 +609,7 @@ max_in_node() ->
     end, lists:zip(NodesIds, ExpectedMaxsInNode)).
 
 
-max_in_node_after_remove_elements() ->
+max_key_in_node_after_remove_elements() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_record(Id),
@@ -621,7 +621,7 @@ max_in_node_after_remove_elements() ->
     end, lists:zip(NodesIds, ExpectedMaxsInNode)).
 
 
-min_max_in_node_after_remove_elements_merge_nodes() ->
+min_max_key_in_node_after_remove_elements_merge_nodes() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_uniquely_sorted_elements(Id, prepare_batch(1, 100)),
     sliding_proplist:remove_elements(Id, lists:seq(1, 100) -- [8]),

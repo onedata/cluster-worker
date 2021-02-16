@@ -147,7 +147,7 @@ delete_node(_Sentinel, #node{node_id = NodeId} = CurrentNode, NextNodeId, PrevNo
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Updates `min_in_newer_nodes` and `max_in_older_nodes` parameters in nodes, 
+%% Updates `min_key_in_newer_nodes` and `max_key_in_older_nodes` parameters in nodes, 
 %% where it is no longer valid.
 %% @end
 %%--------------------------------------------------------------------
@@ -168,7 +168,10 @@ handle_deletion_finished(CurrentNode, PrevNode, MaxInCurrentAndOlderBefore) ->
     #node{min_key_in_newer_nodes = MinInNewer, min_key_in_node = MinInNode, next = Next} = CurrentNode,
     Min = min(MinInNewer, MinInNode),
     PrevNode =/= undefined andalso 
-        sliding_proplist_utils:adjust_min_key_in_newer_nodes(PrevNode#node.node_id, Min, true),
+        % As deletion starts from oldest node continuing to newer ones and minimal key in 
+        % newer nodes might be deleted after node have been processed, `check_to_the_end` 
+        % strategy needs to be used.
+        sliding_proplist_utils:adjust_min_key_in_newer_nodes(PrevNode#node.node_id, Min, check_to_the_end),
     % if MaxInOlder did not change, there is no need to update this value in the next nodes
     case sliding_proplist_utils:get_max_key_in_current_and_older_nodes(CurrentNode) of
         MaxInCurrentAndOlderBefore -> ok;

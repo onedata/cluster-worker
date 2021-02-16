@@ -42,15 +42,15 @@
 %%% resulting structure after deletions, as it would require additional fetch 
 %%% of next node.
 %%%
-%%% Each node stores also value `min_in_newer_nodes`. It represents minimal key 
+%%% Each node stores also value `min_key_in_newer_nodes`. It represents minimal key 
 %%% in all nodes, that are newer (are pointed by `next`) than this node. 
 %%% It is used during deletion  - it allows to determine whether it is 
 %%% necessary to fetch next nodes and allows to finish deletion without 
 %%% traversing all list nodes. This is why it is optimal to have 
 %%% increasing keys.
 %%%
-%%% In each node there is also value `max_in_older_nodes`. It works similarly to 
-%%% `min_in_newer_nodes` but it represents maximum key in all nodes, that are 
+%%% In each node there is also value `max_key_in_older_nodes`. It works similarly to 
+%%% `min_key_in_newer_nodes` but it represents maximum key in all nodes, that are 
 %%% older (are pointed by `prev`) than this node. 
 %%% It is used to optimize function finding elements (`get_elements/2`) 
 %%% and also when overwriting existing elements during addition.

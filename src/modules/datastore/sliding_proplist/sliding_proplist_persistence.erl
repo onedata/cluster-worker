@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-% fixme This module will be reworked during integration with datastore
+%%% @TODO VFS-7245 This module will be reworked during integration with datastore
 %%% @end
 %%%-------------------------------------------------------------------
 -module(sliding_proplist_persistence).
@@ -16,7 +16,7 @@
 -include_lib("ctool/include/errors.hrl").
 
 %% API
-% fixme remove after integration with datastore as ets init will be no longer needed 
+%%% @TODO VFS-7245 remove after integration with datastore as ets init will be no longer needed 
 -export([init/0, destroy_ets/0]).
 -export([get_record/1, save_record/2, delete_record/1]). 
 
