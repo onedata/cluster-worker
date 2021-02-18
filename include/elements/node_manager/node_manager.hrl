@@ -17,7 +17,7 @@
 %% It holds the status of connection to cluster manager.
 -record(state, {
     cm_con_status = not_connected :: not_connected | connected | registered,
-    initialized = {false, 0} :: true | {false, TriesNum :: non_neg_integer()},
+    cluster_ready = false :: boolean(),
     monitoring_state = undefined :: monitoring:node_monitoring_state(),
     scheduler_info = undefined :: undefined | list(),
     task_control = false,
