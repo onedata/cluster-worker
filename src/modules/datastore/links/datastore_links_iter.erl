@@ -562,8 +562,8 @@ process_link(Fun, Acc, Link = #link{tree_id = TreeId, name = Name}, Opts = #{
     case Fun(Link, Acc) of
         {ok, Acc} -> {ok, {Acc, Opts2}};
         {ok, _} -> {ok, {Acc, Opts2#{offset => Offset - 1}}};
-        {{stop, Acc2}, _} -> {ok, {Acc2, Opts2#{offset => 0, size => 0}}};
-        {{error, Reason}, _} -> {error, Reason}
+        {stop, Acc2} -> {ok, {Acc2, Opts2#{offset => 0, size => 0}}};
+        {error, Reason} -> {error, Reason}
     end;
 process_link(Fun, Acc, Link = #link{tree_id = TreeId, name = Name}, Opts) ->
     Opts2 = Opts#{
