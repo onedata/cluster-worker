@@ -552,19 +552,15 @@ process_link(_, Acc, #link{tree_id = TreeId, name = Name}, Opts = #{
     prev_link_name := PrevName
 }) when TreeId =< PrevTreeId andalso Name =< PrevName ->
     {ok, {Acc, Opts}};
-process_link(Fun, Acc, Link = #link{tree_id = TreeId, name = Name}, Opts = #{
+process_link(_Fun, Acc, #link{tree_id = TreeId, name = Name}, Opts = #{
     offset := Offset
 }) when Offset > 0 ->
     Opts2 = Opts#{
         prev_tree_id => TreeId,
-        prev_link_name => Name
+        prev_link_name => Name,
+        offset => Offset - 1
     },
-    case Fun(Link, Acc) of
-        {ok, Acc} -> {ok, {Acc, Opts2}};
-        {ok, _} -> {ok, {Acc, Opts2#{offset => Offset - 1}}};
-        {{stop, Acc2}, _} -> {ok, {Acc2, Opts2#{offset => 0, size => 0}}};
-        {{error, Reason}, _} -> {error, Reason}
-    end;
+    {ok, {Acc, Opts2}};
 process_link(Fun, Acc, Link = #link{tree_id = TreeId, name = Name}, Opts) ->
     Opts2 = Opts#{
         prev_tree_id => TreeId,
