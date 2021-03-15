@@ -35,7 +35,8 @@
 -export([single_error_log/2, single_error_log/3, single_error_log/4,
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
--export([get_cluster_status/0, get_cluster_status/1, get_cluster_ips/0]).
+-export([are_db_and_workers_ready/0, get_cluster_status/0, get_cluster_status/1]).
+-export([get_cluster_ips/0]).
 -export([reschedule_service_healthcheck/4]).
 
 %% gen_server callbacks
@@ -408,6 +409,9 @@ handle_call(healthcheck, _From, State) ->
 handle_call({healthcheck, Component}, _From, State) ->
     {reply, perform_healthcheck(Component, State), State};
 
+handle_call(are_db_and_workers_ready, _From, State) ->
+    {reply, State#state.db_and_workers_ready, State};
+
 handle_call(disable_task_control, _From, State) ->
     {reply, ok, State#state{task_control = false}};
 
@@ -462,8 +466,11 @@ handle_cast(?INIT_STEP_MSG(Step), State) ->
     end,
     {noreply, State};
 
-handle_cast(node_initialized, State) ->
-    {noreply, State#state{initialized = true}};
+handle_cast(report_db_and_workers_ready, State) ->
+    {noreply, State#state{db_and_workers_ready = true}};
+
+handle_cast(report_cluster_ready, State) ->
+    {noreply, State#state{cluster_ready = true}};
 
 handle_cast(configure_throttling, #state{throttling = true} = State) ->
     try
@@ -776,6 +783,7 @@ cluster_init_step(?START_CUSTOM_WORKERS) ->
     ?info("Custom workers started successfully"),
     ok;
 cluster_init_step(?DB_AND_WORKERS_READY) ->
+    gen_server2:cast(?NODE_MANAGER_NAME, report_db_and_workers_ready),
     ?info("Database and workers ready - executing 'on_db_and_workers_ready' procedures..."),
     % the procedures require calls to node manager, hence they are processed asynchronously
     spawn(fun() ->
@@ -798,7 +806,7 @@ cluster_init_step(?START_LISTENERS) ->
     end, node_manager:listeners());
 cluster_init_step(?CLUSTER_READY) ->
     ?info("Cluster initialized successfully"),
-    gen_server2:cast(?NODE_MANAGER_NAME, node_initialized),
+    gen_server2:cast(?NODE_MANAGER_NAME, report_cluster_ready),
     ok.
 
 %%--------------------------------------------------------------------
@@ -862,7 +870,7 @@ upgrade_cluster(CurrentGen, _InstalledGen, _OldestKnownGen) ->
     cluster_status:status() | [{module(), cluster_status:status()}].
 perform_healthcheck(cluster_manager_connection, #state{cm_con_status = connected}) -> ok;
 perform_healthcheck(cluster_manager_connection, _State) -> out_of_sync;
-perform_healthcheck(node_manager, #state{cm_con_status = connected, initialized = true}) -> ok;
+perform_healthcheck(node_manager, #state{cm_con_status = connected, cluster_ready = true}) -> ok;
 perform_healthcheck(node_manager, _State) -> out_of_sync;
 perform_healthcheck(dispatcher, _) -> gen_server2:call(?DISPATCHER_NAME, healthcheck);
 perform_healthcheck(workers, _) ->
@@ -1307,6 +1315,19 @@ get_ip_address() ->
         undefined -> {127, 0, 0, 1}; % should be overriden by onepanel during deployment
         _ -> {127, 0, 0, 1}
     end.
+
+
+-spec are_db_and_workers_ready() -> boolean().
+are_db_and_workers_ready() ->
+    % cache only the positive result as after the first initialization
+    % this does not change anymore
+    {ok, Result} = node_cache:acquire({?MODULE, ?FUNCTION_NAME}, fun() ->
+        case gen_server2:call(?NODE_MANAGER_NAME, are_db_and_workers_ready) of
+            true -> {ok, true, infinity};
+            false -> {ok, false, 0}
+        end
+    end),
+    Result.
 
 
 %%--------------------------------------------------------------------
