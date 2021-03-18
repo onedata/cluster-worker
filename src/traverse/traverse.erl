@@ -932,8 +932,10 @@ clasiffy_tasks_to_restart_and_cancel(TaskIdToCtxMap, JobsPerTask, PoolName, Call
     pool(), callback_module(), node()) -> ok.
 clean_tasks_and_jobs(TaskIdToCtxMap, JobsPerTask, TasksToCancel, JobsWitoutCtx, PoolName, CallbackModule, Node) ->
     lists:foreach(fun(TaskId) ->
-        ExtendedCtx = maps:get(TaskId, TaskIdToCtxMap),
-        traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, true),
+        case maps:get(TaskId, TaskIdToCtxMap) of
+            ctx_not_found -> traverse_task:finish(traverse_task:get_ctx(), PoolName, CallbackModule, TaskId, true);
+            ExtendedCtx -> traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, true)
+        end,
 
         clean_jobs(maps:get(TaskId, JobsPerTask, []), PoolName, CallbackModule, Node)
     end, TasksToCancel),
