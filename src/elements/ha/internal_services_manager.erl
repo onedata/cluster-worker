@@ -66,8 +66,8 @@ start_service(Module, ServiceName, NodeSelector, ServiceDescription) ->
     case rpc:call(HandlingNode, ?MODULE, start_service_locally, [MasterNode, Module, ServiceName, ServiceDescription]) of
         ok -> ok;
         aborted -> aborted;
-        {badrpc, Reason} -> throw(Reason);
-        {error, Reason} -> throw(Reason)
+        {badrpc, Reason} -> error(Reason);
+        {error, Reason} -> error(Reason)
     end.
 
 -spec reschedule_healthcheck(module(), internal_service:service_name(), node_selector(),
