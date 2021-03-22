@@ -36,6 +36,7 @@
 -type ctx() :: datastore:ctx().
 -type record() :: #traverse_task{}.
 -type doc() :: datastore_doc:doc(record()).
+-type finish_mode() :: graceful | force.
 
 -export_type([ctx/0, doc/0]).
 
@@ -173,7 +174,7 @@ schedule_for_local_execution(Pool, TaskId, #document{value = #traverse_task{
     ok = traverse_tasks_scheduler:register_group(Pool, GroupId).
 
 
--spec finish(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), boolean(), boolean()) ->
+-spec finish(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), boolean(), finish_mode()) ->
     ok | {error, term()}.
 finish(ExtendedCtx, Pool, CallbackModule, TaskId, Cancel, ForceCancel) ->
     {ok, Timestamp} = get_timestamp(CallbackModule),
@@ -191,20 +192,20 @@ finish(ExtendedCtx, Pool, CallbackModule, TaskId, Cancel, ForceCancel) ->
     end,
 
     case {datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskId), Diff), ForceCancel} of
-        {{ok, #document{value = #traverse_task{start_time = StartTimestamp, executor = Executor}}}, true} ->
+        {{ok, #document{value = #traverse_task{start_time = StartTimestamp, executor = Executor}}}, force} ->
             % If system has not been stopped properly, links can already exists - catch errors
             catch traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskId, Timestamp),
             catch traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskId, StartTimestamp),
             ok;
-        {{ok, #document{value = #traverse_task{start_time = StartTimestamp, executor = Executor}}}, false} ->
+        {{ok, #document{value = #traverse_task{start_time = StartTimestamp, executor = Executor}}}, graceful} ->
             ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskId, Timestamp),
             ok = traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskId, StartTimestamp);
-        {{error, {Reason, StartTimestamp, Executor}}, true} ->
+        {{error, {Reason, StartTimestamp, Executor}}, force} ->
             % If system has not been stopped properly, links can already exists - catch errors
             catch traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskId, Timestamp),
             catch traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskId, StartTimestamp),
             {error, Reason};
-        {{error, {Reason, _StartTimestamp, _Executor}}, false} ->
+        {{error, {Reason, _StartTimestamp, _Executor}}, graceful} ->
             {error, Reason}
     end.
 
