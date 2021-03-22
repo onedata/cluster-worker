@@ -641,7 +641,7 @@ maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskId, Executor, #{
                 _ -> task_callback(CallbackModule, task_finished, TaskId, PoolName)
             end,
 
-            case traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, false) of
+            case traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, false, graceful) of
                 ok -> check_task_list_and_run(PoolName, Executor, []);
                 {error, already_finished} -> ok
             end;
@@ -932,8 +932,10 @@ clasiffy_tasks_to_restart_and_cancel(TaskIdToCtxMap, JobsPerTask, PoolName, Call
     pool(), callback_module(), node()) -> ok.
 clean_tasks_and_jobs(TaskIdToCtxMap, JobsPerTask, TasksToCancel, JobsWitoutCtx, PoolName, CallbackModule, Node) ->
     lists:foreach(fun(TaskId) ->
-        ExtendedCtx = maps:get(TaskId, TaskIdToCtxMap),
-        traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, true),
+        case maps:get(TaskId, TaskIdToCtxMap) of
+            ctx_not_found -> traverse_task:finish(traverse_task:get_ctx(), PoolName, CallbackModule, TaskId, true, force);
+            ExtendedCtx -> traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, true, force)
+        end,
 
         clean_jobs(maps:get(TaskId, JobsPerTask, []), PoolName, CallbackModule, Node)
     end, TasksToCancel),

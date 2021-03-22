@@ -19,7 +19,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% Lifecycle API
--export([create/11, start/5, schedule_for_local_execution/3, finish/5, cancel/5, on_task_change/2,
+-export([create/11, start/5, schedule_for_local_execution/3, finish/6, cancel/5, on_task_change/2,
     on_remote_change/4, delete_ended/2]).
 
 %%% Setters and getters API
@@ -36,6 +36,7 @@
 -type ctx() :: datastore:ctx().
 -type record() :: #traverse_task{}.
 -type doc() :: datastore_doc:doc(record()).
+-type finish_mode() :: graceful | force.
 
 -export_type([ctx/0, doc/0]).
 
@@ -173,8 +174,9 @@ schedule_for_local_execution(Pool, TaskId, #document{value = #traverse_task{
     ok = traverse_tasks_scheduler:register_group(Pool, GroupId).
 
 
--spec finish(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), boolean()) -> ok | {error, term()}.
-finish(ExtendedCtx, Pool, CallbackModule, TaskId, Cancel) ->
+-spec finish(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), boolean(), finish_mode()) ->
+    ok | {error, term()}.
+finish(ExtendedCtx, Pool, CallbackModule, TaskId, Cancel, ForceCancel) ->
     {ok, Timestamp} = get_timestamp(CallbackModule),
     Diff = fun
         (#traverse_task{status = ongoing, canceled = false} = Task) when Cancel =:= false ->
@@ -183,17 +185,28 @@ finish(ExtendedCtx, Pool, CallbackModule, TaskId, Cancel) ->
             {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}};
         (#traverse_task{status = canceling, canceled = true} = Task) ->
             {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}};
-        (#traverse_task{status = finished}) ->
-            {error, already_finished};
-        (#traverse_task{status = canceled}) ->
-            {error, already_finished}
+        (#traverse_task{status = finished, start_time = Time, executor = Provider}) ->
+            {error, {already_finished, Time, Provider}};
+        (#traverse_task{status = canceled, start_time = Time, executor = Provider}) ->
+            {error, {already_finished, Time, Provider}}
     end,
-    case datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskId), Diff) of
-        {ok, #document{value = #traverse_task{start_time = StartTimestamp, executor = Executor}}} ->
+
+    case {datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskId), Diff), ForceCancel} of
+        {{ok, #document{value = #traverse_task{start_time = StartTimestamp, executor = Executor}}}, force} ->
+            % If system has not been stopped properly, links can already exists - catch errors
+            catch traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskId, Timestamp),
+            catch traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskId, StartTimestamp),
+            ok;
+        {{ok, #document{value = #traverse_task{start_time = StartTimestamp, executor = Executor}}}, graceful} ->
             ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskId, Timestamp),
             ok = traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskId, StartTimestamp);
-        Other ->
-            Other
+        {{error, {Reason, StartTimestamp, Executor}}, force} ->
+            % If system has not been stopped properly, links can already exists - catch errors
+            catch traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskId, Timestamp),
+            catch traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskId, StartTimestamp),
+            {error, Reason};
+        {{error, {Reason, _StartTimestamp, _Executor}}, graceful} ->
+            {error, Reason}
     end.
 
 -spec cancel(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), traverse:environment_id()) ->
