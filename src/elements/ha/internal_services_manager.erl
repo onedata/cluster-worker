@@ -45,7 +45,7 @@
 
 -spec start_service(module(), internal_service:service_name(), internal_service:service_fun_name(),
     internal_service:service_fun_name(), internal_service:service_fun_args(), node_selector()) ->
-    ok | aborted | {error, term()}.
+    ok | aborted | no_return().
 start_service(Module, ServiceName, Fun, StopFun, Args, NodeSelector) ->
     Options = #{
         start_function => Fun,
@@ -60,12 +60,14 @@ start_service(Module, ServiceName, ServiceDescription) ->
     start_service(Module, ServiceName, ?LOCAL_NODE_SELECTOR, ServiceDescription).
 
 -spec start_service(module(), internal_service:service_name(), node_selector(), internal_service:options()) ->
-    ok | aborted | {error, term()}.
+    ok | aborted | no_return().
 start_service(Module, ServiceName, NodeSelector, ServiceDescription) ->
     {MasterNode, HandlingNode} = get_master_and_handling_nodes(NodeSelector),
     case rpc:call(HandlingNode, ?MODULE, start_service_locally, [MasterNode, Module, ServiceName, ServiceDescription]) of
-        {badrpc, Reason} -> {error, Reason};
-        Other -> Other
+        ok -> ok;
+        aborted -> aborted;
+        {badrpc, Reason} -> error(Reason);
+        {error, Reason} -> error(Reason)
     end.
 
 -spec reschedule_healthcheck(module(), internal_service:service_name(), node_selector(),
