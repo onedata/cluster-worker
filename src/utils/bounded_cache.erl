@@ -64,7 +64,8 @@
 }.
 -type in_critical_section() :: boolean().
 
--export_type([additional_info/0, cache/0, callback/0, timestamp/0, value/0]).
+-export_type([additional_info/0, cache/0, group/0, cache_options/0, group_options/0,
+    callback/0, timestamp/0, value/0]).
 
 -define(TIMER_MESSAGE(Options), {bounded_cache_timer, Options}).
 -define(CACHE_MANAGER, bounded_cache_manager).
@@ -72,7 +73,8 @@
 -define(INVALIDATION_TIMESTAMP_KEY(Cache), {invalidation_timestamp, Cache}).
 -define(GROUP_MEMBERS_KEY(Group), {group_members, Group}).
 -define(CREATE_CRITICAL_SECTION(Group), {bounded_cache_group_create, Group}).
--define(INVALIDATE_CRITICAL_SECTION(Cache), {bounded_cache_invalidation, Cache}).
+-define(INVALIDATE_CRITICAL_SECTION(Cache),
+    {bounded_cache_invalidation, Cache}).
 -define(INSERT_CRITICAL_SECTION(Cache, Key), {bounded_cache_insert, Cache, Key}).
 
 -record(cache_item, {
