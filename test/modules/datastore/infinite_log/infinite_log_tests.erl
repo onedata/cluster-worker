@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @author Lukasz Opiola
-%%% @copyright (C) 2019 ACK CYFRONET AGH
+%%% @copyright (C) 2021 ACK CYFRONET AGH
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @end
@@ -16,14 +16,12 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("ctool/include/logging.hrl").
-
--define(BACKWARD, backward_from_newest).
--define(FORWARD, forward_from_oldest).
+-include("modules/datastore/infinite_log.hrl").
 
 -define(range(From, To), lists:seq(From, To, signum(To - From))).
 -define(rand(Limit), rand:uniform(Limit)).
--define(testList(Result, Direction, StartFrom, OtherOpts), ?assertEqual(
-    Result, list_ids_and_verify(Direction, StartFrom, OtherOpts))
+-define(testList(ExpectedIndices, Direction, StartFrom, OtherOpts),
+    ?assert(list_indices_and_verify(ExpectedIndices, Direction, StartFrom, OtherOpts))
 ).
 
 %%%===================================================================
@@ -42,6 +40,7 @@
     {"list_log_with_clustered_timestamps", fun list_log_with_clustered_timestamps/2},
     {"list_log_with_irregular_timestamps", fun list_log_with_irregular_timestamps/2},
     {"list_log_with_one_element", fun list_log_with_one_element/2},
+    {"list_log_with_one_full_node", fun list_log_with_one_full_node/2},
     {"append_with_time_warps", fun append_with_time_warps/2},
     {"append_too_large_content", fun append_too_large_content/2}
 ]).
@@ -49,6 +48,7 @@
 -define(ELEMENTS_PER_NODE_VARIANTS, [
     1, 2, 3, 5, 11, 99, 301, 1000, 1999
 ]).
+
 
 inf_log_test_() ->
     {foreach,
@@ -79,11 +79,8 @@ create_and_destroy(LogId, MaxEntriesPerNode) ->
     MaxNodeNumber = (EntryCount - 1) div MaxEntriesPerNode,
 
     ForeachNodeNumber = fun(Callback) ->
-        NodeNumbers = case MaxNodeNumber of
-            0 -> [];
-            _ -> lists:seq(0, MaxNodeNumber - 1)
-        end,
-        lists:foreach(Callback, NodeNumbers)
+        % does not run the callback for sentinel (which has MaxNodeNumber)
+        lists:foreach(Callback, lists:seq(0, MaxNodeNumber - 1))
     end,
 
     ?assert(sentinel_exists(LogId)),
@@ -103,9 +100,8 @@ create_and_destroy(LogId, MaxEntriesPerNode) ->
         ?assertNot(node_exists(LogId, NodeNumber))
     end),
 
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{
-        direction => lists_utils:random_element([?FORWARD, ?BACKWARD])
-    })),
+    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?FORWARD})),
+    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD})),
     ?assertEqual({error, not_found}, infinite_log:append(LogId, <<"log">>)),
     ?assertEqual(ok, infinite_log:destroy(LogId)).
 
@@ -114,7 +110,7 @@ list_inexistent_log(_, _) ->
     InexistentLogId = str_utils:rand_hex(16),
     ?assertEqual({error, not_found}, infinite_log:list(InexistentLogId, #{
         direction => lists_utils:random_element([?FORWARD, ?BACKWARD]),
-        start_from => lists_utils:random_element([undefined, {id, ?rand(1000)}, {timestamp, ?rand(1000)}]),
+        start_from => lists_utils:random_element([undefined, {index, ?rand(1000)}, {timestamp, ?rand(1000)}]),
         offset => ?rand(1000) - 500,
         limit => ?rand(1000)
     })).
@@ -122,164 +118,164 @@ list_inexistent_log(_, _) ->
 
 list_empty_log(_, _) ->
     lists:foreach(fun(_) ->
-        ?testList([], ?BACKWARD, undefined, #{off => 500 - ?rand(1000), lim => ?rand(1000)}),
-        ?testList([], ?FORWARD, undefined, #{off => 500 - ?rand(1000), lim => ?rand(1000)}),
-        ?testList([], ?BACKWARD, {id, ?rand(1000)}, #{off => 500 - ?rand(1000), lim => ?rand(1000)}),
-        ?testList([], ?FORWARD, {id, ?rand(1000)}, #{off => 500 - ?rand(1000), lim => ?rand(1000)}),
-        ?testList([], ?BACKWARD, {timestamp, ?rand(1000)}, #{off => 500 - ?rand(1000), lim => ?rand(1000)}),
-        ?testList([], ?FORWARD, {timestamp, ?rand(1000)}, #{off => 500 - ?rand(1000), lim => ?rand(1000)})
-    end, lists:seq(1, 100)).
+        ?testList([], ?BACKWARD, undefined, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
+        ?testList([], ?FORWARD, undefined, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
+        ?testList([], ?BACKWARD, {index, ?rand(1000)}, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
+        ?testList([], ?FORWARD, {index, ?rand(1000)}, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
+        ?testList([], ?BACKWARD, {timestamp, ?rand(1000)}, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
+        ?testList([], ?FORWARD, {timestamp, ?rand(1000)}, #{offset => 500 - ?rand(1000), limit => ?rand(1000)})
+    end, ?range(1, 100)).
 
 
 list(_, _) ->
     append(#{count => 5000}),
 
-    ?testList([4999], ?BACKWARD, undefined, #{off => 0, lim => 1}),
-    ?testList([0], ?FORWARD, undefined, #{off => 0, lim => 1}),
-    ?testList([4999], ?BACKWARD, undefined, #{off => -1, lim => 1}),
-    ?testList([0], ?FORWARD, undefined, #{off => -1, lim => 1}),
+    ?testList([4999], ?BACKWARD, undefined, #{offset => 0, limit => 1}),
+    ?testList([0], ?FORWARD, undefined, #{offset => 0, limit => 1}),
+    ?testList([4999], ?BACKWARD, undefined, #{offset => -1, limit => 1}),
+    ?testList([0], ?FORWARD, undefined, #{offset => -1, limit => 1}),
 
-    ?testList(?range(4999, 4980), ?BACKWARD, undefined, #{off => 0, lim => 20}),
-    ?testList(?range(0, 19), ?FORWARD, undefined, #{off => 0, lim => 20}),
-    ?testList(?range(4999, 4980), ?BACKWARD, undefined, #{off => -19, lim => 20}),
-    ?testList(?range(0, 19), ?FORWARD, undefined, #{off => -19, lim => 20}),
+    ?testList(?range(4999, 4980), ?BACKWARD, undefined, #{offset => 0, limit => 20}),
+    ?testList(?range(0, 19), ?FORWARD, undefined, #{offset => 0, limit => 20}),
+    ?testList(?range(4999, 4980), ?BACKWARD, undefined, #{offset => -19, limit => 20}),
+    ?testList(?range(0, 19), ?FORWARD, undefined, #{offset => -19, limit => 20}),
 
     % listing limit is capped at 1000
-    ?testList(?range(4999, 4000), ?BACKWARD, undefined, #{off => 0, lim => 5000}),
-    ?testList(?range(0, 999), ?FORWARD, undefined, #{off => 0, lim => 5000}),
-    ?testList(?range(2999, 2000), ?BACKWARD, undefined, #{off => 2000, lim => 5000}),
-    ?testList(?range(2000, 2999), ?FORWARD, undefined, #{off => 2000, lim => 5000}),
+    ?testList(?range(4999, 4000), ?BACKWARD, undefined, #{offset => 0, limit => 5000}),
+    ?testList(?range(0, 999), ?FORWARD, undefined, #{offset => 0, limit => 5000}),
+    ?testList(?range(2999, 2000), ?BACKWARD, undefined, #{offset => 2000, limit => 5000}),
+    ?testList(?range(2000, 2999), ?FORWARD, undefined, #{offset => 2000, limit => 5000}),
 
-    ?testList([0], ?BACKWARD, undefined, #{off => 4999, lim => 1}),
-    ?testList([4999], ?FORWARD, undefined, #{off => 4999, lim => 1}),
-    ?testList([0], ?BACKWARD, undefined, #{off => 4999, lim => 56}),
-    ?testList([4999], ?FORWARD, undefined, #{off => 4999, lim => 56}),
+    ?testList([0], ?BACKWARD, undefined, #{offset => 4999, limit => 1}),
+    ?testList([4999], ?FORWARD, undefined, #{offset => 4999, limit => 1}),
+    ?testList([0], ?BACKWARD, undefined, #{offset => 4999, limit => 56}),
+    ?testList([4999], ?FORWARD, undefined, #{offset => 4999, limit => 56}),
 
-    ?testList(?range(4979, 4965), ?BACKWARD, undefined, #{off => 20, lim => 15}),
-    ?testList(?range(20, 34), ?FORWARD, undefined, #{off => 20, lim => 15}),
+    ?testList(?range(4979, 4965), ?BACKWARD, undefined, #{offset => 20, limit => 15}),
+    ?testList(?range(20, 34), ?FORWARD, undefined, #{offset => 20, limit => 15}),
     % listing limit is capped at 1000
-    ?testList(?range(4979, 3980), ?BACKWARD, undefined, #{off => 20, lim => 3000}),
-    ?testList(?range(20, 1019), ?FORWARD, undefined, #{off => 20, lim => 3000}),
-    ?testList(?range(4979, 3980), ?BACKWARD, undefined, #{off => 20, lim => 80000000}),
-    ?testList(?range(20, 1019), ?FORWARD, undefined, #{off => 20, lim => 80000000}).
+    ?testList(?range(4979, 3980), ?BACKWARD, undefined, #{offset => 20, limit => 3000}),
+    ?testList(?range(20, 1019), ?FORWARD, undefined, #{offset => 20, limit => 3000}),
+    ?testList(?range(4979, 3980), ?BACKWARD, undefined, #{offset => 20, limit => 80000000}),
+    ?testList(?range(20, 1019), ?FORWARD, undefined, #{offset => 20, limit => 80000000}).
 
 
 list_from_id(_, _) ->
     append(#{count => 5000}),
 
-    ?testList([0], ?BACKWARD, {id, 0}, #{off => 0, lim => 1}),
-    ?testList([0], ?FORWARD, {id, 0}, #{off => 0, lim => 1}),
-    ?testList([0], ?BACKWARD, {id, 0}, #{off => 0, lim => 8}),
-    ?testList(?range(0, 7), ?FORWARD, {id, 0}, #{off => 0, lim => 8}),
+    ?testList([0], ?BACKWARD, {index, 0}, #{offset => 0, limit => 1}),
+    ?testList([0], ?FORWARD, {index, 0}, #{offset => 0, limit => 1}),
+    ?testList([0], ?BACKWARD, {index, 0}, #{offset => 0, limit => 8}),
+    ?testList(?range(0, 7), ?FORWARD, {index, 0}, #{offset => 0, limit => 8}),
 
-    ?testList([1], ?BACKWARD, {id, 0}, #{off => -1, lim => 1}),
-    ?testList([0], ?FORWARD, {id, 0}, #{off => -1, lim => 1}),
-    ?testList(?range(1, 0), ?BACKWARD, {id, 0}, #{off => -1, lim => 27}),
-    ?testList(?range(0, 26), ?FORWARD, {id, 0}, #{off => -1, lim => 27}),
+    ?testList([1], ?BACKWARD, {index, 0}, #{offset => -1, limit => 1}),
+    ?testList([0], ?FORWARD, {index, 0}, #{offset => -1, limit => 1}),
+    ?testList(?range(1, 0), ?BACKWARD, {index, 0}, #{offset => -1, limit => 27}),
+    ?testList(?range(0, 26), ?FORWARD, {index, 0}, #{offset => -1, limit => 27}),
 
-    ?testList([], ?BACKWARD, {id, 0}, #{off => 1, lim => 1}),
-    ?testList([1], ?FORWARD, {id, 0}, #{off => 1, lim => 1}),
-    ?testList([], ?BACKWARD, {id, 0}, #{off => 1, lim => 240}),
-    ?testList(?range(1, 240), ?FORWARD, {id, 0}, #{off => 1, lim => 240}),
+    ?testList([], ?BACKWARD, {index, 0}, #{offset => 1, limit => 1}),
+    ?testList([1], ?FORWARD, {index, 0}, #{offset => 1, limit => 1}),
+    ?testList([], ?BACKWARD, {index, 0}, #{offset => 1, limit => 240}),
+    ?testList(?range(1, 240), ?FORWARD, {index, 0}, #{offset => 1, limit => 240}),
 
-    ?testList([4999], ?BACKWARD, {id, 4999}, #{off => 0, lim => 1}),
-    ?testList([4999], ?FORWARD, {id, 4999}, #{off => 0, lim => 1}),
-    ?testList(?range(4999, 4987), ?BACKWARD, {id, 4999}, #{off => 0, lim => 13}),
-    ?testList([4999], ?FORWARD, {id, 4999}, #{off => 0, lim => 13}),
+    ?testList([4999], ?BACKWARD, {index, 4999}, #{offset => 0, limit => 1}),
+    ?testList([4999], ?FORWARD, {index, 4999}, #{offset => 0, limit => 1}),
+    ?testList(?range(4999, 4987), ?BACKWARD, {index, 4999}, #{offset => 0, limit => 13}),
+    ?testList([4999], ?FORWARD, {index, 4999}, #{offset => 0, limit => 13}),
 
-    ?testList([4999], ?BACKWARD, {id, 4999}, #{off => -1, lim => 1}),
-    ?testList([4998], ?FORWARD, {id, 4999}, #{off => -1, lim => 1}),
-    ?testList(?range(4999, 4995), ?BACKWARD, {id, 4999}, #{off => -1, lim => 5}),
-    ?testList(?range(4998, 4999), ?FORWARD, {id, 4999}, #{off => -1, lim => 5}),
+    ?testList([4999], ?BACKWARD, {index, 4999}, #{offset => -1, limit => 1}),
+    ?testList([4998], ?FORWARD, {index, 4999}, #{offset => -1, limit => 1}),
+    ?testList(?range(4999, 4995), ?BACKWARD, {index, 4999}, #{offset => -1, limit => 5}),
+    ?testList(?range(4998, 4999), ?FORWARD, {index, 4999}, #{offset => -1, limit => 5}),
 
-    ?testList([4998], ?BACKWARD, {id, 4999}, #{off => 1, lim => 1}),
-    ?testList([], ?FORWARD, {id, 4999}, #{off => 1, lim => 1}),
+    ?testList([4998], ?BACKWARD, {index, 4999}, #{offset => 1, limit => 1}),
+    ?testList([], ?FORWARD, {index, 4999}, #{offset => 1, limit => 1}),
     % listing limit is capped at 1000
-    ?testList(?range(4998, 3999), ?BACKWARD, {id, 4999}, #{off => 1, lim => 4800}),
-    ?testList([], ?FORWARD, {id, 4999}, #{off => 1, lim => 4800}),
+    ?testList(?range(4998, 3999), ?BACKWARD, {index, 4999}, #{offset => 1, limit => 4800}),
+    ?testList([], ?FORWARD, {index, 4999}, #{offset => 1, limit => 4800}),
 
-    ?testList(?range(2400, 2101), ?BACKWARD, {id, 2400}, #{off => 0, lim => 300}),
-    ?testList(?range(2400, 2699), ?FORWARD, {id, 2400}, #{off => 0, lim => 300}),
-    ?testList(?range(100, 0), ?BACKWARD, {id, 2400}, #{off => 2300, lim => 300}),
-    ?testList(?range(4700, 4999), ?FORWARD, {id, 2400}, #{off => 2300, lim => 300}),
-    ?testList(?range(3000, 2701), ?BACKWARD, {id, 2400}, #{off => -600, lim => 300}),
-    ?testList(?range(1800, 2099), ?FORWARD, {id, 2400}, #{off => -600, lim => 300}),
-    ?testList(?range(4999, 4700), ?BACKWARD, {id, 2400}, #{off => -2600, lim => 300}),
-    ?testList(?range(0, 299), ?FORWARD, {id, 2400}, #{off => -2600, lim => 300}),
+    ?testList(?range(2400, 2101), ?BACKWARD, {index, 2400}, #{offset => 0, limit => 300}),
+    ?testList(?range(2400, 2699), ?FORWARD, {index, 2400}, #{offset => 0, limit => 300}),
+    ?testList(?range(100, 0), ?BACKWARD, {index, 2400}, #{offset => 2300, limit => 300}),
+    ?testList(?range(4700, 4999), ?FORWARD, {index, 2400}, #{offset => 2300, limit => 300}),
+    ?testList(?range(3000, 2701), ?BACKWARD, {index, 2400}, #{offset => -600, limit => 300}),
+    ?testList(?range(1800, 2099), ?FORWARD, {index, 2400}, #{offset => -600, limit => 300}),
+    ?testList(?range(4999, 4700), ?BACKWARD, {index, 2400}, #{offset => -2600, limit => 300}),
+    ?testList(?range(0, 299), ?FORWARD, {index, 2400}, #{offset => -2600, limit => 300}),
 
-    ?testList([], ?BACKWARD, {id, -7}, #{off => 0, lim => 1}),
-    ?testList([0], ?FORWARD, {id, -7}, #{off => 0, lim => 1}),
+    ?testList([], ?BACKWARD, {index, -7}, #{offset => 0, limit => 1}),
+    ?testList([0], ?FORWARD, {index, -7}, #{offset => 0, limit => 1}),
 
-    ?testList(?range(3, 0), ?BACKWARD, {id, -7}, #{off => -4, lim => 49}),
-    ?testList(?range(0, 48), ?FORWARD, {id, -7}, #{off => -4, lim => 49}),
+    ?testList(?range(3, 0), ?BACKWARD, {index, -7}, #{offset => -4, limit => 49}),
+    ?testList(?range(0, 48), ?FORWARD, {index, -7}, #{offset => -4, limit => 49}),
 
-    ?testList([], ?BACKWARD, {id, -7}, #{off => 9, lim => 506}),
-    ?testList(?range(9, 514), ?FORWARD, {id, -7}, #{off => 9, lim => 506}),
+    ?testList([], ?BACKWARD, {index, -7}, #{offset => 9, limit => 506}),
+    ?testList(?range(9, 514), ?FORWARD, {index, -7}, #{offset => 9, limit => 506}),
 
-    ?testList([4999], ?BACKWARD, {id, 9823655123764823}, #{off => 0, lim => 1}),
-    ?testList([], ?FORWARD, {id, 9823655123764823}, #{off => 0, lim => 1}),
+    ?testList([4999], ?BACKWARD, {index, 9823655123764823}, #{offset => 0, limit => 1}),
+    ?testList([], ?FORWARD, {index, 9823655123764823}, #{offset => 0, limit => 1}),
 
-    ?testList(?range(4999, 4930), ?BACKWARD, {id, 9823655123764823}, #{off => -60, lim => 70}),
-    ?testList(?range(4940, 4999), ?FORWARD, {id, 9823655123764823}, #{off => -60, lim => 70}),
+    ?testList(?range(4999, 4930), ?BACKWARD, {index, 9823655123764823}, #{offset => -60, limit => 70}),
+    ?testList(?range(4940, 4999), ?FORWARD, {index, 9823655123764823}, #{offset => -60, limit => 70}),
 
     % listing limit is capped at 1000
-    ?testList(?range(4985, 3986), ?BACKWARD, {id, 9823655123764823}, #{off => 14, lim => 7000}),
-    ?testList([], ?FORWARD, {id, 9823655123764823}, #{off => 14, lim => 7000}).
+    ?testList(?range(4985, 3986), ?BACKWARD, {index, 9823655123764823}, #{offset => 14, limit => 7000}),
+    ?testList([], ?FORWARD, {index, 9823655123764823}, #{offset => 14, limit => 7000}).
 
 
 list_from_timestamp(_, _) ->
     append(#{count => 1000, first_at => 0, interval => 1}),
 
-    ?testList([], ?BACKWARD, {timestamp, -1}, #{off => 0, lim => 1}),
-    ?testList([], ?FORWARD, {timestamp, 1000}, #{off => 0, lim => 1}),
-    ?testList([], ?BACKWARD, {timestamp, -1}, #{off => 10, lim => 1}),
-    ?testList([], ?FORWARD, {timestamp, 1000}, #{off => 10, lim => 1}),
-    ?testList([9], ?BACKWARD, {timestamp, -1}, #{off => -10, lim => 1}),
-    ?testList([990], ?FORWARD, {timestamp, 1000}, #{off => -10, lim => 1}),
+    ?testList([], ?BACKWARD, {timestamp, -1}, #{offset => 0, limit => 1}),
+    ?testList([], ?FORWARD, {timestamp, 1000}, #{offset => 0, limit => 1}),
+    ?testList([], ?BACKWARD, {timestamp, -1}, #{offset => 10, limit => 1}),
+    ?testList([], ?FORWARD, {timestamp, 1000}, #{offset => 10, limit => 1}),
+    ?testList([9], ?BACKWARD, {timestamp, -1}, #{offset => -10, limit => 1}),
+    ?testList([990], ?FORWARD, {timestamp, 1000}, #{offset => -10, limit => 1}),
 
-    ?testList([999], ?BACKWARD, {timestamp, 1000}, #{off => 0, lim => 1}),
-    ?testList([0], ?FORWARD, {timestamp, -1}, #{off => 0, lim => 1}),
-    ?testList([319], ?BACKWARD, {timestamp, 1000}, #{off => 680, lim => 1}),
-    ?testList([680], ?FORWARD, {timestamp, -1}, #{off => 680, lim => 1}),
+    ?testList([999], ?BACKWARD, {timestamp, 1000}, #{offset => 0, limit => 1}),
+    ?testList([0], ?FORWARD, {timestamp, -1}, #{offset => 0, limit => 1}),
+    ?testList([319], ?BACKWARD, {timestamp, 1000}, #{offset => 680, limit => 1}),
+    ?testList([680], ?FORWARD, {timestamp, -1}, #{offset => 680, limit => 1}),
 
-    ?testList([999], ?BACKWARD, {timestamp, 999}, #{off => 0, lim => 1}),
-    ?testList([0], ?FORWARD, {timestamp, 0}, #{off => 0, lim => 1}),
-    ?testList([0], ?BACKWARD, {timestamp, 999}, #{off => 999, lim => 1}),
-    ?testList([999], ?FORWARD, {timestamp, 0}, #{off => 999, lim => 1}),
+    ?testList([999], ?BACKWARD, {timestamp, 999}, #{offset => 0, limit => 1}),
+    ?testList([0], ?FORWARD, {timestamp, 0}, #{offset => 0, limit => 1}),
+    ?testList([0], ?BACKWARD, {timestamp, 999}, #{offset => 999, limit => 1}),
+    ?testList([999], ?FORWARD, {timestamp, 0}, #{offset => 999, limit => 1}),
 
-    ?testList([0], ?BACKWARD, {timestamp, 0}, #{off => 0, lim => 1}),
-    ?testList([999], ?FORWARD, {timestamp, 999}, #{off => 0, lim => 1}),
-    ?testList([], ?BACKWARD, {timestamp, 0}, #{off => 1, lim => 1}),
-    ?testList([], ?FORWARD, {timestamp, 999}, #{off => 1, lim => 1}),
+    ?testList([0], ?BACKWARD, {timestamp, 0}, #{offset => 0, limit => 1}),
+    ?testList([999], ?FORWARD, {timestamp, 999}, #{offset => 0, limit => 1}),
+    ?testList([], ?BACKWARD, {timestamp, 0}, #{offset => 1, limit => 1}),
+    ?testList([], ?FORWARD, {timestamp, 999}, #{offset => 1, limit => 1}),
 
-    ?testList([500, 499], ?BACKWARD, {timestamp, 500}, #{off => 0, lim => 2}),
-    ?testList([500, 501], ?FORWARD, {timestamp, 500}, #{off => 0, lim => 2}),
-    ?testList([543, 542], ?BACKWARD, {timestamp, 500}, #{off => -43, lim => 2}),
-    ?testList([457, 458], ?FORWARD, {timestamp, 500}, #{off => -43, lim => 2}),
+    ?testList([500, 499], ?BACKWARD, {timestamp, 500}, #{offset => 0, limit => 2}),
+    ?testList([500, 501], ?FORWARD, {timestamp, 500}, #{offset => 0, limit => 2}),
+    ?testList([543, 542], ?BACKWARD, {timestamp, 500}, #{offset => -43, limit => 2}),
+    ?testList([457, 458], ?FORWARD, {timestamp, 500}, #{offset => -43, limit => 2}),
 
-    ?testList(?range(500, 401), ?BACKWARD, {timestamp, 500}, #{off => 0, lim => 100}),
-    ?testList(?range(500, 599), ?FORWARD, {timestamp, 500}, #{off => 0, lim => 100}),
-    ?testList(?range(34, 0), ?BACKWARD, {timestamp, 500}, #{off => 466, lim => 100}),
-    ?testList(?range(966, 999), ?FORWARD, {timestamp, 500}, #{off => 466, lim => 100}).
+    ?testList(?range(500, 401), ?BACKWARD, {timestamp, 500}, #{offset => 0, limit => 100}),
+    ?testList(?range(500, 599), ?FORWARD, {timestamp, 500}, #{offset => 0, limit => 100}),
+    ?testList(?range(34, 0), ?BACKWARD, {timestamp, 500}, #{offset => 466, limit => 100}),
+    ?testList(?range(966, 999), ?FORWARD, {timestamp, 500}, #{offset => 466, limit => 100}).
 
 
 list_log_with_the_same_timestamps(_, _) ->
     Timestamp = ?rand(9999999999),
     append(#{count => 100, first_at => Timestamp, interval => 0}),
 
-    ?testList([99], ?BACKWARD, {timestamp, Timestamp}, #{off => 0, lim => 1}),
-    ?testList([0], ?FORWARD, {timestamp, Timestamp}, #{off => 0, lim => 1}),
-    ?testList([82], ?BACKWARD, {timestamp, Timestamp}, #{off => 17, lim => 1}),
-    ?testList([17], ?FORWARD, {timestamp, Timestamp}, #{off => 17, lim => 1}),
-    ?testList([99], ?BACKWARD, {timestamp, Timestamp}, #{off => -9, lim => 1}),
-    ?testList([0], ?FORWARD, {timestamp, Timestamp}, #{off => -9, lim => 1}),
+    ?testList([99], ?BACKWARD, {timestamp, Timestamp}, #{offset => 0, limit => 1}),
+    ?testList([0], ?FORWARD, {timestamp, Timestamp}, #{offset => 0, limit => 1}),
+    ?testList([82], ?BACKWARD, {timestamp, Timestamp}, #{offset => 17, limit => 1}),
+    ?testList([17], ?FORWARD, {timestamp, Timestamp}, #{offset => 17, limit => 1}),
+    ?testList([99], ?BACKWARD, {timestamp, Timestamp}, #{offset => -9, limit => 1}),
+    ?testList([0], ?FORWARD, {timestamp, Timestamp}, #{offset => -9, limit => 1}),
 
-    ?testList(?range(99, 65), ?BACKWARD, {timestamp, Timestamp}, #{off => 0, lim => 35}),
-    ?testList(?range(0, 34), ?FORWARD, {timestamp, Timestamp}, #{off => 0, lim => 35}),
-    ?testList(?range(88, 54), ?BACKWARD, {timestamp, Timestamp}, #{off => 11, lim => 35}),
-    ?testList(?range(11, 45), ?FORWARD, {timestamp, Timestamp}, #{off => 11, lim => 35}),
-    ?testList(?range(99, 65), ?BACKWARD, {timestamp, Timestamp}, #{off => -30, lim => 35}),
-    ?testList(?range(0, 34), ?FORWARD, {timestamp, Timestamp}, #{off => -30, lim => 35}).
+    ?testList(?range(99, 65), ?BACKWARD, {timestamp, Timestamp}, #{offset => 0, limit => 35}),
+    ?testList(?range(0, 34), ?FORWARD, {timestamp, Timestamp}, #{offset => 0, limit => 35}),
+    ?testList(?range(88, 54), ?BACKWARD, {timestamp, Timestamp}, #{offset => 11, limit => 35}),
+    ?testList(?range(11, 45), ?FORWARD, {timestamp, Timestamp}, #{offset => 11, limit => 35}),
+    ?testList(?range(99, 65), ?BACKWARD, {timestamp, Timestamp}, #{offset => -30, limit => 35}),
+    ?testList(?range(0, 34), ?FORWARD, {timestamp, Timestamp}, #{offset => -30, limit => 35}).
 
 
 list_log_with_clustered_timestamps(_, _) ->
@@ -287,31 +283,31 @@ list_log_with_clustered_timestamps(_, _) ->
     append(#{count => 100, first_at => 12345, interval => 0}),
     append(#{count => 100, first_at => 24690, interval => 0}),
 
-    ?testList(?range(99, 95), ?BACKWARD, {timestamp, 0}, #{off => 0, lim => 5}),
-    ?testList(?range(0, 4), ?FORWARD, {timestamp, 0}, #{off => 0, lim => 5}),
-    ?testList(?range(179, 175), ?BACKWARD, {timestamp, 0}, #{off => -80, lim => 5}),
-    ?testList(?range(0, 4), ?FORWARD, {timestamp, 0}, #{off => -80, lim => 5}),
+    ?testList(?range(99, 95), ?BACKWARD, {timestamp, 0}, #{offset => 0, limit => 5}),
+    ?testList(?range(0, 4), ?FORWARD, {timestamp, 0}, #{offset => 0, limit => 5}),
+    ?testList(?range(179, 175), ?BACKWARD, {timestamp, 0}, #{offset => -80, limit => 5}),
+    ?testList(?range(0, 4), ?FORWARD, {timestamp, 0}, #{offset => -80, limit => 5}),
 
-    ?testList([199], ?BACKWARD, {timestamp, 12345}, #{off => 0, lim => 1}),
-    ?testList([100], ?FORWARD, {timestamp, 12345}, #{off => 0, lim => 1}),
-    ?testList([233], ?BACKWARD, {timestamp, 12345}, #{off => -34, lim => 1}),
-    ?testList([66], ?FORWARD, {timestamp, 12345}, #{off => -34, lim => 1}),
+    ?testList([199], ?BACKWARD, {timestamp, 12345}, #{offset => 0, limit => 1}),
+    ?testList([100], ?FORWARD, {timestamp, 12345}, #{offset => 0, limit => 1}),
+    ?testList([233], ?BACKWARD, {timestamp, 12345}, #{offset => -34, limit => 1}),
+    ?testList([66], ?FORWARD, {timestamp, 12345}, #{offset => -34, limit => 1}),
 
-    ?testList(?range(199, 80), ?BACKWARD, {timestamp, 12345}, #{off => 0, lim => 120}),
-    ?testList(?range(100, 219), ?FORWARD, {timestamp, 12345}, #{off => 0, lim => 120}),
-    ?testList(?range(184, 65), ?BACKWARD, {timestamp, 12345}, #{off => 15, lim => 120}),
-    ?testList(?range(115, 234), ?FORWARD, {timestamp, 12345}, #{off => 15, lim => 120}),
+    ?testList(?range(199, 80), ?BACKWARD, {timestamp, 12345}, #{offset => 0, limit => 120}),
+    ?testList(?range(100, 219), ?FORWARD, {timestamp, 12345}, #{offset => 0, limit => 120}),
+    ?testList(?range(184, 65), ?BACKWARD, {timestamp, 12345}, #{offset => 15, limit => 120}),
+    ?testList(?range(115, 234), ?FORWARD, {timestamp, 12345}, #{offset => 15, limit => 120}),
 
-    ?testList(?range(299, 250), ?BACKWARD, {timestamp, 24690}, #{off => 0, lim => 50}),
-    ?testList(?range(200, 249), ?FORWARD, {timestamp, 24690}, #{off => 0, lim => 50}),
-    ?testList(?range(19, 0), ?BACKWARD, {timestamp, 24690}, #{off => 280, lim => 50}),
-    ?testList([], ?FORWARD, {timestamp, 24690}, #{off => 280, lim => 50}),
+    ?testList(?range(299, 250), ?BACKWARD, {timestamp, 24690}, #{offset => 0, limit => 50}),
+    ?testList(?range(200, 249), ?FORWARD, {timestamp, 24690}, #{offset => 0, limit => 50}),
+    ?testList(?range(19, 0), ?BACKWARD, {timestamp, 24690}, #{offset => 280, limit => 50}),
+    ?testList([], ?FORWARD, {timestamp, 24690}, #{offset => 280, limit => 50}),
 
     % listing limit is capped at 1000
-    ?testList(?range(99, 0), ?BACKWARD, {timestamp, 0}, #{off => 0, lim => 4000}),
-    ?testList(?range(0, 299), ?FORWARD, {timestamp, 0}, #{off => 0, lim => 4000}),
-    ?testList(?range(179, 0), ?BACKWARD, {timestamp, 0}, #{off => -80, lim => 4000}),
-    ?testList(?range(0, 299), ?FORWARD, {timestamp, 0}, #{off => -80, lim => 4000}).
+    ?testList(?range(99, 0), ?BACKWARD, {timestamp, 0}, #{offset => 0, limit => 4000}),
+    ?testList(?range(0, 299), ?FORWARD, {timestamp, 0}, #{offset => 0, limit => 4000}),
+    ?testList(?range(179, 0), ?BACKWARD, {timestamp, 0}, #{offset => -80, limit => 4000}),
+    ?testList(?range(0, 299), ?FORWARD, {timestamp, 0}, #{offset => -80, limit => 4000}).
 
 
 list_log_with_irregular_timestamps(_, _) ->
@@ -321,99 +317,125 @@ list_log_with_irregular_timestamps(_, _) ->
         append(#{count => 1, first_at => T0 + Interval})
     end, Intervals),
 
-    ?testList([0], ?BACKWARD, {timestamp, T0}, #{off => 0, lim => 1}),
-    ?testList([0], ?FORWARD, {timestamp, T0}, #{off => 0, lim => 1}),
-    ?testList([], ?BACKWARD, {timestamp, T0}, #{off => 6, lim => 1}),
-    ?testList([6], ?FORWARD, {timestamp, T0}, #{off => 6, lim => 1}),
+    ?testList([0], ?BACKWARD, {timestamp, T0}, #{offset => 0, limit => 1}),
+    ?testList([0], ?FORWARD, {timestamp, T0}, #{offset => 0, limit => 1}),
+    ?testList([], ?BACKWARD, {timestamp, T0}, #{offset => 6, limit => 1}),
+    ?testList([6], ?FORWARD, {timestamp, T0}, #{offset => 6, limit => 1}),
 
-    ?testList([11], ?BACKWARD, {timestamp, T0 + 100000000000}, #{off => 0, lim => 1}),
-    ?testList([11], ?FORWARD, {timestamp, T0 + 100000000000}, #{off => 0, lim => 1}),
-    ?testList([8], ?BACKWARD, {timestamp, T0 + 100000000000}, #{off => 3, lim => 1}),
-    ?testList([], ?FORWARD, {timestamp, T0 + 100000000000}, #{off => 3, lim => 1}),
+    ?testList([11], ?BACKWARD, {timestamp, T0 + 100000000000}, #{offset => 0, limit => 1}),
+    ?testList([11], ?FORWARD, {timestamp, T0 + 100000000000}, #{offset => 0, limit => 1}),
+    ?testList([8], ?BACKWARD, {timestamp, T0 + 100000000000}, #{offset => 3, limit => 1}),
+    ?testList([], ?FORWARD, {timestamp, T0 + 100000000000}, #{offset => 3, limit => 1}),
 
-    ?testList(?range(11, 7), ?BACKWARD, {timestamp, T0 + 100000000000}, #{off => 0, lim => 5}),
-    ?testList([11], ?FORWARD, {timestamp, T0 + 100000000000}, #{off => 0, lim => 5}),
-    ?testList([0], ?BACKWARD, {timestamp, T0 + 100000000000}, #{off => 11, lim => 5}),
-    ?testList([], ?FORWARD, {timestamp, T0 + 100000000000}, #{off => 11, lim => 5}),
+    ?testList(?range(11, 7), ?BACKWARD, {timestamp, T0 + 100000000000}, #{offset => 0, limit => 5}),
+    ?testList([11], ?FORWARD, {timestamp, T0 + 100000000000}, #{offset => 0, limit => 5}),
+    ?testList([0], ?BACKWARD, {timestamp, T0 + 100000000000}, #{offset => 11, limit => 5}),
+    ?testList([], ?FORWARD, {timestamp, T0 + 100000000000}, #{offset => 11, limit => 5}),
 
-    ?testList([0], ?BACKWARD, {timestamp, T0}, #{off => 0, lim => 5}),
-    ?testList(?range(0, 4), ?FORWARD, {timestamp, T0}, #{off => 0, lim => 5}),
-    ?testList(?range(2, 0), ?BACKWARD, {timestamp, T0}, #{off => -2, lim => 5}),
-    ?testList(?range(0, 4), ?FORWARD, {timestamp, T0}, #{off => -2, lim => 5}),
+    ?testList([0], ?BACKWARD, {timestamp, T0}, #{offset => 0, limit => 5}),
+    ?testList(?range(0, 4), ?FORWARD, {timestamp, T0}, #{offset => 0, limit => 5}),
+    ?testList(?range(2, 0), ?BACKWARD, {timestamp, T0}, #{offset => -2, limit => 5}),
+    ?testList(?range(0, 4), ?FORWARD, {timestamp, T0}, #{offset => -2, limit => 5}),
 
-    ?testList(?range(6, 2), ?BACKWARD, {timestamp, T0 + 1000000}, #{off => 0, lim => 5}),
-    ?testList(?range(6, 10), ?FORWARD, {timestamp, T0 + 1000000}, #{off => 0, lim => 5}),
-    ?testList(?range(10, 6), ?BACKWARD, {timestamp, T0 + 1000000}, #{off => -4, lim => 5}),
-    ?testList(?range(2, 6), ?FORWARD, {timestamp, T0 + 1000000}, #{off => -4, lim => 5}),
+    ?testList(?range(6, 2), ?BACKWARD, {timestamp, T0 + 1000000}, #{offset => 0, limit => 5}),
+    ?testList(?range(6, 10), ?FORWARD, {timestamp, T0 + 1000000}, #{offset => 0, limit => 5}),
+    ?testList(?range(10, 6), ?BACKWARD, {timestamp, T0 + 1000000}, #{offset => -4, limit => 5}),
+    ?testList(?range(2, 6), ?FORWARD, {timestamp, T0 + 1000000}, #{offset => -4, limit => 5}),
 
-    ?testList(?range(6, 2), ?BACKWARD, {timestamp, T0 + 1000001}, #{off => 0, lim => 5}),
-    ?testList(?range(7, 11), ?FORWARD, {timestamp, T0 + 1000001}, #{off => 0, lim => 5}),
-    ?testList(?range(3, 0), ?BACKWARD, {timestamp, T0 + 1000001}, #{off => 3, lim => 5}),
-    ?testList(?range(10, 11), ?FORWARD, {timestamp, T0 + 1000001}, #{off => 3, lim => 5}).
+    ?testList(?range(6, 2), ?BACKWARD, {timestamp, T0 + 1000001}, #{offset => 0, limit => 5}),
+    ?testList(?range(7, 11), ?FORWARD, {timestamp, T0 + 1000001}, #{offset => 0, limit => 5}),
+    ?testList(?range(3, 0), ?BACKWARD, {timestamp, T0 + 1000001}, #{offset => 3, limit => 5}),
+    ?testList(?range(10, 11), ?FORWARD, {timestamp, T0 + 1000001}, #{offset => 3, limit => 5}).
 
 
 list_log_with_one_element(_, _) ->
     append(#{count => 1, first_at => 9999}),
 
-    ?testList([0], ?BACKWARD, undefined, #{off => 0, lim => 0}),
-    ?testList([0], ?FORWARD, undefined, #{off => 0, lim => 0}),
+    ?testList([0], ?BACKWARD, undefined, #{offset => 0, limit => 0}),
+    ?testList([0], ?FORWARD, undefined, #{offset => 0, limit => 0}),
 
-    ?testList([0], ?BACKWARD, undefined, #{off => 0, lim => -15}),
-    ?testList([0], ?FORWARD, undefined, #{off => 0, lim => -1}),
+    ?testList([0], ?BACKWARD, undefined, #{offset => 0, limit => -15}),
+    ?testList([0], ?FORWARD, undefined, #{offset => 0, limit => -1}),
 
-    ?testList([0], ?BACKWARD, undefined, #{off => 0, lim => 1}),
-    ?testList([0], ?FORWARD, undefined, #{off => 0, lim => 1}),
+    ?testList([0], ?BACKWARD, undefined, #{offset => 0, limit => 1}),
+    ?testList([0], ?FORWARD, undefined, #{offset => 0, limit => 1}),
 
-    ?testList([0], ?BACKWARD, undefined, #{off => 0, lim => ?rand(1000)}),
-    ?testList([0], ?FORWARD, undefined, #{off => 0, lim => ?rand(1000)}),
+    ?testList([0], ?BACKWARD, undefined, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([0], ?FORWARD, undefined, #{offset => 0, limit => ?rand(1000)}),
 
-    ?testList([], ?BACKWARD, undefined, #{off => 1, lim => ?rand(1000)}),
-    ?testList([], ?FORWARD, undefined, #{off => 1, lim => ?rand(1000)}),
+    ?testList([], ?BACKWARD, undefined, #{offset => 1, limit => ?rand(1000)}),
+    ?testList([], ?FORWARD, undefined, #{offset => 1, limit => ?rand(1000)}),
 
-    ?testList([0], ?BACKWARD, undefined, #{off => -1, lim => ?rand(1000)}),
-    ?testList([0], ?FORWARD, undefined, #{off => -1, lim => ?rand(1000)}),
+    ?testList([0], ?BACKWARD, undefined, #{offset => -1, limit => ?rand(1000)}),
+    ?testList([0], ?FORWARD, undefined, #{offset => -1, limit => ?rand(1000)}),
 
-    ?testList([0], ?BACKWARD, {id, 0}, #{off => 0, lim => ?rand(1000)}),
-    ?testList([0], ?FORWARD, {id, 0}, #{off => 0, lim => ?rand(1000)}),
-    ?testList([], ?BACKWARD, {id, 0}, #{off => 1, lim => ?rand(1000)}),
-    ?testList([], ?FORWARD, {id, 0}, #{off => 1, lim => ?rand(1000)}),
-    ?testList([0], ?BACKWARD, {id, 0}, #{off => -1, lim => ?rand(1000)}),
-    ?testList([0], ?FORWARD, {id, 0}, #{off => -1, lim => ?rand(1000)}),
+    ?testList([0], ?BACKWARD, {index, 0}, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([0], ?FORWARD, {index, 0}, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([], ?BACKWARD, {index, 0}, #{offset => 1, limit => ?rand(1000)}),
+    ?testList([], ?FORWARD, {index, 0}, #{offset => 1, limit => ?rand(1000)}),
+    ?testList([0], ?BACKWARD, {index, 0}, #{offset => -1, limit => ?rand(1000)}),
+    ?testList([0], ?FORWARD, {index, 0}, #{offset => -1, limit => ?rand(1000)}),
 
-    ?testList([0], ?BACKWARD, {id, 4}, #{off => 0, lim => ?rand(1000)}),
-    ?testList([], ?FORWARD, {id, 4}, #{off => 0, lim => ?rand(1000)}),
-    ?testList([], ?BACKWARD, {id, 4}, #{off => 2, lim => ?rand(1000)}),
-    ?testList([], ?FORWARD, {id, 4}, #{off => 2, lim => ?rand(1000)}),
-    ?testList([0], ?BACKWARD, {id, 4}, #{off => -8, lim => ?rand(1000)}),
-    ?testList([0], ?FORWARD, {id, 4}, #{off => -8, lim => ?rand(1000)}),
+    ?testList([0], ?BACKWARD, {index, 4}, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([], ?FORWARD, {index, 4}, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([], ?BACKWARD, {index, 4}, #{offset => 2, limit => ?rand(1000)}),
+    ?testList([], ?FORWARD, {index, 4}, #{offset => 2, limit => ?rand(1000)}),
+    ?testList([0], ?BACKWARD, {index, 4}, #{offset => -8, limit => ?rand(1000)}),
+    ?testList([0], ?FORWARD, {index, 4}, #{offset => -8, limit => ?rand(1000)}),
 
-    ?testList([], ?BACKWARD, {id, -8}, #{off => 0, lim => ?rand(1000)}),
-    ?testList([0], ?FORWARD, {id, -8}, #{off => 0, lim => ?rand(1000)}),
-    ?testList([], ?BACKWARD, {id, -8}, #{off => 3, lim => ?rand(1000)}),
-    ?testList([], ?FORWARD, {id, -8}, #{off => 3, lim => ?rand(1000)}),
-    ?testList([0], ?BACKWARD, {id, -8}, #{off => -2, lim => ?rand(1000)}),
-    ?testList([0], ?FORWARD, {id, -8}, #{off => -2, lim => ?rand(1000)}),
+    ?testList([], ?BACKWARD, {index, -8}, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([0], ?FORWARD, {index, -8}, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([], ?BACKWARD, {index, -8}, #{offset => 3, limit => ?rand(1000)}),
+    ?testList([], ?FORWARD, {index, -8}, #{offset => 3, limit => ?rand(1000)}),
+    ?testList([0], ?BACKWARD, {index, -8}, #{offset => -2, limit => ?rand(1000)}),
+    ?testList([0], ?FORWARD, {index, -8}, #{offset => -2, limit => ?rand(1000)}),
 
-    ?testList([0], ?BACKWARD, {timestamp, 9999}, #{off => 0, lim => ?rand(1000)}),
-    ?testList([0], ?FORWARD, {timestamp, 9999}, #{off => 0, lim => ?rand(1000)}),
-    ?testList([], ?BACKWARD, {timestamp, 9999}, #{off => 56, lim => ?rand(1000)}),
-    ?testList([], ?FORWARD, {timestamp, 9999}, #{off => 56, lim => ?rand(1000)}),
-    ?testList([0], ?BACKWARD, {timestamp, 9999}, #{off => -100, lim => ?rand(1000)}),
-    ?testList([0], ?FORWARD, {timestamp, 9999}, #{off => -100, lim => ?rand(1000)}),
+    ?testList([0], ?BACKWARD, {timestamp, 9999}, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([0], ?FORWARD, {timestamp, 9999}, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([], ?BACKWARD, {timestamp, 9999}, #{offset => 56, limit => ?rand(1000)}),
+    ?testList([], ?FORWARD, {timestamp, 9999}, #{offset => 56, limit => ?rand(1000)}),
+    ?testList([0], ?BACKWARD, {timestamp, 9999}, #{offset => -100, limit => ?rand(1000)}),
+    ?testList([0], ?FORWARD, {timestamp, 9999}, #{offset => -100, limit => ?rand(1000)}),
 
-    ?testList([0], ?BACKWARD, {timestamp, 15683}, #{off => 0, lim => ?rand(1000)}),
-    ?testList([], ?FORWARD, {timestamp, 15683}, #{off => 0, lim => ?rand(1000)}),
-    ?testList([], ?BACKWARD, {timestamp, 15683}, #{off => 9, lim => ?rand(1000)}),
-    ?testList([], ?FORWARD, {timestamp, 15683}, #{off => 9, lim => ?rand(1000)}),
-    ?testList([0], ?BACKWARD, {timestamp, 15683}, #{off => -895, lim => ?rand(1000)}),
-    ?testList([0], ?FORWARD, {timestamp, 15683}, #{off => -895, lim => ?rand(1000)}),
+    ?testList([0], ?BACKWARD, {timestamp, 15683}, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([], ?FORWARD, {timestamp, 15683}, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([], ?BACKWARD, {timestamp, 15683}, #{offset => 9, limit => ?rand(1000)}),
+    ?testList([], ?FORWARD, {timestamp, 15683}, #{offset => 9, limit => ?rand(1000)}),
+    ?testList([0], ?BACKWARD, {timestamp, 15683}, #{offset => -895, limit => ?rand(1000)}),
+    ?testList([0], ?FORWARD, {timestamp, 15683}, #{offset => -895, limit => ?rand(1000)}),
 
-    ?testList([], ?BACKWARD, {timestamp, 0}, #{off => 0, lim => ?rand(1000)}),
-    ?testList([0], ?FORWARD, {timestamp, 0}, #{off => 0, lim => ?rand(1000)}),
-    ?testList([], ?BACKWARD, {timestamp, 0}, #{off => 33, lim => ?rand(1000)}),
-    ?testList([], ?FORWARD, {timestamp, 0}, #{off => 33, lim => ?rand(1000)}),
-    ?testList([0], ?BACKWARD, {timestamp, 0}, #{off => -70, lim => ?rand(1000)}),
-    ?testList([0], ?FORWARD, {timestamp, 0}, #{off => -70, lim => ?rand(1000)}).
+    ?testList([], ?BACKWARD, {timestamp, 0}, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([0], ?FORWARD, {timestamp, 0}, #{offset => 0, limit => ?rand(1000)}),
+    ?testList([], ?BACKWARD, {timestamp, 0}, #{offset => 33, limit => ?rand(1000)}),
+    ?testList([], ?FORWARD, {timestamp, 0}, #{offset => 33, limit => ?rand(1000)}),
+    ?testList([0], ?BACKWARD, {timestamp, 0}, #{offset => -70, limit => ?rand(1000)}),
+    ?testList([0], ?FORWARD, {timestamp, 0}, #{offset => -70, limit => ?rand(1000)}).
+
+
+list_log_with_one_full_node(_, MaxEntriesPerNode) ->
+    append(#{count => MaxEntriesPerNode, first_at => 0, interval => 1}),
+
+    EffLimit = min(1000, MaxEntriesPerNode),
+    MaxEntryIndex = MaxEntriesPerNode - 1,
+    ExpBackwardResult = ?range(MaxEntryIndex, max(0, MaxEntryIndex - EffLimit + 1)),
+
+    ?testList([MaxEntryIndex], ?BACKWARD, undefined, #{limit => 1}),
+    ?testList([0], ?FORWARD, undefined, #{limit => 1}),
+
+    ?testList(ExpBackwardResult, ?BACKWARD, undefined, #{limit => MaxEntriesPerNode}),
+    ?testList(?range(0, EffLimit - 1), ?FORWARD, undefined, #{limit => MaxEntriesPerNode}),
+
+    ?testList(ExpBackwardResult, ?BACKWARD, {index, MaxEntryIndex}, #{limit => MaxEntriesPerNode}),
+    ?testList(?range(0, EffLimit - 1), ?FORWARD, {index, 0}, #{limit => MaxEntriesPerNode}),
+
+    ?testList([0], ?BACKWARD, {index, 0}, #{limit => MaxEntriesPerNode}),
+    ?testList([MaxEntryIndex], ?FORWARD, {index, MaxEntryIndex}, #{limit => MaxEntriesPerNode}),
+
+    ?testList(ExpBackwardResult, ?BACKWARD, {timestamp, MaxEntryIndex}, #{limit => MaxEntriesPerNode}),
+    ?testList(?range(0, EffLimit - 1), ?FORWARD, {timestamp, 0}, #{limit => MaxEntriesPerNode}),
+
+    ?testList([0], ?BACKWARD, {timestamp, 0}, #{limit => MaxEntriesPerNode}),
+    ?testList([MaxEntryIndex], ?FORWARD, {timestamp, MaxEntryIndex}, #{limit => MaxEntriesPerNode}).
 
 
 append_with_time_warps(LogId, _) ->
@@ -494,40 +516,47 @@ append(Spec) ->
             random -> ?rand(10000);
             _ -> Interval
         end)
-    end, lists:seq(1, EntryCount)).
+    end, ?range(1, EntryCount)).
 
 
-list_ids_and_verify(Direction, StartFrom, OtherOpts) ->
-    Offset = maps:get(off, OtherOpts, 0),
-    Limit = maps:get(lim, OtherOpts, 1000),
-    LogId = get_current_log_id(),
-    {ok, {ProgressMarker, Batch}} = infinite_log:list(LogId, #{
-        direction => Direction,
-        start_from => StartFrom,
-        offset => Offset,
-        limit => Limit
-    }),
-    ListedIds = lists:map(fun({EntryId, {Timestamp, Content}}) ->
-        ?assertEqual({Timestamp, Content}, get_entry(LogId, EntryId)),
-        EntryId
-    end, Batch),
+% to be called within an ?assert() macro to pinpoint the failing line
+list_indices_and_verify(ExpectedIndices, Direction, StartFrom, OtherOpts) ->
+    try
+        Offset = maps:get(offset, OtherOpts, 0),
+        Limit = maps:get(limit, OtherOpts, 1000),
+        LogId = get_current_log_id(),
+        {ok, {ProgressMarker, Batch}} = infinite_log:list(LogId, #{
+            direction => Direction,
+            start_from => StartFrom,
+            offset => Offset,
+            limit => Limit
+        }),
 
-    ExpProgressMarker = case length(ListedIds) of
-        0 ->
-            done;
-        _ ->
-            LastEntryId = case Direction of
-                ?FORWARD -> get_entry_count(LogId) - 1;
-                ?BACKWARD -> 0
-            end,
-            case lists:last(ListedIds) of
-                LastEntryId -> done;
-                _ -> more
-            end
-    end,
-    ?assertEqual(ExpProgressMarker, ProgressMarker),
+        ListedIndices = lists:map(fun({EntryIndex, {Timestamp, Content}}) ->
+            ?assertEqual({Timestamp, Content}, get_entry(LogId, EntryIndex)),
+            EntryIndex
+        end, Batch),
+        ?assertEqual(ExpectedIndices, ListedIndices),
 
-    ListedIds.
+        ExpProgressMarker = case length(ExpectedIndices) of
+            0 ->
+                done;
+            _ ->
+                LastEntryIndex = case Direction of
+                    ?FORWARD -> get_entry_count(LogId) - 1;
+                    ?BACKWARD -> 0
+                end,
+                case lists:last(ExpectedIndices) of
+                    LastEntryIndex -> done;
+                    _ -> more
+                end
+        end,
+        ?assertEqual(ExpProgressMarker, ProgressMarker),
+
+        true
+    catch _:_ ->
+        false
+    end.
 
 
 extract_timestamps(ListingResult) ->
@@ -550,12 +579,12 @@ get_entry_count(Id) ->
     node_cache:get({entry_count, Id}, 0).
 
 
-store_entry(Id, EntryId, Entry) ->
-    node_cache:put({entry, Id, EntryId}, Entry).
+store_entry(Id, EntryIndex, Entry) ->
+    node_cache:put({entry, Id, EntryIndex}, Entry).
 
 
-get_entry(Id, EntryId) ->
-    node_cache:get({entry, Id, EntryId}).
+get_entry(Id, EntryIndex) ->
+    node_cache:get({entry, Id, EntryIndex}).
 
 
 sentinel_exists(LogId) ->

@@ -25,12 +25,16 @@
 % In addition, it contains the newest node, to which all appends are done until
 % it becomes full - to optimize the performance.
 -record(sentinel, {
-    structure_id :: infinite_log:id(),
+    log_id :: infinite_log:log_id(),
     max_entries_per_node :: pos_integer(),
     entry_count = 0 :: non_neg_integer(),
     oldest_timestamp = 0 :: infinite_log:timestamp(),
     newest_timestamp = 0 :: infinite_log:timestamp(),
     buffer = #node{} :: infinite_log:log_node()
 }).
+
+% possible directions of listing
+-define(BACKWARD, backward_from_newest).
+-define(FORWARD, forward_from_oldest).
 
 -endif.
