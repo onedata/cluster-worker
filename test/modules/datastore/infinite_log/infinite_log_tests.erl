@@ -53,7 +53,7 @@
 inf_log_test_() ->
     {foreach,
         fun() ->
-            clock_freezer_mock:setup_locally([infinite_log]),
+            clock_freezer_mock:setup_locally([infinite_log_sentinel]),
             node_cache:init()
         end,
         fun(_) ->
@@ -588,15 +588,14 @@ get_entry(Id, EntryIndex) ->
 
 
 sentinel_exists(LogId) ->
-    case infinite_log_persistence:get_record(LogId) of
+    case infinite_log_sentinel:get(LogId) of
         {ok, _} -> true;
         {error, not_found} -> false
     end.
 
 
 node_exists(LogId, NodeNumber) ->
-    NodeId = datastore_key:build_adjacent(integer_to_binary(NodeNumber), LogId),
-    case infinite_log_persistence:get_record(NodeId) of
+    case infinite_log_node:get(LogId, NodeNumber) of
         {ok, _} -> true;
         {error, not_found} -> false
     end.

@@ -30,7 +30,7 @@
     entry_count = 0 :: non_neg_integer(),
     oldest_timestamp = 0 :: infinite_log:timestamp(),
     newest_timestamp = 0 :: infinite_log:timestamp(),
-    buffer = #node{} :: infinite_log:log_node()
+    buffer = #node{} :: infinite_log_node:record()
 }).
 
 % possible directions of listing
