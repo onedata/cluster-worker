@@ -20,7 +20,7 @@
 -export([list/2]).
 
 -type direction() :: ?FORWARD | ?BACKWARD.
--type start_from() :: undefined | {index, infinite_log:entry_index()} | {timestamp, infinite_log:timestamp()}.
+-type start_from() :: undefined | {index, entry_index()} | {timestamp, timestamp()}.
 % offset from the starting point requested using start_from parameter, may be negative
 % if the offset points to an entry before the beginning of the list, it is rounded up to the first index
 % if the offset points to an entry after the end of the list, the returned result will always be empty
@@ -35,23 +35,46 @@
 }.
 %% @formatter:on
 
--type listing_batch() :: [{infinite_log:entry_index(), infinite_log:entry()}].
+-type listing_batch() :: [{entry_index(), entry()}].
 % indicates if listing has ended
 -type progress_marker() :: more | done.
 -type listing_result() :: {progress_marker(), listing_batch()}.
 -export_type([listing_opts/0, listing_result/0]).
 
+%%%-------------------------------------------------------------------
+%%% internal records and types
+%%%-------------------------------------------------------------------
 -record(listing_state, {
-    sentinel :: infinite_log_sentinel:record(),
+    sentinel :: sentinel_record(),
     direction :: direction(),
-    start_index :: infinite_log:entry_index(), % inclusive
-    end_index :: infinite_log:entry_index(),   % inclusive
+    start_index :: entry_index(), % inclusive
+    end_index :: entry_index(),   % inclusive
     acc :: listing_batch()
 }).
 -type listing_state() :: #listing_state{}.
 
+-record(search_state, {
+    sentinel :: sentinel_record(),
+    direction :: direction(),
+    target_tstamp :: timestamp(),
+    oldest_node_number = 0 :: node_number(),
+    oldest_index = 0 :: entry_index(),
+    oldest_tstamp = 0 :: timestamp(),
+    newest_node_number = 0 :: node_number(),
+    newest_index = 0 :: entry_index(),
+    newest_tstamp = 0 :: timestamp()
+}).
+-type search_state() :: #search_state{}.
+
 % index of an entry within a node, starting from 0
 -type index_in_node() :: non_neg_integer().
+
+-type timestamp() :: infinite_log:timestamp().
+-type entry_index() :: infinite_log:entry_index().
+-type entry() :: infinite_log:entry().
+-type sentinel_record() :: infinite_log_sentinel:record().
+-type node_record() :: infinite_log_node:record().
+-type node_number() :: infinite_log_node:node_number().
 
 -define(MAX_LISTING_BATCH, 1000).
 
@@ -59,7 +82,7 @@
 %% API
 %%=====================================================================
 
--spec list(infinite_log_sentinel:record(), listing_opts()) -> listing_result().
+-spec list(sentinel_record(), listing_opts()) -> listing_result().
 list(Sentinel = #sentinel{entry_count = EntryCount}, Opts) ->
     Direction = maps:get(direction, Opts, forward_from_newest),
     StartFrom = maps:get(start_from, Opts, undefined),
@@ -125,14 +148,8 @@ list(#listing_state{sentinel = Sentinel, direction = Direction, start_index = St
 
 
 %% @private
--spec extract_entries(
-    infinite_log_sentinel:record(),
-    direction(),
-    infinite_log_node:node_number(),
-    index_in_node(),
-    limit()
-) ->
-    [infinite_log:entry()].
+-spec extract_entries(sentinel_record(), direction(), node_number(), index_in_node(), limit()) ->
+    [entry()].
 extract_entries(Sentinel, Direction, NodeNumber, StartIndexInNode, Limit) ->
     #node{entries = Entries} = infinite_log_sentinel:get_node_by_number(Sentinel, NodeNumber),
     EntriesLength = infinite_log_node:get_node_entries_length(Sentinel, NodeNumber),
@@ -147,12 +164,8 @@ extract_entries(Sentinel, Direction, NodeNumber, StartIndexInNode, Limit) ->
 
 
 %% @private
--spec assign_entry_indices(
-    direction(),
-    [infinite_log:entry()],
-    infinite_log:entry_index(),
-    infinite_log:entry_index()
-) -> listing_batch().
+-spec assign_entry_indices(direction(), [entry()], entry_index(), entry_index()) ->
+    listing_batch().
 assign_entry_indices(?FORWARD, Entries, StartIndex, EndIndex) ->
     lists:zip(lists:seq(StartIndex, EndIndex), Entries);
 assign_entry_indices(?BACKWARD, Entries, StartIndex, EndIndex) ->
@@ -160,7 +173,7 @@ assign_entry_indices(?BACKWARD, Entries, StartIndex, EndIndex) ->
 
 
 %% @private
--spec gen_progress_marker(infinite_log_sentinel:record(), direction(), infinite_log:entry_index()) ->
+-spec gen_progress_marker(sentinel_record(), direction(), entry_index()) ->
     progress_marker().
 gen_progress_marker(#sentinel{entry_count = EntryCount}, ?FORWARD, EndIndex) when EndIndex >= EntryCount - 1 ->
     done;
@@ -173,7 +186,8 @@ gen_progress_marker(_, ?BACKWARD, _) ->
 
 
 %% @private
--spec calc_end_index(direction(), infinite_log:entry_index(), limit()) -> infinite_log:entry_index().
+-spec calc_end_index(direction(), entry_index(), limit()) ->
+    entry_index().
 calc_end_index(?FORWARD, StartIndex, Limit) ->
     StartIndex + Limit - 1;
 calc_end_index(?BACKWARD, StartIndex, Limit) ->
@@ -191,8 +205,8 @@ calc_end_index(?BACKWARD, StartIndex, Limit) ->
 %% Every offset exceeding the log length is rounded down to the next index after the last element.
 %% @end
 %%--------------------------------------------------------------------
--spec start_from_param_to_offset(infinite_log_sentinel:record(), direction(), start_from()) ->
-    infinite_log:entry_index().
+-spec start_from_param_to_offset(sentinel_record(), direction(), start_from()) ->
+    entry_index().
 start_from_param_to_offset(_Sentinel, _, undefined) ->
     0;
 start_from_param_to_offset(#sentinel{entry_count = EntryCount}, ?FORWARD, {index, EntryIndex}) ->
@@ -200,12 +214,31 @@ start_from_param_to_offset(#sentinel{entry_count = EntryCount}, ?FORWARD, {index
 start_from_param_to_offset(#sentinel{entry_count = EntryCount}, ?BACKWARD, {index, EntryIndex}) ->
     snap_to_range(EntryCount - 1 - EntryIndex, {0, EntryCount});
 start_from_param_to_offset(Sentinel, Direction, {timestamp, Timestamp}) ->
-    EntryIndex = locate_entry(
-        Sentinel, Direction, Timestamp,
-        0, Sentinel#sentinel.oldest_timestamp,
-        Sentinel#sentinel.entry_count - 1, Sentinel#sentinel.newest_timestamp
-    ),
+    SS1 = #search_state{sentinel = Sentinel, direction = Direction, target_tstamp = Timestamp},
+    SS2 = set_search_since(SS1, 0, Sentinel#sentinel.oldest_timestamp),
+    SS3 = set_search_until(SS2, Sentinel#sentinel.entry_count - 1, Sentinel#sentinel.newest_timestamp),
+    EntryIndex = locate_timestamp(SS3),
     start_from_param_to_offset(Sentinel, Direction, {index, EntryIndex}).
+
+
+%% @private
+-spec set_search_since(search_state(), entry_index(), timestamp()) -> search_state().
+set_search_since(SS = #search_state{sentinel = Sentinel}, OldestIndex, OldestTimestamp) ->
+    SS#search_state{
+        oldest_node_number = infinite_log_node:entry_index_to_node_number(Sentinel, OldestIndex),
+        oldest_index = OldestIndex,
+        oldest_tstamp = OldestTimestamp
+    }.
+
+
+%% @private
+-spec set_search_until(search_state(), entry_index(), timestamp()) -> search_state().
+set_search_until(SS = #search_state{sentinel = Sentinel}, NewestIndex, NewestTimestamp) ->
+    SS#search_state{
+        newest_node_number = infinite_log_node:entry_index_to_node_number(Sentinel, NewestIndex),
+        newest_index = NewestIndex,
+        newest_tstamp = NewestTimestamp
+    }.
 
 
 %%--------------------------------------------------------------------
@@ -223,45 +256,32 @@ start_from_param_to_offset(Sentinel, Direction, {timestamp, Timestamp}) ->
 %%    ?BACKWARD -> last entry with timestamp that is not higher than the target timestamp.
 %% @end
 %%--------------------------------------------------------------------
--spec locate_entry(
-    infinite_log_sentinel:record(), direction(), infinite_log:timestamp(),
-    infinite_log:entry_index(), infinite_log:timestamp(),
-    infinite_log:entry_index(), infinite_log:timestamp()
-) ->
-    infinite_log:entry_index().
-locate_entry(_, ?FORWARD, TStamp, OldestIndex, OldestTStamp, _, _) when TStamp =< OldestTStamp ->
-    OldestIndex;
-locate_entry(_, ?FORWARD, TStamp, _, _, NewestIndex, NewestTStamp) when TStamp > NewestTStamp ->
-    NewestIndex + 1;
-locate_entry(_, ?BACKWARD, TStamp, _, _, NewestIndex, NewestTStamp) when TStamp >= NewestTStamp ->
-    NewestIndex;
-locate_entry(_, ?BACKWARD, TStamp, OldestIndex, OldestTStamp, _, _) when TStamp < OldestTStamp ->
-    OldestIndex - 1;
-locate_entry(Sentinel, Direction, TStamp, OldestIndex, OldestTStamp, NewestIndex, NewestTStamp) ->
-    OldestNodeNum = infinite_log_node:entry_index_to_node_number(Sentinel, OldestIndex),
-    NewestNodeNum = infinite_log_node:entry_index_to_node_number(Sentinel, NewestIndex),
+-spec locate_timestamp(search_state()) -> entry_index().
+locate_timestamp(SS = #search_state{direction = ?FORWARD, target_tstamp = T, oldest_tstamp = Oldest}) when T =< Oldest ->
+    SS#search_state.oldest_index;
+locate_timestamp(SS = #search_state{direction = ?FORWARD, target_tstamp = T, newest_tstamp = Newest}) when T > Newest ->
+    SS#search_state.newest_index + 1;
+locate_timestamp(SS = #search_state{direction = ?BACKWARD, target_tstamp = T, newest_tstamp = Newest}) when T >= Newest ->
+    SS#search_state.newest_index;
+locate_timestamp(SS = #search_state{direction = ?BACKWARD, target_tstamp = T, oldest_tstamp = Oldest}) when T < Oldest ->
+    SS#search_state.oldest_index - 1;
+locate_timestamp(SS = #search_state{oldest_node_number = OldestNodeNum, newest_node_number = NewestNodeNum}) ->
     case NewestNodeNum - OldestNodeNum of
         0 ->
-            locate_entry_within_one_node(Sentinel, Direction, TStamp, OldestNodeNum);
+            locate_timestamp_within_one_node(SS);
         1 ->
-            locate_entry_within_two_adjacent_nodes(Sentinel, Direction, TStamp, OldestNodeNum, NewestNodeNum);
+            locate_timestamp_within_two_adjacent_nodes(SS);
         _ ->
-            locate_entry_within_more_than_two_nodes(
-                Sentinel, Direction, TStamp, OldestIndex, OldestTStamp, NewestIndex, NewestTStamp
-            )
+            locate_timestamp_within_more_than_two_nodes(SS)
     end.
 
 
 %% @private
--spec locate_entry_within_one_node(
-    infinite_log_sentinel:record(),
-    direction(),
-    infinite_log:timestamp(),
-    infinite_log_node:node_number()
-) ->
-    infinite_log:entry_index().
-locate_entry_within_one_node(Sentinel, Direction, TStamp, NodeNumber) ->
-    case locate_timestamp_in_node(Sentinel, NodeNumber, Direction, TStamp) of
+-spec locate_timestamp_within_one_node(search_state()) -> entry_index().
+locate_timestamp_within_one_node(#search_state{
+    sentinel = Sentinel, direction = Direction, target_tstamp = TStamp, oldest_node_number = NodeNumber
+}) ->
+    case lookup_timestamp_in_node(Sentinel, NodeNumber, Direction, TStamp) of
         {older_than, _} ->
             entry_index_older_than_first_in_node(Sentinel, NodeNumber, Direction);
         {included, IndexInNode} ->
@@ -272,39 +292,28 @@ locate_entry_within_one_node(Sentinel, Direction, TStamp, NodeNumber) ->
 
 
 %% @private
--spec locate_entry_within_two_adjacent_nodes(
-    infinite_log_sentinel:record(),
-    direction(),
-    infinite_log:timestamp(),
-    infinite_log_node:node_number(),
-    infinite_log_node:node_number()
-) ->
-    infinite_log:entry_index().
-locate_entry_within_two_adjacent_nodes(Sentinel, Direction, TStamp, FirstNodeNum, SecondNodeNum) ->
-    case locate_timestamp_in_node(Sentinel, FirstNodeNum, Direction, TStamp) of
+-spec locate_timestamp_within_two_adjacent_nodes(search_state()) -> entry_index().
+locate_timestamp_within_two_adjacent_nodes(SS = #search_state{
+    sentinel = Sentinel, direction = Direction, target_tstamp = TStamp,
+    oldest_node_number = FirstNodeNum, newest_node_number = SecondNodeNum
+}) ->
+    case lookup_timestamp_in_node(Sentinel, FirstNodeNum, Direction, TStamp) of
         {older_than, _} ->
             entry_index_older_than_first_in_node(Sentinel, FirstNodeNum, Direction);
         {included, IndexInNode} ->
             index_in_node_to_entry_index(Sentinel, FirstNodeNum, IndexInNode);
         {newer_than, _} ->
-            locate_entry_within_one_node(Sentinel, Direction, TStamp, SecondNodeNum)
+            locate_timestamp_within_one_node(SS#search_state{oldest_node_number = SecondNodeNum})
     end.
 
 
 %% @private
--spec locate_entry_within_more_than_two_nodes(
-    infinite_log_sentinel:record(),
-    direction(),
-    infinite_log:timestamp(),
-    infinite_log:entry_index(), infinite_log:timestamp(),
-    infinite_log:entry_index(), infinite_log:timestamp()
-) ->
-    infinite_log:entry_index().
-locate_entry_within_more_than_two_nodes(
-    Sentinel, Direction, TStamp, OldestIndex, OldestTStamp, NewestIndex, NewestTStamp
-) ->
-    OldestNodeNum = infinite_log_node:entry_index_to_node_number(Sentinel, OldestIndex),
-    NewestNodeNum = infinite_log_node:entry_index_to_node_number(Sentinel, NewestIndex),
+-spec locate_timestamp_within_more_than_two_nodes(search_state()) -> entry_index().
+locate_timestamp_within_more_than_two_nodes(SS = #search_state{
+    sentinel = Sentinel, direction = Direction, target_tstamp = TStamp,
+    oldest_node_number = OldestNodeNum, oldest_index = OldestIndex, oldest_tstamp = OldestTStamp,
+    newest_node_number = NewestNodeNum, newest_index = NewestIndex, newest_tstamp = NewestTStamp
+}) ->
     PivotIndex = OldestIndex + round(
         (NewestIndex - OldestIndex) * (TStamp - OldestTStamp) / (NewestTStamp - OldestTStamp)
     ),
@@ -312,31 +321,22 @@ locate_entry_within_more_than_two_nodes(
         infinite_log_node:entry_index_to_node_number(Sentinel, PivotIndex),
         {OldestNodeNum + 1, NewestNodeNum - 1}
     ),
-    case locate_timestamp_in_node(Sentinel, PivotNodeNum, Direction, TStamp) of
+    case lookup_timestamp_in_node(Sentinel, PivotNodeNum, Direction, TStamp) of
         {older_than, PivotOldestTStamp} ->
             PivotOldestIndex = index_in_node_to_entry_index(Sentinel, PivotNodeNum, 0),
-            locate_entry(
-                Sentinel, Direction, TStamp, OldestIndex, OldestTStamp, PivotOldestIndex, PivotOldestTStamp
-            );
+            locate_timestamp(set_search_until(SS, PivotOldestIndex, PivotOldestTStamp));
         {included, IndexInNode} ->
             index_in_node_to_entry_index(Sentinel, PivotNodeNum, IndexInNode);
         {newer_than, PivotNewestTStamp} ->
             PivotNewestIndex = index_in_node_to_entry_index(Sentinel, PivotNodeNum + 1, 0) - 1,
-            locate_entry(
-                Sentinel, Direction, TStamp, PivotNewestIndex, PivotNewestTStamp, NewestIndex, NewestTStamp
-            )
+            locate_timestamp(set_search_since(SS, PivotNewestIndex, PivotNewestTStamp))
     end.
 
 
 %% @private
--spec locate_timestamp_in_node(
-    infinite_log_sentinel:record(),
-    infinite_log_node:node_number(),
-    direction(),
-    infinite_log:timestamp()
-) ->
-    {older_than, infinite_log:timestamp()} | {included, index_in_node()} | {newer_than, infinite_log:timestamp()}.
-locate_timestamp_in_node(Sentinel, NodeNumber, Direction, TargetTimestamp) ->
+-spec lookup_timestamp_in_node(sentinel_record(), node_number(), direction(), timestamp()) ->
+    {older_than, timestamp()} | {included, index_in_node()} | {newer_than, timestamp()}.
+lookup_timestamp_in_node(Sentinel, NodeNumber, Direction, TargetTimestamp) ->
     Node = infinite_log_sentinel:get_node_by_number(Sentinel, NodeNumber),
     case compare_timestamp_against_node(Node, Direction, TargetTimestamp) of
         older ->
@@ -349,7 +349,7 @@ locate_timestamp_in_node(Sentinel, NodeNumber, Direction, TargetTimestamp) ->
 
 
 %% @private
--spec compare_timestamp_against_node(infinite_log_node:record(), direction(), infinite_log:timestamp()) ->
+-spec compare_timestamp_against_node(node_record(), direction(), timestamp()) ->
     older | included | newer.
 compare_timestamp_against_node(#node{oldest_timestamp = Oldest}, ?FORWARD, T) when T =< Oldest -> older;
 compare_timestamp_against_node(#node{newest_timestamp = Newest}, ?FORWARD, T) when T =< Newest -> included;
@@ -360,13 +360,7 @@ compare_timestamp_against_node(#node{newest_timestamp = Newest}, ?BACKWARD, T) w
 
 
 %% @private
--spec index_in_node_of_timestamp(
-    infinite_log_sentinel:record(),
-    infinite_log_node:node_number(),
-    infinite_log_node:record(),
-    direction(),
-    infinite_log:timestamp()
-) ->
+-spec index_in_node_of_timestamp(sentinel_record(), node_number(), node_record(), direction(), timestamp()) ->
     index_in_node().
 index_in_node_of_timestamp(Sentinel, NodeNumber, Node, Direction, TargetTimestamp) ->
     EntriesLength = infinite_log_node:get_node_entries_length(Sentinel, NodeNumber),
@@ -374,12 +368,7 @@ index_in_node_of_timestamp(Sentinel, NodeNumber, Node, Direction, TargetTimestam
 
 
 %% @private
--spec index_in_node_of_timestamp(
-    infinite_log_node:record(),
-    non_neg_integer(),
-    direction(),
-    infinite_log:timestamp()
-) ->
+-spec index_in_node_of_timestamp(node_record(), non_neg_integer(), direction(), timestamp()) ->
     index_in_node().
 index_in_node_of_timestamp(#node{entries = Entries}, EntriesLength, ?FORWARD, TargetTimestamp) ->
     lists_utils:foldl_while(fun({Timestamp, _}, Index) ->
@@ -398,12 +387,8 @@ index_in_node_of_timestamp(#node{entries = Entries}, EntriesLength, ?BACKWARD, T
 
 
 %% @private
--spec entry_index_older_than_first_in_node(
-    infinite_log_sentinel:record(),
-    infinite_log_node:node_number(),
-    direction()
-) ->
-    infinite_log:entry_index().
+-spec entry_index_older_than_first_in_node(sentinel_record(), node_number(), direction()) ->
+    entry_index().
 entry_index_older_than_first_in_node(Sentinel, NodeNumber, Direction) ->
     FirstEntryIndex = index_in_node_to_entry_index(Sentinel, NodeNumber, 0),
     case Direction of
@@ -413,12 +398,8 @@ entry_index_older_than_first_in_node(Sentinel, NodeNumber, Direction) ->
 
 
 %% @private
--spec entry_index_newer_than_latest_in_node(
-    infinite_log_sentinel:record(),
-    infinite_log_node:node_number(),
-    direction()
-) ->
-    infinite_log:entry_index().
+-spec entry_index_newer_than_latest_in_node(sentinel_record(), node_number(), direction()) ->
+    entry_index().
 entry_index_newer_than_latest_in_node(Sentinel, NodeNumber, Direction) ->
     NewestIndex = index_in_node_to_entry_index(Sentinel, NodeNumber + 1, 0) - 1,
     case Direction of
@@ -428,8 +409,8 @@ entry_index_newer_than_latest_in_node(Sentinel, NodeNumber, Direction) ->
 
 
 %% @private
--spec index_in_node_to_entry_index(infinite_log_sentinel:record(), infinite_log_node:node_number(), index_in_node()) ->
-    infinite_log:entry_index().
+-spec index_in_node_to_entry_index(sentinel_record(), node_number(), index_in_node()) ->
+    entry_index().
 index_in_node_to_entry_index(Sentinel, NewestNodeNum, Index) ->
     NewestNodeNum * Sentinel#sentinel.max_entries_per_node + Index.
 
