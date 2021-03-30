@@ -52,6 +52,7 @@ delete(LogId) ->
     %% they actually will after integration with datastore
     case LogId of
         <<"123">> -> {error, etmpfail};
+        %% @TODO VFS-7411 should return ok if the document is not found
         _ -> node_cache:clear({?MODULE, LogId})
     end.
 
