@@ -31,6 +31,7 @@
 % appending to log is tested during listing tests
 -define(TEST_CASES, [
     {"create_and_destroy", fun create_and_destroy/2},
+    {"set_ttl", fun set_ttl/2},
     {"list_inexistent_log", fun list_inexistent_log/2},
     {"list_empty_log", fun list_empty_log/2},
     {"list", fun list/2},
@@ -53,7 +54,7 @@
 inf_log_test_() ->
     {foreach,
         fun() ->
-            clock_freezer_mock:setup_locally([infinite_log_sentinel]),
+            clock_freezer_mock:setup_locally([infinite_log_sentinel, node_cache]),
             node_cache:init()
         end,
         fun(_) ->
@@ -76,27 +77,21 @@ inf_log_test_() ->
 create_and_destroy(LogId, MaxEntriesPerNode) ->
     % the log is created in test setup
     EntryCount = 1000,
-    MaxNodeNumber = (EntryCount - 1) div MaxEntriesPerNode,
-
-    ForeachNodeNumber = fun(Callback) ->
-        % does not run the callback for sentinel (which has MaxNodeNumber)
-        lists:foreach(Callback, lists:seq(0, MaxNodeNumber - 1))
-    end,
 
     ?assert(sentinel_exists(LogId)),
-    ForeachNodeNumber(fun(NodeNumber) ->
+    foreach_archival_node_number(EntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
         ?assertNot(node_exists(LogId, NodeNumber))
     end),
 
     append(#{count => EntryCount, first_at => 0, interval => 1}),
     ?assert(sentinel_exists(LogId)),
-    ForeachNodeNumber(fun(NodeNumber) ->
+    foreach_archival_node_number(EntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
         ?assert(node_exists(LogId, NodeNumber))
     end),
 
     ?assertEqual(ok, infinite_log:destroy(LogId)),
     ?assertNot(sentinel_exists(LogId)),
-    ForeachNodeNumber(fun(NodeNumber) ->
+    foreach_archival_node_number(EntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
         ?assertNot(node_exists(LogId, NodeNumber))
     end),
 
@@ -104,6 +99,32 @@ create_and_destroy(LogId, MaxEntriesPerNode) ->
     ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD})),
     ?assertEqual({error, not_found}, infinite_log:append(LogId, <<"log">>)),
     ?assertEqual(ok, infinite_log:destroy(LogId)).
+
+
+set_ttl(LogId, MaxEntriesPerNode) ->
+    % the log is created in test setup
+    EntryCount = 5000,
+    append(#{count => EntryCount, first_at => 0, interval => 1}),
+
+    Ttl = rand:uniform(100000000),
+    ?assertEqual(ok, infinite_log:set_ttl(LogId, Ttl)),
+
+    clock_freezer_mock:simulate_seconds_passing(Ttl - 1),
+    ?assert(sentinel_exists(LogId)),
+    foreach_archival_node_number(EntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
+        ?assert(node_exists(LogId, NodeNumber))
+    end),
+
+    clock_freezer_mock:simulate_seconds_passing(1),
+    ?assertNot(sentinel_exists(LogId)),
+    foreach_archival_node_number(EntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
+        ?assertNot(node_exists(LogId, NodeNumber))
+    end),
+
+    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?FORWARD})),
+    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD})),
+    ?assertEqual({error, not_found}, infinite_log:append(LogId, <<"log">>)),
+    ?assertEqual({error, not_found}, infinite_log:set_ttl(LogId, Ttl)).
 
 
 list_inexistent_log(_, _) ->
@@ -561,6 +582,12 @@ list_indices_and_verify(ExpectedIndices, Direction, StartFrom, OtherOpts) ->
 
 extract_timestamps(ListingResult) ->
     [Timestamp || {_Id, {Timestamp, _Content}} <- ListingResult].
+
+
+foreach_archival_node_number(EntryCount, MaxEntriesPerNode, Callback) ->
+    MaxNodeNumber = (EntryCount - 1) div MaxEntriesPerNode,
+    % do not run the callback for sentinel (which has MaxNodeNumber)
+    lists:foreach(Callback, lists:seq(0, MaxNodeNumber - 1)).
 
 
 store_current_log_id(Id) ->

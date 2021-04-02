@@ -42,7 +42,7 @@
 -export_type([listing_opts/0, listing_result/0]).
 
 %%%-------------------------------------------------------------------
-%%% internal records and types
+%%% internal definitions
 %%%-------------------------------------------------------------------
 -record(listing_state, {
     sentinel :: sentinel_record(),

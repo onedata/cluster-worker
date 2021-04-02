@@ -16,7 +16,7 @@
 -include("modules/datastore/infinite_log.hrl").
 
 %% Model API
--export([get/2, save/3, delete/2]).
+-export([get/2, save/3, delete/2, set_ttl/3]).
 %% Convenience functions
 -export([append_entry/2]).
 -export([get_node_entries_length/2]).
@@ -65,6 +65,20 @@ delete(LogId, NodeNumber) ->
         <<"123">> -> {error, etmpfail};
         %% @TODO VFS-7411 should return ok if the document is not found
         _ -> node_cache:clear({?MODULE, NodeId})
+    end.
+
+
+-spec set_ttl(infinite_log:log_id(), node_number(), time:seconds()) -> ok | {error, term()}.
+set_ttl(LogId, NodeNumber, Ttl) ->
+    NodeId = build_node_id(LogId, NodeNumber),
+    %% @TODO VFS-7411 trick dialyzer into thinking that errors can be returned
+    %% they actually will after integration with datastore
+    case NodeId of
+        <<"123">> ->
+            {error, etmpfail};
+        _ ->
+            {ok, Record} = get(LogId, NodeNumber),
+            node_cache:put({?MODULE, NodeId}, Record, Ttl)
     end.
 
 %%=====================================================================

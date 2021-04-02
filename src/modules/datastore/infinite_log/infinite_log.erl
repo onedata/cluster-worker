@@ -47,6 +47,7 @@
 -export([create/2, destroy/1]).
 -export([append/2]).
 -export([list/2]).
+-export([set_ttl/2]).
 
 % unit of timestamps used across the module for stamping entries and searching
 -type timestamp() :: time:millis().
@@ -83,8 +84,12 @@ create(LogId, MaxEntriesPerNode) ->
 destroy(LogId) ->
     case infinite_log_sentinel:get(LogId) of
         {ok, Sentinel} ->
-            delete_log_nodes(Sentinel),
-            infinite_log_sentinel:delete(LogId);
+            case apply_for_archival_log_nodes(Sentinel, fun infinite_log_node:delete/2) of
+                {error, _} = Error ->
+                    Error;
+                ok ->
+                    infinite_log_sentinel:delete(LogId)
+            end;
         {error, not_found} ->
             ok
     end.
@@ -115,6 +120,30 @@ list(LogId, Opts) ->
             {ok, infinite_log_browser:list(Sentinel, Opts)}
     end.
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Makes the log expire (be deleted from database) after specified Time To Live.
+%% The procedure iterates through all documents used up by the log.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_ttl(log_id(), time:seconds()) -> ok | {error, term()}.
+set_ttl(LogId, Ttl) ->
+    case infinite_log_sentinel:get(LogId) of
+        {error, _} = GetError ->
+            GetError;
+        {ok, Sentinel} ->
+            SetNodeTtl = fun(LogId, NodeNumber) ->
+                infinite_log_node:set_ttl(LogId, NodeNumber, Ttl)
+            end,
+            case apply_for_archival_log_nodes(Sentinel, SetNodeTtl) of
+                {error, _} = SetTtlError ->
+                    SetTtlError;
+                ok ->
+                    infinite_log_sentinel:set_ttl(LogId, Ttl)
+            end
+    end.
+
 %%=====================================================================
 %% Internal functions
 %%=====================================================================
@@ -141,17 +170,27 @@ safe_log_content_size(#sentinel{max_entries_per_node = MaxEntriesPerNode}) ->
     ?SAFE_NODE_DB_SIZE div MaxEntriesPerNode - ?APPROXIMATE_EMPTY_ENTRY_DB_SIZE.
 
 
+%%--------------------------------------------------------------------
 %% @private
--spec delete_log_nodes(infinite_log_sentinel:record()) -> ok | {error, term()}.
-delete_log_nodes(Sentinel = #sentinel{log_id = LogId}) ->
+%% @doc
+%% Applies given function on all log nodes that are archival (will never be modified),
+%% i.e. all nodes apart from the newest one (buffer) included in the sentinel.
+%% Stops with an error if the function returns one.
+%% @end
+%%--------------------------------------------------------------------
+-spec apply_for_archival_log_nodes(
+    infinite_log_sentinel:record(),
+    fun((log_id(), infinite_log_node:node_number()) -> ok | {error, term()})
+) ->
+    ok | {error, term()}.
+apply_for_archival_log_nodes(Sentinel = #sentinel{log_id = LogId}, Callback) ->
     BufferNodeNumber = infinite_log_node:latest_node_number(Sentinel),
-    % the newest node (buffer) is included in the sentinel - no need to delete it
-    NodeNumbersToDelete = lists:seq(0, BufferNodeNumber - 1),
+    ArchivalNodeNumbers = lists:seq(0, BufferNodeNumber - 1),
     lists_utils:foldl_while(fun(NodeNumber, _) ->
-        case infinite_log_node:delete(LogId, NodeNumber) of
+        case Callback(LogId, NodeNumber) of
             ok ->
                 {cont, ok};
             {error, _} = Error ->
                 {halt, Error}
         end
-    end, ok, NodeNumbersToDelete).
+    end, ok, ArchivalNodeNumbers).
