@@ -30,8 +30,9 @@
 %% List API
 -export([list/2, list/3, list_scheduled/3, list_scheduled/4, get_first_scheduled_link/3, list_node_jobs/3]).
 %% Modify API
--export([add_link/6, add_scheduled_link/6, add_job_link/3,
-    delete_link/6, delete_scheduled_link/6, delete_job_link/4]).
+-export([add_link/6, add_scheduled_link/6, add_job_link/3, add_task_job_link/4,
+    delete_link/6, delete_scheduled_link/6, delete_job_link/4,
+    delete_task_job_link/5, get_and_delete_first_task_job_link/4]).
 
 %% For tests
 -export([forest_key/2]).
@@ -49,6 +50,8 @@
     <<Pool/binary, "###", (atom_to_binary(CallbackModule, utf8))/binary, "###",
         (atom_to_binary(Node, utf8))/binary, "###JOBS">>).
 -define(JOB_TREE, <<"JOB_TREE">>).
+% Definitions used to list tasks' jobs (used for fair load balancing between tasks)
+-define(JOB_TREE(TaskID), <<"JOB_TREE_", TaskID/binary>>).
 % Other definitions
 -define(LINK_NAME_ID_PART_LENGTH, 6).
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
@@ -205,6 +208,21 @@ add_job_link(Pool, CallbackModule, JobId) ->
     end,
     ok.
 
+-spec add_task_job_link(traverse:pool(), traverse:callback_module(), traverse:id(), traverse:job_id()) -> ok.
+add_task_job_link(Pool, CallbackModule, TaskId, JobId) ->
+    Ctx = traverse_task:get_ctx(),
+    Tree = ?JOB_TREE(TaskId),
+    case datastore_model:add_links(
+        Ctx#{local_links_tree_id => Tree, routing => local},
+        ?JOB_KEY(Pool, CallbackModule, node()),
+        Tree,
+        [{JobId, JobId}]
+    ) of
+        [{ok, _}] -> ok;
+        [{error, ?ALREADY_EXISTS}] -> ok % in case of restart
+    end,
+    ok.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Deletes link from main tree of tasks.
@@ -242,6 +260,44 @@ delete_job_link(Pool, CallbackModule, Node, JobId) ->
         [JobId]
     ),
     ok.
+
+-spec delete_task_job_link(traverse:pool(), traverse:callback_module(), node(), traverse:id(), traverse:job_id()) -> ok.
+delete_task_job_link(Pool, CallbackModule, Node, TaskId, JobId) ->
+    Ctx = traverse_task:get_ctx(),
+    Tree = ?JOB_TREE(TaskId),
+    [ok] = datastore_model:delete_links(
+        Ctx#{local_links_tree_id => Tree, routing => local},
+        ?JOB_KEY(Pool, CallbackModule, Node),
+        Tree,
+        [JobId]
+    ),
+    ok.
+
+-spec get_and_delete_first_task_job_link(traverse:pool(), traverse:callback_module(), node(), traverse:id()) ->
+    {ok, traverse:id()} | {error, term()}.
+get_and_delete_first_task_job_link(Pool, CallbackModule, Node, TaskId) ->
+    Ctx = traverse_task:get_ctx(),
+    Tree = ?JOB_TREE(TaskId),
+    critical_section:run([Pool, CallbackModule, Node, TaskId], fun() ->
+        FoldAns = datastore_model:fold_links(
+            Ctx#{local_links_tree_id => Tree, routing => local},
+            ?JOB_KEY(Pool, CallbackModule, Node),
+            Tree,
+            fun(#link{target = Target}, _Acc) -> {ok, Target} end,
+            undefined,
+            #{size => 1}
+        ),
+
+        case FoldAns of
+            {ok, undefined} ->
+                {error, not_found};
+            {ok, JobId} = OkAns ->
+                delete_task_job_link(Pool, CallbackModule, Node, TaskId, JobId),
+                OkAns;
+            Other ->
+                Other
+        end
+    end).
 
 %%%===================================================================
 %%% Internal functions

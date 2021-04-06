@@ -21,7 +21,8 @@
     executor :: traverse:environment_id(),
     main_job_id :: traverse:job_id(),
     node :: undefined | node(),
-    start_time = 0 :: traverse:timestamp()
+    start_time = 0 :: traverse:timestamp(),
+    single_master_job_mode :: boolean()
 }).
 
 
