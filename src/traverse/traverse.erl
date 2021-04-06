@@ -98,7 +98,8 @@
     creator => environment_id(),
     callback_module => callback_module(),
     group_id => group(),
-    additional_data => additional_data()
+    additional_data => additional_data(),
+    single_master_job_mode => boolean()
 }.
 -type task_execution_info() :: #task_execution_info{}. % see traverse.hrl
 % Basic types for jobs management

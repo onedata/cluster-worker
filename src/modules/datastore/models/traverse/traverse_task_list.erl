@@ -204,7 +204,7 @@ add_job_link(Pool, CallbackModule, JobId) ->
         [{JobId, JobId}]
     ) of
         [{ok, _}] -> ok;
-        [{error,already_exists}] -> ok % in case of restart
+        [{error, already_exists}] -> ok % in case of restart
     end,
     ok.
 
@@ -219,7 +219,7 @@ add_task_job_link(Pool, CallbackModule, TaskId, JobId) ->
         [{JobId, JobId}]
     ) of
         [{ok, _}] -> ok;
-        [{error, ?ALREADY_EXISTS}] -> ok % in case of restart
+        [{error, already_exists}] -> ok % in case of restart
     end,
     ok.
 
