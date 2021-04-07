@@ -150,14 +150,14 @@ single_master_job_test(Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     TestMap = #{<<"key">> => <<"value">>},
     ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, <<"single_master_job_test">>, {self(), 1, 1},
-        #{additional_data => TestMap, single_master_job_mode => true}])),
+        #{additional_data => TestMap, master_job_mode => single}])),
     check_task_list(Worker, ongoing, [<<"single_master_job_test">>]),
 
     {Expected, Description} = traverse_test_pool:get_expected(),
     Ans = traverse_test_pool:get_slave_ans(false),
     ?assertEqual(Expected, lists:sort(Ans)),
 
-    get_and_verify_job_activity_log(),
+    traverse_test_pool:get_and_verify_job_activity_log(),
 
     ?assertMatch({ok, #document{value = #traverse_task{description = Description, enqueued = false, status = finished,
         additional_data = TestMap}}}, rpc:call(Worker, traverse_task, get, [?POOL, <<"single_master_job_test">>]), 5),
@@ -521,19 +521,3 @@ check_ans_sorting([]) ->
 check_ans_sorting([A1, A2, A3 | Tail]) ->
     ?assertEqual([A1, A2, A3], lists:sort([A1, A2, A3])),
     check_ans_sorting(Tail).
-
-get_and_verify_job_activity_log() ->
-    get_and_verify_job_activity_log(job_stop, 0).
-
-get_and_verify_job_activity_log(LastType, LastNum) ->
-    receive
-        {job_activity_log, Type, Num} ->
-            ?assertNotEqual(LastType, Type),
-            case Type of
-                job_start -> ok;
-                job_stop -> ?assertEqual(LastNum, Num)
-            end,
-            get_and_verify_job_activity_log(Type, Num)
-    after
-        5000 -> ok
-    end.

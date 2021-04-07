@@ -86,7 +86,7 @@
     description = #{} :: traverse:description(),
     additional_data = #{} :: traverse:additional_data(),
 
-    single_master_job_mode :: boolean()
+    master_job_mode :: traverse:master_job_mode()
 }).
 
 -record(traverse_tasks_scheduler, {

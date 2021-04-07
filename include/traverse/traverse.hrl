@@ -22,7 +22,7 @@
     main_job_id :: traverse:job_id(),
     node :: undefined | node(),
     start_time = 0 :: traverse:timestamp(),
-    single_master_job_mode :: boolean()
+    master_job_mode :: traverse:master_job_mode()
 }).
 
 

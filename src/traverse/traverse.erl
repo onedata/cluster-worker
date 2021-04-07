@@ -93,13 +93,18 @@
 -type status() :: atom().   % framework uses statuses: scheduled, ongoing, finished and canceled but user can set
                             % any intermediary status using traverse_task:update_status function
 -type group() :: binary(). % group used for load balancing (see traverse_tasks_scheduler.erl)
+-type master_job_mode() :: single | all. % mode of master jobs starting on pool; for `all` each master job start is
+                                         % triggered immediately after job definition; for `single` only one master
+                                         % job start is triggered immediately after job definition - rest of jobs
+                                         % waits until execution of triggered job is finished; as a result only one
+                                         % master job is performed in parallel for each task for `single` mode
 -type run_options() :: #{
     executor => environment_id(),
     creator => environment_id(),
     callback_module => callback_module(),
     group_id => group(),
     additional_data => additional_data(),
-    single_master_job_mode => boolean()
+    master_job_mode => master_job_mode()
 }.
 -type task_execution_info() :: #task_execution_info{}. % see traverse.hrl
 % Basic types for jobs management
@@ -117,8 +122,8 @@
 }.
 
 -type master_job_extended_args() :: #{
-    task_id => id(),
-    master_job_starter_callback => master_job_starter_callback()
+    task_id := id(),
+    master_job_starter_callback => master_job_starter_callback() % callback is not supported when master_job_mode =:= single
 }.
 -type master_job_starter_callback() :: fun((master_job_starter_args()) -> ok).
 -type master_job_starter_args() :: #{
@@ -147,7 +152,7 @@
 -type tasks_ctxs() :: #{id() => ctx() | ctx_not_found}.
 -type jobs_per_task() :: #{id() => [{job_id(), job()}]}.
 
--export_type([pool/0, id/0, task/0, group/0, task_execution_info/0, job/0, job_id/0, job_status/0,
+-export_type([pool/0, id/0, task/0, group/0, master_job_mode/0, task_execution_info/0, job/0, job_id/0, job_status/0,
     environment_id/0, description/0, status/0, additional_data/0, master_job_extended_args/0, timestamp/0,
     sync_info/0, master_job_map/0, callback_module/0, node_crash_policy/0]).
 
@@ -298,7 +303,7 @@ run(PoolName, TaskId, Job, Options) ->
     CallbackModule = maps:get(callback_module, Options, binary_to_atom(PoolName, utf8)),
     TaskGroup = maps:get(group_id, Options, ?DEFAULT_GROUP),
     AdditionalData = maps:get(additional_data, Options, #{}),
-    SingleMasterJobMode = maps:get(single_master_job_mode, Options, false),
+    MasterJobMode = maps:get(master_job_mode, Options, all),
     ExtendedCtx = get_extended_ctx(CallbackModule, Job),
 
     {JobStatus, Node, Description} = case Creator =:= Executor of
@@ -315,7 +320,7 @@ run(PoolName, TaskId, Job, Options) ->
 
     {ok, JobId} = CallbackModule:update_job_progress(main_job, Job, PoolName, TaskId, JobStatus),
     ok = traverse_task:create(ExtendedCtx, PoolName, CallbackModule, TaskId, Creator, Executor,
-        TaskGroup, JobId, Node, Description, AdditionalData, SingleMasterJobMode),
+        TaskGroup, JobId, Node, Description, AdditionalData, MasterJobMode),
 
     case Node of
         undefined ->
@@ -326,7 +331,7 @@ run(PoolName, TaskId, Job, Options) ->
             ok = task_callback(CallbackModule, task_started, TaskId, PoolName),
             ok = rpc:call(Node, ?MODULE, run_on_master_pool, [
                 PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
-                CallbackModule, ExtendedCtx, Executor, TaskId, Job, JobId, SingleMasterJobMode])
+                CallbackModule, ExtendedCtx, Executor, TaskId, Job, JobId, MasterJobMode])
     end.
 
 %%--------------------------------------------------------------------
@@ -355,10 +360,10 @@ on_task_change(Task, Environment) ->
             case CallbackModule:get_job(MainJobId) of
                 {ok, Job, PoolName, TaskId} ->
                     {ok, #task_execution_info{
-                        single_master_job_mode = SingleMasterJobMode
+                        master_job_mode = MasterJobMode
                     }} = traverse_task:get_execution_info(Task),
                     maybe_run_scheduled_task(
-                        PoolName, CallbackModule, TaskId, Task, Environment, Job, MainJobId, SingleMasterJobMode);
+                        PoolName, CallbackModule, TaskId, Task, Environment, Job, MainJobId, MasterJobMode);
                 {error, not_found} ->
                     ok
             end;
@@ -382,12 +387,12 @@ on_job_change(Job, JobId, PoolName, TaskId, Environment) ->
                     {ok, #task_execution_info{
                         callback_module = CallbackModule,
                         executor = Executor,
-                        single_master_job_mode = SingleMasterJobMode
+                        master_job_mode = MasterJobMode
                     }} = traverse_task:get_execution_info(Task),
                     case Executor =:= Environment of
                         true ->
                             maybe_run_scheduled_task(
-                                PoolName, CallbackModule, TaskId, Task, Executor, Job, JobId, SingleMasterJobMode);
+                                PoolName, CallbackModule, TaskId, Task, Executor, Job, JobId, MasterJobMode);
                         _ ->
                             ok
                     end
@@ -447,18 +452,19 @@ cancel(PoolName, TaskId, Environment) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec execute_master_job(pool(), execution_pool(), execution_pool(), callback_module(), ctx(), environment_id(),
-    id(), job(), job_id(), boolean()) -> ok.
+    id(), job(), job_id(), master_job_mode()) -> ok.
 execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor,
-    TaskId, Job, JobId, SingleMasterJobMode) ->
+    TaskId, Job, JobId, MasterJobMode) ->
     try
-        {RunArg, MasterCallbackStatus} = case SingleMasterJobMode of
-            true -> {one, not_supported};
-            false -> {all, supported}
+        MasterJobExtendedArgs = case MasterJobMode of
+            single ->
+                #{task_id => TaskId}; % callback is not supported when master_job_mode =:= single
+            all ->
+                MasterJobCallback = prepare_master_callback(PoolName, MasterPool, SlavePool, CallbackModule,
+                    ExtendedCtx, Executor, TaskId),
+                #{task_id => TaskId, master_job_starter_callback => MasterJobCallback}
         end,
 
-        MasterJobCallback = prepare_master_callback(PoolName, MasterPool, SlavePool, CallbackModule,
-            ExtendedCtx, Executor, TaskId, MasterCallbackStatus),
-        MasterJobExtendedArgs = #{task_id => TaskId, master_job_starter_callback => MasterJobCallback},
         {ok, MasterAns} = CallbackModule:do_master_job(Job, MasterJobExtendedArgs),
         MasterJobsList = maps:get(master_jobs, MasterAns, []),
         AsyncMasterJobsList = maps:get(async_master_jobs, MasterAns, []),
@@ -486,23 +492,20 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                 CancelCallback(CancelDescription),
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskId, CancelDescription);
             _ ->
-%%                CancelCallback = maps:get(init_callback, MasterAns, fun(_Args) -> ok end),
-%%                CancelCallback(MasterJobExtendedArgs),
                 ok = run_or_queue_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
-                    Executor, TaskId, AsyncMasterJobsList, RunArg, SingleMasterJobMode),
+                    Executor, TaskId, AsyncMasterJobsList, MasterJobMode, MasterJobMode),
 
                 SequentialSlaveAnswers = sequential_run_on_slave_pool(
                     PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskId, SequentialSlaveJobsList),
                 SlaveAnswers = run_on_slave_pool(
                     PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskId, SlaveJobsList),
 
-                RunArg2 = case {RunArg, AsyncMasterJobsList} of
-                    {one, []} -> one;
-                    {one, _} -> none;
-                    _ -> RunArg
+                SyncJobsToRun = case {MasterJobMode, AsyncMasterJobsList} of
+                    {single, [_ | _]} -> none; % Single master job has been already started from AsyncMasterJobsList
+                    _ -> MasterJobMode
                 end,
                 ok = run_or_queue_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
-                    Executor, TaskId, MasterJobsList, RunArg2, SingleMasterJobMode),
+                    Executor, TaskId, MasterJobsList, SyncJobsToRun, MasterJobMode),
 
                 {SlavesOk, SlavesErrors} = lists:foldl(fun
                     ({ok, ok}, {OkSum, ErrorSum}) -> {OkSum + 1, ErrorSum};
@@ -527,7 +530,7 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                 case {AsyncMasterJobsList, MasterJobsList} of
                     {[], []} ->
                         run_from_queue(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
-                            Executor, TaskId, SingleMasterJobMode);
+                            Executor, TaskId, MasterJobMode);
                     _ ->
                         ok
                 end,
@@ -611,29 +614,25 @@ sequential_run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, T
     lists:flatten(Ans).
 
 -spec run_or_queue_on_master_pool(pool(), execution_pool(), execution_pool(), callback_module(), ctx(), environment_id(),
-    id(), [job() | {job(), job_id()}], all | one | none, boolean()) -> ok.
+    id(), [job() | {job(), job_id()}], master_job_mode() | none, master_job_mode()) -> ok.
 run_or_queue_on_master_pool(_PoolName, _MasterPool, _SlavePool, _CallbackModule, _ExtendedCtx,
-    _Executor, _TaskId, [], _RunNow, _SingleMasterJobMode) ->
+    _Executor, _TaskId, [], _RunNow, _MasterJobMode) ->
     ok;
 run_or_queue_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
-    Executor, TaskId, Jobs, RunNow, SingleMasterJobMode) ->
+    Executor, TaskId, Jobs, RunNow, MasterJobMode) ->
     {JobsToRun, JobsToQueue} = case RunNow of
-        all ->
-            {Jobs, []};
-        one ->
-            [First | Tail] = Jobs,
-            {[First], Tail};
-        none ->
-            {[], Jobs}
+        all -> {Jobs, []};
+        single -> {[hd(Jobs)], tl(Jobs)};
+        none -> {[], Jobs}
     end,
 
     lists:foreach(fun
         ({Job, JobId}) ->
             run_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule,
-                ExtendedCtx, Executor, TaskId, Job, JobId, SingleMasterJobMode);
+                ExtendedCtx, Executor, TaskId, Job, JobId, MasterJobMode);
         (Job) ->
             run_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule,
-                ExtendedCtx, Executor, TaskId, Job, undefined, SingleMasterJobMode)
+                ExtendedCtx, Executor, TaskId, Job, undefined, MasterJobMode)
     end, JobsToRun),
 
     lists:foreach(fun
@@ -642,8 +641,8 @@ run_or_queue_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, Ext
     end, JobsToQueue).
 
 -spec prepare_master_callback(pool(), execution_pool(), execution_pool(), callback_module(), ctx(), environment_id(),
-    id(), supported | not_supported) -> master_job_starter_callback().
-prepare_master_callback(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskId, supported) ->
+    id()) -> master_job_starter_callback().
+prepare_master_callback(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskId) ->
     fun(Args) ->
         Jobs = maps:get(jobs, Args, []),
         Description = #{
@@ -662,24 +661,17 @@ prepare_master_callback(PoolName, MasterPool, SlavePool, CallbackModule, Extende
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskId, CancelDescription);
             _ ->
                 run_or_queue_on_master_pool(
-                    PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskId, Jobs, all, false)
-        end
-    end;
-prepare_master_callback(_PoolName, _MasterPool, _SlavePool, _CallbackModule, _ExtendedCtx, _Executor, _TaskId, not_supported) ->
-    fun(Args) ->
-        case maps:get(jobs, Args, []) of
-            [] -> ok;
-            _ -> throw(master_callback_not_supported)
+                    PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskId, Jobs, all, all)
         end
     end.
 
 -spec run_on_master_pool(pool(), execution_pool(), execution_pool(), callback_module(), ctx(), environment_id(),
-    id(), job(), job_id(), boolean()) -> ok.
-run_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskId, Job, JobId, SingleMasterJobMode) ->
+    id(), job(), job_id(), master_job_mode()) -> ok.
+run_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskId, Job, JobId, MasterJobMode) ->
     {ok, JobId2} = CallbackModule:update_job_progress(JobId, Job, PoolName, TaskId, on_pool),
     ok = traverse_task_list:add_job_link(PoolName, CallbackModule, JobId2),
     ok = worker_pool:cast(MasterPool, {?MODULE, execute_master_job,
-        [PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskId, Job, JobId2, SingleMasterJobMode]}).
+        [PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskId, Job, JobId2, MasterJobMode]}).
 
 -spec queue_on_master_pool(pool(), callback_module(), id(), job(), job_id()) -> ok.
 queue_on_master_pool(PoolName, CallbackModule, TaskId, Job, JobId) ->
@@ -687,23 +679,22 @@ queue_on_master_pool(PoolName, CallbackModule, TaskId, Job, JobId) ->
     ok = traverse_task_list:add_task_job_link(PoolName, CallbackModule, TaskId, JobId2).
 
 -spec run_from_queue(pool(), execution_pool(), execution_pool(), callback_module(), ctx(), environment_id(),
-    id(), boolean()) -> ok.
-run_from_queue(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskId, SingleMasterJobMode) ->
+    id(), master_job_mode()) -> ok.
+run_from_queue(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskId, MasterJobMode) ->
     case traverse_task_list:get_and_delete_first_task_job_link(PoolName, CallbackModule, node(), TaskId) of
         {ok, JobId} ->
             case  CallbackModule:get_job(JobId) of
                 {ok, Job, _, _} ->
                     ExtendedCtx = get_extended_ctx(CallbackModule, Job),
                     ok = run_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
-                        Executor, TaskId, Job, JobId, SingleMasterJobMode);
+                        Executor, TaskId, Job, JobId, MasterJobMode);
                 {error, not_found} ->
                     ?warning("Job ~p not found for pool ~p, callback module ~p, task ~p",
                         [JobId, PoolName, CallbackModule, TaskId])
 
             end;
         {error, not_found} ->
-            ?warning("No jobs in queue for pool ~p, callback module ~p, task ~p",
-                [PoolName, CallbackModule, TaskId])
+            ok
     end.
 
 -spec maybe_finish(pool(), callback_module(), ctx(), id(), environment_id(), description(), boolean()) -> ok.
@@ -772,7 +763,7 @@ run_task(PoolName, TaskId, Executor) ->
     {ok, #task_execution_info{
         callback_module = CallbackModule,
         main_job_id = MainJobId,
-        single_master_job_mode = SingleMasterJobMode
+        master_job_mode = MasterJobMode
     }} = traverse_task:get_execution_info(PoolName, TaskId),
     case  CallbackModule:get_job(MainJobId) of
         {ok, Job, _, _} ->
@@ -781,7 +772,7 @@ run_task(PoolName, TaskId, Executor) ->
                 ok ->
                     ok = task_callback(CallbackModule, task_started, TaskId, PoolName),
                     ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
-                        CallbackModule, ExtendedCtx, Executor, TaskId, Job, MainJobId, SingleMasterJobMode);
+                        CallbackModule, ExtendedCtx, Executor, TaskId, Job, MainJobId, MasterJobMode);
                 {error, start_aborted} ->
                     start_interrupted;
                 {error, not_found} ->
@@ -834,8 +825,9 @@ retry_run(PoolName, Executor, Delay) ->
     end),
     ok.
 
--spec maybe_run_scheduled_task(pool(), callback_module(), id(), task(), environment_id(), job(), job_id(), boolean()) -> ok.
-maybe_run_scheduled_task(PoolName, CallbackModule, TaskId, Task, Executor, Job, MainJobId, SingleMasterJobMode) ->
+-spec maybe_run_scheduled_task(pool(), callback_module(), id(), task(), environment_id(),
+    job(), job_id(), master_job_mode()) -> ok.
+maybe_run_scheduled_task(PoolName, CallbackModule, TaskId, Task, Executor, Job, MainJobId, MasterJobMode) ->
     case traverse_tasks_scheduler:increment_ongoing_tasks_and_choose_node(PoolName) of
         {ok, Node} ->
             ExtendedCtx = get_extended_ctx(CallbackModule, Job),
@@ -844,7 +836,7 @@ maybe_run_scheduled_task(PoolName, CallbackModule, TaskId, Task, Executor, Job, 
                     ok = task_callback(CallbackModule, task_started, TaskId, PoolName),
                     ok = rpc:call(Node, ?MODULE, run_on_master_pool, [PoolName, ?MASTER_POOL_NAME(PoolName),
                         ?SLAVE_POOL_NAME(PoolName), CallbackModule, ExtendedCtx, Executor, TaskId, Job,
-                        MainJobId, SingleMasterJobMode]);
+                        MainJobId, MasterJobMode]);
                 {error, start_aborted} ->
                     % TODO VFS-6297 - what if node crashes before next line
                     traverse_tasks_scheduler:decrement_ongoing_tasks(PoolName)
@@ -1036,7 +1028,7 @@ restart_jobs(TaskIdToCtxMap, JobsPerTask, PoolName, CallbackModule, Executor, No
     LocalNode = node(),
     lists:foreach(fun({TaskId, JobsToRestart}) ->
         {ok, #task_execution_info{
-            single_master_job_mode = SingleMasterJobMode
+            master_job_mode = MasterJobMode
         }} = traverse_task:get_execution_info(PoolName, TaskId),
         lists:foreach(fun({JobId, Job}) ->
             case Node of
@@ -1051,7 +1043,7 @@ restart_jobs(TaskIdToCtxMap, JobsPerTask, PoolName, CallbackModule, Executor, No
                 master_jobs_delegated => 1
             }),
             ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
-                CallbackModule, ExtendedCtx, Executor, TaskId, Job, JobId, SingleMasterJobMode)
+                CallbackModule, ExtendedCtx, Executor, TaskId, Job, JobId, MasterJobMode)
         end, JobsToRestart)
     end, maps:to_list(JobsPerTask)).
 

@@ -60,9 +60,9 @@
 %%--------------------------------------------------------------------
 -spec create(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), traverse:environment_id(),
     traverse:environment_id(), traverse:group(), traverse:job_id(), remote | undefined | node(),
-    traverse:description(), traverse:additional_data(), boolean()) -> ok.
+    traverse:description(), traverse:additional_data(), traverse:master_job_mode()) -> ok.
 create(ExtendedCtx, Pool, CallbackModule, TaskId, Creator, Executor, GroupId, Job, Node, InitialDescription,
-    AdditionalData, SingleMasterJobMode) ->
+    AdditionalData, MasterJobMode) ->
     {ok, Timestamp} = get_timestamp(CallbackModule),
     Value0 = #traverse_task{
         callback_module = CallbackModule,
@@ -73,7 +73,7 @@ create(ExtendedCtx, Pool, CallbackModule, TaskId, Creator, Executor, GroupId, Jo
         schedule_time = Timestamp,
         main_job_id = Job,
         additional_data = AdditionalData,
-        single_master_job_mode = SingleMasterJobMode
+        master_job_mode = MasterJobMode
     },
 
     Value = case Node of
@@ -471,7 +471,7 @@ get_execution_info(#document{value = #traverse_task{
     main_job_id = MainJobId,
     node = Node,
     start_time = StartTimestamp,
-    single_master_job_mode = SingleMasterJobMode
+    master_job_mode = MasterJobMode
 }}) ->
     {ok, #task_execution_info{
         callback_module = CallbackModule,
@@ -479,7 +479,7 @@ get_execution_info(#document{value = #traverse_task{
         main_job_id = MainJobId,
         node = Node,
         start_time = StartTimestamp,
-        single_master_job_mode = SingleMasterJobMode
+        master_job_mode = MasterJobMode
     }}.
 
 -spec get_execution_info(traverse:pool(), traverse:id()) -> {ok, traverse:task_execution_info()} | {error, term()}.
@@ -561,7 +561,7 @@ get_record_struct(2) ->
         {status, atom},
         {description, {custom, json, {?MODULE, encode_description, decode_description}}},
         {additional_data, #{string => binary}},
-        {single_master_job_mode, boolean} % Field added
+        {master_job_mode, atom} % field added
     ]}.
 
 -spec get_record_version() -> datastore_model:record_version().
@@ -574,7 +574,7 @@ upgrade_record(1, {?MODULE, CallbackModule, Creator, Executor, Group, ScheduleTi
     FinishTime, MainJobId, Enqueued, Canceled, Node, Status, Description, AdditionalData}
 ) ->
     {2, {?MODULE, CallbackModule, Creator, Executor, Group, ScheduleTime, StartTime,
-        FinishTime, MainJobId, Enqueued, Canceled, Node, Status, Description, AdditionalData, false}}.
+        FinishTime, MainJobId, Enqueued, Canceled, Node, Status, Description, AdditionalData, all}}.
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -23,6 +23,7 @@
 %% Helper functions
 -export([get_slave_ans/1, get_node_slave_ans/2, get_expected/0, copy_jobs_store/2, check_schedulers_after_test/3]).
 -export([delete_ongoing_jobs/1]).
+-export([get_and_verify_job_activity_log/0]).
 
 -define(POOL, <<"traverse_test_pool">>).
 
@@ -169,9 +170,25 @@ delete_ongoing_jobs(Node) ->
     rpc:call(Node, application, set_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []]),
     ok.
 
+get_and_verify_job_activity_log() ->
+    get_and_verify_job_activity_log(job_stop, 0).
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+get_and_verify_job_activity_log(LastType, LastNum) ->
+    receive
+        {job_activity_log, Type, Num} ->
+            ?assertNotEqual(LastType, Type),
+            case Type of
+                job_start -> ok;
+                job_stop -> ?assertEqual(LastNum, Num)
+            end,
+            get_and_verify_job_activity_log(Type, Num)
+    after
+        5000 -> ok
+    end.
 
 get_env(Node, Name) ->
     case rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, Name, []]) of
