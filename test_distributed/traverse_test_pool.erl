@@ -23,6 +23,7 @@
 %% Helper functions
 -export([get_slave_ans/1, get_node_slave_ans/2, get_expected/0, copy_jobs_store/2, check_schedulers_after_test/3]).
 -export([delete_ongoing_jobs/1]).
+-export([get_and_verify_job_activity_log/0]).
 
 -define(POOL, <<"traverse_test_pool">>).
 
@@ -43,6 +44,12 @@ do_master_job({Master, Num, ID}, #{task_id := <<"sequential_traverse_test">>,
     SequentialSlaveJobs = [{Master, Num + 1, ID}, [{Master, Num + 2, ID}]],
     SlaveJobs = [{Master, Num + 3, ID}],
     {ok, #{sequential_slave_jobs => SequentialSlaveJobs, slave_jobs => SlaveJobs, async_master_jobs => MasterJobs}};
+do_master_job({Master, Num, ID}, #{task_id := <<"single_master_job_test">>}) ->
+    Master ! {job_activity_log, job_start, Num},
+    timer:sleep(200),
+    Ans = do_master_job_helper({Master, Num, ID}),
+    Master ! {job_activity_log, job_stop, Num},
+    Ans;
 do_master_job({Master, 100, ID}, _) when ID == 100 ; ID == 101 ->
     timer:sleep(1000),
     Master ! {stop, node()},
@@ -163,9 +170,25 @@ delete_ongoing_jobs(Node) ->
     rpc:call(Node, application, set_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []]),
     ok.
 
+get_and_verify_job_activity_log() ->
+    get_and_verify_job_activity_log(job_stop, 0).
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+get_and_verify_job_activity_log(LastType, LastNum) ->
+    receive
+        {job_activity_log, Type, Num} ->
+            ?assertNotEqual(LastType, Type),
+            case Type of
+                job_start -> ok;
+                job_stop -> ?assertEqual(LastNum, Num)
+            end,
+            get_and_verify_job_activity_log(Type, Num)
+    after
+        5000 -> ok
+    end.
 
 get_env(Node, Name) ->
     case rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, Name, []]) of
