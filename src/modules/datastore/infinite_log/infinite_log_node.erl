@@ -20,7 +20,8 @@
 %% Convenience functions
 -export([append_entry/2]).
 -export([get_node_entries_length/2]).
--export([latest_node_number/1]).
+-export([newest_node_number/1]).
+-export([oldest_node_number/1]).
 -export([entry_index_to_node_number/2]).
 
 % id of individual node in an infinite log as stored in database
@@ -101,18 +102,22 @@ append_entry(Node = #node{entries = Entries, oldest_timestamp = OldestTimestamp}
 -spec get_node_entries_length(infinite_log_sentinel:record(), node_number()) ->
     node_number().
 get_node_entries_length(Sentinel = #sentinel{max_entries_per_node = MaxEntriesPerNode}, NodeNumber) ->
-    case latest_node_number(Sentinel) of
+    case newest_node_number(Sentinel) of
         NodeNumber ->
-            Sentinel#sentinel.entry_count - (NodeNumber * MaxEntriesPerNode);
+            Sentinel#sentinel.total_entry_count - (NodeNumber * MaxEntriesPerNode);
         _ ->
             MaxEntriesPerNode
     end.
 
 
--spec latest_node_number(infinite_log_sentinel:record()) ->
-    node_number().
-latest_node_number(Sentinel = #sentinel{entry_count = EntryCount}) ->
+-spec newest_node_number(infinite_log_sentinel:record()) -> node_number().
+newest_node_number(Sentinel = #sentinel{total_entry_count = EntryCount}) ->
     entry_index_to_node_number(Sentinel, EntryCount - 1).
+
+
+-spec oldest_node_number(infinite_log_sentinel:record()) -> node_number().
+oldest_node_number(Sentinel = #sentinel{oldest_entry_index = PrunedEntryCount}) ->
+    entry_index_to_node_number(Sentinel, PrunedEntryCount).
 
 
 -spec entry_index_to_node_number(infinite_log_sentinel:record(), infinite_log:entry_index()) ->

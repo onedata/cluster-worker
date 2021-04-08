@@ -35,6 +35,25 @@
 %%%
 %%% Entries are stored in lists and new ones are always prepended, which means
 %%% that the order of entries in a node is descending index-wise.
+%%%
+%%% The infinite log supports three ways of automatic cleaning:
+%%%
+%%%   * TTL (Time To Live) - a TTL can be explicitly set, making all the log
+%%%     data expire after a certain time.
+%%%
+%%%   * size based pruning - oldest nodes are pruned when the total log size
+%%%     exceed a certain threshold. The threshold is soft - the pruning happens
+%%%     when the log size is equal to threshold + max_elements_per_node, so that
+%%%     after the pruning, the number of entries left is equal to the threshold.
+%%%
+%%%   * age based pruning - oldest nodes are pruned when all entries in given
+%%%     node are older than the threshold. If this option is chosen, the nodes
+%%%     are assigned a TTL so that they expire on the database level, even if
+%%%     the pruning is not applied.
+%%%
+%%% In case of size/age based pruning, only whole nodes are deleted (when all
+%%% entries in the node satisfy the pruning condition). The newest node
+%%% (buffered inside sentinel) is never pruned.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(infinite_log).
@@ -54,6 +73,15 @@
 
 % id of an infinite log instance as stored in database
 -type log_id() :: binary().
+
+%% @formatter:off
+-type log_opts() :: #{
+    max_entries_per_node => pos_integer(),
+    size_pruning_threshold => undefined | non_neg_integer(),
+    age_pruning_threshold => undefined | time:seconds()
+}.
+%% @formatter:on
+
 % content of a log entry, must be a text (suitable for JSON),
 % if needed may encode some arbitrary structures as a JSON or base64
 -type content() :: binary().
@@ -72,17 +100,19 @@
 %% API
 %%=====================================================================
 
--spec create(log_id(), pos_integer()) -> ok | {error, term()}.
-create(LogId, MaxEntriesPerNode) ->
+-spec create(log_id(), log_opts()) -> ok | {error, term()}.
+create(LogId, Opts) ->
     infinite_log_sentinel:save(LogId, #sentinel{
         log_id = LogId,
-        max_entries_per_node = MaxEntriesPerNode
+        max_entries_per_node = maps:get(max_entries_per_node, Opts, ?DEFAULT_MAX_ENTRIES_PER_NODE),
+        size_pruning_threshold = maps:get(size_pruning_threshold, Opts, undefined),
+        age_pruning_threshold = maps:get(age_pruning_threshold, Opts, undefined)
     }).
 
 
 -spec destroy(log_id()) -> ok | {error, term()}.
 destroy(LogId) ->
-    case infinite_log_sentinel:get(LogId) of
+    case infinite_log_sentinel:acquire(LogId, skip_pruning) of
         {ok, Sentinel} ->
             case apply_for_archival_log_nodes(Sentinel, fun infinite_log_node:delete/2) of
                 {error, _} = Error ->
@@ -97,7 +127,7 @@ destroy(LogId) ->
 
 -spec append(log_id(), content()) -> ok | {error, term()}.
 append(LogId, Content) when is_binary(LogId) ->
-    case infinite_log_sentinel:get(LogId) of
+    case infinite_log_sentinel:acquire(LogId, skip_pruning) of
         {error, _} = GetError ->
             GetError;
         {ok, Sentinel} ->
@@ -113,7 +143,9 @@ append(LogId, Content) when is_binary(LogId) ->
 -spec list(log_id(), infinite_log_browser:listing_opts()) ->
     {ok, infinite_log_browser:listing_result()} | {error, term()}.
 list(LogId, Opts) ->
-    case infinite_log_sentinel:get(LogId) of
+    % age based pruning must be attempted at every listing as some of
+    % the log nodes may have expired
+    case infinite_log_sentinel:acquire(LogId, apply_pruning) of
         {error, _} = GetError ->
             GetError;
         {ok, Sentinel} ->
@@ -129,7 +161,7 @@ list(LogId, Opts) ->
 %%--------------------------------------------------------------------
 -spec set_ttl(log_id(), time:seconds()) -> ok | {error, term()}.
 set_ttl(LogId, Ttl) ->
-    case infinite_log_sentinel:get(LogId) of
+    case infinite_log_sentinel:acquire(LogId, skip_pruning) of
         {error, _} = GetError ->
             GetError;
         {ok, Sentinel} ->
@@ -184,7 +216,7 @@ safe_log_content_size(#sentinel{max_entries_per_node = MaxEntriesPerNode}) ->
 ) ->
     ok | {error, term()}.
 apply_for_archival_log_nodes(Sentinel = #sentinel{log_id = LogId}, Callback) ->
-    BufferNodeNumber = infinite_log_node:latest_node_number(Sentinel),
+    BufferNodeNumber = infinite_log_node:newest_node_number(Sentinel),
     ArchivalNodeNumbers = lists:seq(0, BufferNodeNumber - 1),
     lists_utils:foldl_while(fun(NodeNumber, _) ->
         case Callback(LogId, NodeNumber) of
