@@ -17,7 +17,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% Model API
--export([acquire/2, save/2, delete/1, set_ttl/2]).
+-export([acquire/3, save/2, delete/1, set_ttl/2]).
 %% Convenience functions
 -export([append/2]).
 -export([get_node_by_number/2]).
@@ -29,19 +29,19 @@
 %% API
 %%=====================================================================
 
--spec acquire(infinite_log:log_id(), skip_pruning | apply_pruning) ->
+-spec acquire(infinite_log:log_id(), skip_pruning | apply_pruning, infinite_log:access_mode()) ->
     {ok, term()} | {error, term()}.
-acquire(LogId, skip_pruning) ->
+acquire(LogId, skip_pruning, _) ->
     case node_cache:get({?MODULE, LogId}, undefined) of
         undefined -> {error, not_found};
         Record -> {ok, Record}
     end;
-acquire(LogId, apply_pruning) ->
-    case acquire(LogId, skip_pruning) of
+acquire(LogId, apply_pruning, AccessMode) ->
+    case acquire(LogId, skip_pruning, readonly) of
         {error, _} = GetError ->
             GetError;
         {ok, Sentinel} ->
-            case apply_age_pruning(Sentinel) of
+            case apply_age_pruning(Sentinel, AccessMode) of
                 {error, _} = PruningError ->
                     PruningError;
                 {ok, Sentinel} ->
@@ -94,7 +94,7 @@ set_ttl(LogId, Ttl) ->
             {error, etmpfail};
         _ ->
             %% @TODO VFS-7411 adjust to CB's way of handling expiration
-            {ok, Record} = infinite_log_sentinel:acquire(LogId, skip_pruning),
+            {ok, Record} = infinite_log_sentinel:acquire(LogId, skip_pruning, readonly),
             save(LogId, Record#sentinel{
                 expiration_time = current_timestamp(Record) div 1000 + Ttl
             })
@@ -164,7 +164,7 @@ save_buffer_as_new_node(Sentinel = #sentinel{buffer = Buffer}) ->
     end,
     case save_node(Sentinel, NodeNumber, Buffer) of
         ok ->
-            apply_size_and_age_pruning(UpdatedSentinel#sentinel{buffer = #node{}});
+            apply_size_and_age_pruning(UpdatedSentinel#sentinel{buffer = #node{}}, allow_updates);
         {error, _} = SaveError ->
             SaveError
     end.
@@ -200,42 +200,44 @@ save_node(#sentinel{log_id = LogId} = Sentinel, NodeNumber, Node, Ttl) ->
 
 
 %% @private
--spec apply_size_and_age_pruning(record()) -> {ok, record()} | {error, term()}.
-apply_size_and_age_pruning(Sentinel) ->
-    case apply_size_pruning(Sentinel) of
+-spec apply_size_and_age_pruning(record(), infinite_log:access_mode()) ->
+    {ok, record()} | {error, term()}.
+apply_size_and_age_pruning(Sentinel, AccessMode) ->
+    case apply_size_pruning(Sentinel, AccessMode) of
         {ok, UpdatedSentinel} ->
-            apply_age_pruning(UpdatedSentinel);
+            apply_age_pruning(UpdatedSentinel, AccessMode);
         {error, _} = Error ->
             Error
     end.
 
 
 %% @private
--spec apply_size_pruning(record()) -> {ok, record()} | {error, term()}.
-apply_size_pruning(#sentinel{size_pruning_threshold = undefined} = Sentinel) ->
+-spec apply_size_pruning(record(), infinite_log:access_mode()) -> {ok, record()} | {error, term()}.
+apply_size_pruning(#sentinel{size_pruning_threshold = undefined} = Sentinel, _) ->
     {ok, Sentinel};
-apply_size_pruning(Sentinel) ->
-    prune_while(Sentinel, fun(Acc) ->
+apply_size_pruning(Sentinel, AccessMode) ->
+    prune_while(Sentinel, AccessMode, fun(Acc) ->
         CurrentEntryCount = Acc#sentinel.total_entry_count - Acc#sentinel.oldest_entry_index,
         CurrentEntryCount - Acc#sentinel.max_entries_per_node >= Acc#sentinel.size_pruning_threshold
     end).
 
 
 %% @private
--spec apply_age_pruning(record()) -> {ok, record()} | {error, term()}.
-apply_age_pruning(#sentinel{age_pruning_threshold = undefined} = Sentinel) ->
+-spec apply_age_pruning(record(), infinite_log:access_mode()) -> {ok, record()} | {error, term()}.
+apply_age_pruning(#sentinel{age_pruning_threshold = undefined} = Sentinel, _) ->
     {ok, Sentinel};
-apply_age_pruning(Sentinel) ->
+apply_age_pruning(Sentinel, AccessMode) ->
     Now = current_timestamp(Sentinel),
-    prune_while(Sentinel, fun(Acc) ->
+    prune_while(Sentinel, AccessMode, fun(Acc) ->
         % timestamps are in milliseconds, while the threshold is in seconds
         Now >= Acc#sentinel.oldest_node_timestamp + Acc#sentinel.age_pruning_threshold * 1000
     end).
 
 
 %% @private
--spec prune_while(record(), fun((record()) -> boolean())) -> {ok, record()} | {error, term()}.
-prune_while(Sentinel, Condition) ->
+-spec prune_while(record(), infinite_log:access_mode(), fun((record()) -> boolean())) ->
+    {ok, record()} | {error, term()}.
+prune_while(Sentinel, AccessMode, Condition) ->
     OldestNodeNumber = infinite_log_node:oldest_node_number(Sentinel),
     NewestNodeNumber = infinite_log_node:newest_node_number(Sentinel),
     case OldestNodeNumber of
@@ -243,15 +245,17 @@ prune_while(Sentinel, Condition) ->
             % no nodes left to be pruned (the buffer node is never pruned)
             {ok, Sentinel};
         _ ->
-            case Condition(Sentinel) of
-                false ->
+            case {Condition(Sentinel), AccessMode} of
+                {false, _} ->
                     {ok, Sentinel};
-                true ->
+                {true, readonly} ->
+                    {error, update_required};
+                {true, allow_updates} ->
                     case prune_oldest_node(Sentinel) of
                         {ok, UpdatedSentinel} ->
                             % the procedure is applied recursively until the
                             % oldest existing node is found
-                            prune_while(UpdatedSentinel, Condition);
+                            prune_while(UpdatedSentinel, AccessMode, Condition);
                         {error, _} = Error ->
                             Error
                     end
@@ -274,16 +278,27 @@ prune_oldest_node(Sentinel = #sentinel{oldest_entry_index = PrunedCount, max_ent
         ok ->
             UpdatedSentinel = Sentinel#sentinel{oldest_entry_index = PrunedCount + MaxEntriesPerNode},
             NewOldestNodeNumber = OldestNodeNumber + 1,
-            case get_node_by_number(Sentinel, NewOldestNodeNumber) of
-                {ok, NewOldestNode} ->
+            case infinite_log_node:newest_node_number(UpdatedSentinel) of
+                NewOldestNodeNumber ->
+                    % the sentinel may have no entries, in which case the buffer node's
+                    % newest_timestamp is meaningless - take the global newest known timestamp
                     {ok, UpdatedSentinel#sentinel{
-                        oldest_node_timestamp = NewOldestNode#node.newest_timestamp
+                        oldest_node_timestamp = UpdatedSentinel#sentinel.newest_timestamp
                     }};
-                {error, not_found} ->
-                    % the next node may have already expired, in such case
-                    % the oldest_node_timestamp will be adjusted during another
-                    % pruning when the oldest existing node is found
-                    {ok, UpdatedSentinel}
+                _ ->
+                    case get_node_by_number(Sentinel, NewOldestNodeNumber) of
+                        {ok, #node{entries = []}} ->
+                            Sentinel#sentinel.newest_timestamp;
+                        {ok, NewOldestNode} ->
+                            {ok, UpdatedSentinel#sentinel{
+                                oldest_node_timestamp = NewOldestNode#node.newest_timestamp
+                            }};
+                        {error, not_found} ->
+                            % the next node may have already expired, in such case
+                            % the oldest_node_timestamp will be adjusted during another
+                            % pruning when the oldest existing node is found
+                            {ok, UpdatedSentinel}
+                    end
             end
     end.
 

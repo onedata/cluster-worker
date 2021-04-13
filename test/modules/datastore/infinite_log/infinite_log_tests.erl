@@ -109,8 +109,8 @@ create_and_destroy(LogId, MaxEntriesPerNode) ->
         ?assertNot(node_exists(LogId, NodeNumber))
     end),
 
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?FORWARD})),
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD})),
+    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?FORWARD}, allow_updates)),
+    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD}, allow_updates)),
     ?assertEqual({error, not_found}, infinite_log:append(LogId, <<"log">>)),
     ?assertEqual(ok, infinite_log:destroy(LogId)).
 
@@ -140,8 +140,8 @@ set_ttl(LogId, MaxEntriesPerNode) ->
         ?assertNot(node_exists(LogId, NodeNumber))
     end),
 
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?FORWARD})),
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD})),
+    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?FORWARD}, allow_updates)),
+    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD}, allow_updates)),
     ?assertEqual({error, not_found}, infinite_log:append(LogId, <<"log">>)),
     ?assertEqual({error, not_found}, infinite_log:set_ttl(LogId, Ttl)).
 
@@ -153,7 +153,7 @@ list_inexistent_log(_, _) ->
         start_from => lists_utils:random_element([undefined, {index, ?rand(1000)}, {timestamp, ?rand(1000)}]),
         offset => ?rand(1000) - 500,
         limit => ?rand(1000)
-    })).
+    }, allow_updates)).
 
 
 list_empty_log(_, _) ->
@@ -567,13 +567,16 @@ age_based_pruning(LogId, MaxEntriesPerNode) ->
     ?testList([MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
 
     append(#{count => MaxEntriesPerNode, interval => 1000}),
-    ?testList([MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1}),
+    ?testList([MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
     ?testList([2 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
 
     append(#{count => 3 * MaxEntriesPerNode, interval => 0}),
     case MaxEntriesPerNode of
         1 ->
-            ?testList([4 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1});
+            % in case of max_entries_per_node=1, the interval between entries is equal to the
+            % age pruning threshold and the entries are pruned immediately as the new ones come
+            % (so that pruning during listing is not needed)
+            ?testList([2 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1});
         _ ->
             ?testList([MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1})
     end,
@@ -585,11 +588,11 @@ age_based_pruning(LogId, MaxEntriesPerNode) ->
 
     % nodes should be pruned even if no update operations are performed,
     % but excluding the newest node
-    ?testList([4 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1}),
+    ?testList([4 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
     ?testList([5 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
 
     append(#{count => 1, interval => 0}),
-    ?testList([5 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1}),
+    ?testList([5 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
     ?testList([5 * MaxEntriesPerNode], ?BACKWARD, undefined, #{limit => 1}),
     ?assertNot(nodes_up_to_number_exist(LogId, 4)).
 
@@ -612,12 +615,12 @@ age_based_pruning_with_ttl_set(_, MaxEntriesPerNode) ->
     ?testList([4 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
 
     clock_freezer_mock:simulate_seconds_passing(Threshold div 4),
-    ?testList([MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1}),
+    ?testList([MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
     ?testList([4 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
     ?assertNot(nodes_up_to_number_exist(LogId, 0)),
 
     clock_freezer_mock:simulate_seconds_passing(Threshold div 4),
-    ?testList([2 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1}),
+    ?testList([2 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
     ?testList([4 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
     ?assertNot(nodes_up_to_number_exist(LogId, 1)),
 
@@ -628,8 +631,8 @@ age_based_pruning_with_ttl_set(_, MaxEntriesPerNode) ->
         ?assertNot(node_exists(LogId, NodeNumber))
     end),
 
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?FORWARD})),
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD})),
+    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?FORWARD}, allow_updates)),
+    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD}, allow_updates)),
     ?assertEqual({error, not_found}, infinite_log:append(LogId, <<"log">>)),
     ?assertEqual({error, not_found}, infinite_log:set_ttl(LogId, Threshold)).
 
@@ -652,7 +655,7 @@ append_with_time_warps(LogId, _) ->
     clock_freezer_mock:set_current_time_millis(1000),
     infinite_log:append(LogId, str_utils:rand_hex(100)),
 
-    {ok, {done, ListResultsPrim}} = infinite_log:list(LogId, #{direction => ?FORWARD}),
+    {ok, {done, ListResultsPrim}} = infinite_log:list(LogId, #{direction => ?FORWARD}, allow_updates),
     ?assertEqual(
         [1000, 1000, 1000, 1000, 1000],
         extract_timestamps(ListResultsPrim)
@@ -674,7 +677,7 @@ append_with_time_warps(LogId, _) ->
     clock_freezer_mock:set_current_time_millis(1318),
     infinite_log:append(LogId, str_utils:rand_hex(100)),
 
-    {ok, {done, ListResultsBis}} = infinite_log:list(LogId, #{direction => ?FORWARD}),
+    {ok, {done, ListResultsBis}} = infinite_log:list(LogId, #{direction => ?FORWARD}, allow_updates),
     ?assertEqual(
         [1000, 1000, 1000, 1000, 1000, 1300, 1306, 1306, 1306, 1318],
         extract_timestamps(ListResultsBis)
@@ -728,12 +731,24 @@ list_indices_and_verify(ExpectedIndices, Direction, StartFrom, OtherOpts) ->
         Offset = maps:get(offset, OtherOpts, 0),
         Limit = maps:get(limit, OtherOpts, 1000),
         LogId = get_current_log_id(),
-        {ok, {ProgressMarker, Batch}} = infinite_log:list(LogId, #{
+        ListOpts = #{
             direction => Direction,
             start_from => StartFrom,
             offset => Offset,
             limit => Limit
-        }),
+        },
+
+        RequiredAccess = maps:get(required_access, OtherOpts, readonly),
+        Result = case RequiredAccess of
+            readonly ->
+                RandomAccessMode = lists_utils:random_element([readonly, allow_updates]),
+                infinite_log:list(LogId, ListOpts, RandomAccessMode);
+            allow_updates ->
+                ?assertEqual({error, update_required}, infinite_log:list(LogId, ListOpts, readonly)),
+                infinite_log:list(LogId, ListOpts, allow_updates)
+        end,
+        ?assertMatch({ok, {_, _}}, Result),
+        {ok, {ProgressMarker, Batch}} = Result,
 
         ListedIndices = lists:map(fun({EntryIndex, {Timestamp, Content}}) ->
             ?assertEqual({Timestamp, Content}, get_entry(LogId, EntryIndex)),
@@ -752,7 +767,7 @@ list_indices_and_verify(ExpectedIndices, Direction, StartFrom, OtherOpts) ->
                         {ok, {_, [{FirstIndex, _}]}} = infinite_log:list(LogId, #{
                             direction => ?FORWARD,
                             limit => 1
-                        }),
+                        }, allow_updates),
                         FirstIndex
                 end,
                 case lists:last(ExpectedIndices) of
@@ -797,7 +812,7 @@ get_entry(Id, EntryIndex) ->
 
 
 sentinel_exists(LogId) ->
-    case infinite_log_sentinel:acquire(LogId, skip_pruning) of
+    case infinite_log_sentinel:acquire(LogId, skip_pruning, readonly) of
         {ok, _} -> true;
         {error, not_found} -> false
     end.

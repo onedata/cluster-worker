@@ -72,7 +72,7 @@
 %% API
 -export([create/2, destroy/1]).
 -export([append/2]).
--export([list/2]).
+-export([list/3]).
 -export([set_ttl/2]).
 
 % unit of timestamps used across the module for stamping entries and searching
@@ -98,6 +98,13 @@
 
 -export_type([timestamp/0, log_id/0, content/0, entry/0, entry_index/0]).
 
+% Indicates if the calling process is suitable for updating the log data, or may
+% only cause read only access to the documents. In case of 'readonly' access
+% mode, when a log document update is required during the requested operation,
+% the operation will fail with '{error, update_required}'.
+-type access_mode() :: readonly | allow_updates.
+-export_type([access_mode/0]).
+
 % macros used to determine safe log content size
 % couchbase sets the document size limit at 20MB, assume 19MB as safe
 -define(SAFE_NODE_DB_SIZE, 19000000).
@@ -119,7 +126,7 @@ create(LogId, Opts) ->
 
 -spec destroy(log_id()) -> ok | {error, term()}.
 destroy(LogId) ->
-    case infinite_log_sentinel:acquire(LogId, skip_pruning) of
+    case infinite_log_sentinel:acquire(LogId, skip_pruning, readonly) of
         {ok, Sentinel} ->
             case apply_for_archival_log_nodes(Sentinel, fun infinite_log_node:delete/2) of
                 {error, _} = Error ->
@@ -134,9 +141,9 @@ destroy(LogId) ->
 
 -spec append(log_id(), content()) -> ok | {error, term()}.
 append(LogId, Content) when is_binary(LogId) ->
-    case infinite_log_sentinel:acquire(LogId, skip_pruning) of
-        {error, _} = GetError ->
-            GetError;
+    case infinite_log_sentinel:acquire(LogId, skip_pruning, readonly) of
+        {error, _} = AcquireError ->
+            AcquireError;
         {ok, Sentinel} ->
             case sanitize_append_request(Sentinel, Content) of
                 {error, _} = SanitizeError ->
@@ -147,14 +154,14 @@ append(LogId, Content) when is_binary(LogId) ->
     end.
 
 
--spec list(log_id(), infinite_log_browser:listing_opts()) ->
+-spec list(log_id(), infinite_log_browser:listing_opts(), access_mode()) ->
     {ok, infinite_log_browser:listing_result()} | {error, term()}.
-list(LogId, Opts) ->
+list(LogId, Opts, AccessMode) ->
     % age based pruning must be attempted at every listing as some of
     % the log nodes may have expired
-    case infinite_log_sentinel:acquire(LogId, apply_pruning) of
-        {error, _} = GetError ->
-            GetError;
+    case infinite_log_sentinel:acquire(LogId, apply_pruning, AccessMode) of
+        {error, _} = AcquireError ->
+            AcquireError;
         {ok, Sentinel} ->
             {ok, infinite_log_browser:list(Sentinel, Opts)}
     end.
@@ -168,9 +175,9 @@ list(LogId, Opts) ->
 %%--------------------------------------------------------------------
 -spec set_ttl(log_id(), time:seconds()) -> ok | {error, term()}.
 set_ttl(LogId, Ttl) ->
-    case infinite_log_sentinel:acquire(LogId, skip_pruning) of
-        {error, _} = GetError ->
-            GetError;
+    case infinite_log_sentinel:acquire(LogId, skip_pruning, readonly) of
+        {error, _} = AcquireError ->
+            AcquireError;
         {ok, Sentinel} ->
             SetNodeTtl = fun(LogId, NodeNumber) ->
                 infinite_log_node:set_ttl(LogId, NodeNumber, Ttl)
