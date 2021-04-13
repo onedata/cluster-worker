@@ -47,6 +47,9 @@
 
     size_pruning_threshold :: undefined | non_neg_integer(),
     age_pruning_threshold :: undefined | time:seconds(),
+    % the log's expiration time must be tracked so that newly created documents
+    % (archival nodes) are expired adequately and so that the interaction of TTL
+    % and the age-based pruning can be properly handled
     expiration_time :: undefined | time:seconds()
 }).
 

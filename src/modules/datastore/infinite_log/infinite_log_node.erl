@@ -78,6 +78,7 @@ set_ttl(LogId, NodeNumber, Ttl) ->
         <<"123">> ->
             {error, etmpfail};
         _ ->
+            %% @TODO VFS-7411 adjust to CB's way of handling expiration
             {ok, Record} = get(LogId, NodeNumber),
             node_cache:put({?MODULE, NodeId}, Record, Ttl)
     end.

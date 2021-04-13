@@ -133,6 +133,7 @@ set_ttl(LogId, MaxEntriesPerNode) ->
     NewLogsCount = 783,
     append(#{count => NewLogsCount, interval => 0}),
 
+    % when the TTL passes, all log data should be deleted
     clock_freezer_mock:simulate_seconds_passing(1),
     ?assertNot(sentinel_exists(LogId)),
     foreach_archival_node_number(EntryCount + NewLogsCount, MaxEntriesPerNode, fun(NodeNumber) ->
@@ -620,6 +621,8 @@ age_based_pruning_with_ttl_set(_, MaxEntriesPerNode) ->
     ?testList([4 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
     ?assertNot(nodes_up_to_number_exist(LogId, 1)),
 
+    % when the TTL passes, all log data should be deleted, regardless of the
+    % age-based pruning threshold
     clock_freezer_mock:simulate_seconds_passing(Threshold div 4),
     foreach_archival_node_number(4 * MaxEntriesPerNode, MaxEntriesPerNode, fun(NodeNumber) ->
         ?assertNot(node_exists(LogId, NodeNumber))

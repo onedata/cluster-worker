@@ -38,8 +38,9 @@
 %%%
 %%% The infinite log supports three ways of automatic cleaning:
 %%%
-%%%   * TTL (Time To Live) - a TTL can be explicitly set, making all the log
-%%%     data expire after a certain time.
+%%%   * TTL (Time To Live) - a TTL can be explicitly set, making ALL the log
+%%%     data expire after a certain time. During that time, the log can still
+%%%     be read and new entries can still be appended.
 %%%
 %%%   * size based pruning - oldest nodes are pruned when the total log size
 %%%     exceed a certain threshold. The threshold is soft - the pruning happens
@@ -53,7 +54,13 @@
 %%%
 %%% In case of size/age based pruning, only whole nodes are deleted (when all
 %%% entries in the node satisfy the pruning condition). The newest node
-%%% (buffered inside sentinel) is never pruned.
+%%% (buffered inside sentinel) is never pruned, which means that the log can
+%%% still contain some entries that satisfy the pruning threshold, but will not
+%%% be pruned unless the log grows.
+%%%
+%%% Setting a TTL causes the whole log to be completely deleted after given
+%%% time. In the specific case when the age-based pruning is also set, the TTL
+%%% overrides the document's expiration time, even if pruning threshold is longer.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(infinite_log).

@@ -44,6 +44,8 @@ acquire(LogId, apply_pruning) ->
             case apply_age_pruning(Sentinel) of
                 {error, _} = PruningError ->
                     PruningError;
+                {ok, Sentinel} ->
+                    {ok, Sentinel};
                 {ok, UpdatedSentinel} ->
                     case save(LogId, UpdatedSentinel) of
                         ok ->
@@ -63,6 +65,7 @@ save(LogId, Record) ->
         <<"123">> ->
             {error, etmpfail};
         _ ->
+            %% @TODO VFS-7411 adjust to CB's way of handling expiration
             Ttl = case Record#sentinel.expiration_time of
                 undefined -> infinity;
                 Timestamp -> Timestamp - current_timestamp(Record) div 1000
@@ -90,6 +93,7 @@ set_ttl(LogId, Ttl) ->
         <<"123">> ->
             {error, etmpfail};
         _ ->
+            %% @TODO VFS-7411 adjust to CB's way of handling expiration
             {ok, Record} = infinite_log_sentinel:acquire(LogId, skip_pruning),
             save(LogId, Record#sentinel{
                 expiration_time = current_timestamp(Record) div 1000 + Ttl
@@ -245,6 +249,8 @@ prune_while(Sentinel, Condition) ->
                 true ->
                     case prune_oldest_node(Sentinel) of
                         {ok, UpdatedSentinel} ->
+                            % the procedure is applied recursively until the
+                            % oldest existing node is found
                             prune_while(UpdatedSentinel, Condition);
                         {error, _} = Error ->
                             Error
@@ -274,9 +280,9 @@ prune_oldest_node(Sentinel = #sentinel{oldest_entry_index = PrunedCount, max_ent
                         oldest_node_timestamp = NewOldestNode#node.newest_timestamp
                     }};
                 {error, not_found} ->
-                    % the next node may have already expired, in such case it
-                    % will be pruned recursively until the oldest existing node
-                    % is found and the oldest_node_timestamp can be updated
+                    % the next node may have already expired, in such case
+                    % the oldest_node_timestamp will be adjusted during another
+                    % pruning when the oldest existing node is found
                     {ok, UpdatedSentinel}
             end
     end.
