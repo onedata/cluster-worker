@@ -42,7 +42,7 @@
 -export_type([listing_opts/0, listing_result/0]).
 
 %%%-------------------------------------------------------------------
-%%% internal records and types
+%%% internal definitions
 %%%-------------------------------------------------------------------
 -record(listing_state, {
     sentinel :: sentinel_record(),
@@ -76,14 +76,12 @@
 -type node_record() :: infinite_log_node:record().
 -type node_number() :: infinite_log_node:node_number().
 
--define(MAX_LISTING_BATCH, 1000).
-
 %%=====================================================================
 %% API
 %%=====================================================================
 
 -spec list(sentinel_record(), listing_opts()) -> listing_result().
-list(Sentinel = #sentinel{entry_count = EntryCount}, Opts) ->
+list(Sentinel = #sentinel{total_entry_count = TotalEntryCount, oldest_entry_index = OldestIndex}, Opts) ->
     Direction = maps:get(direction, Opts, forward_from_newest),
     StartFrom = maps:get(start_from, Opts, undefined),
     OffsetFromStartPoint = maps:get(offset, Opts, 0),
@@ -93,15 +91,15 @@ list(Sentinel = #sentinel{entry_count = EntryCount}, Opts) ->
     EffectiveOffset = snap_to_range(StartPoint + OffsetFromStartPoint, {0, infinity}),
 
     StartIndex = case Direction of
-        ?FORWARD -> EffectiveOffset;
-        ?BACKWARD -> EntryCount - 1 - EffectiveOffset
+        ?FORWARD -> max(EffectiveOffset, OldestIndex);
+        ?BACKWARD -> TotalEntryCount - 1 - EffectiveOffset
     end,
 
     EffectiveLimit = snap_to_range(Limit, {1, ?MAX_LISTING_BATCH}),
     UnboundedEndIndex = calc_end_index(Direction, StartIndex, EffectiveLimit),
     EndIndex = case Direction of
-        ?FORWARD -> min(UnboundedEndIndex, EntryCount - 1);
-        ?BACKWARD -> max(UnboundedEndIndex, 0)
+        ?FORWARD -> min(UnboundedEndIndex, TotalEntryCount - 1);
+        ?BACKWARD -> max(UnboundedEndIndex, OldestIndex)
     end,
 
     ListingBatch = list(#listing_state{
@@ -123,7 +121,7 @@ list(#listing_state{direction = ?FORWARD, start_index = From, end_index = To, ac
     Acc;
 list(#listing_state{direction = ?BACKWARD, start_index = From, end_index = To, acc = Acc}) when From < To ->
     Acc;
-list(#listing_state{sentinel = Sentinel, start_index = From, acc = Acc}) when From >= Sentinel#sentinel.entry_count ->
+list(#listing_state{sentinel = Sentinel, start_index = From, acc = Acc}) when From >= Sentinel#sentinel.total_entry_count ->
     Acc;
 list(#listing_state{sentinel = Sentinel, direction = Direction, start_index = StartIdx, end_index = EndIdx} = State) ->
     MaxEntriesPerNode = Sentinel#sentinel.max_entries_per_node,
@@ -151,7 +149,7 @@ list(#listing_state{sentinel = Sentinel, direction = Direction, start_index = St
 -spec extract_entries(sentinel_record(), direction(), node_number(), index_in_node(), limit()) ->
     [entry()].
 extract_entries(Sentinel, Direction, NodeNumber, StartIndexInNode, Limit) ->
-    #node{entries = Entries} = infinite_log_sentinel:get_node_by_number(Sentinel, NodeNumber),
+    {ok, #node{entries = Entries}} = infinite_log_sentinel:get_node_by_number(Sentinel, NodeNumber),
     EntriesLength = infinite_log_node:get_node_entries_length(Sentinel, NodeNumber),
     case Direction of
         ?FORWARD ->
@@ -175,11 +173,11 @@ assign_entry_indices(?BACKWARD, Entries, StartIndex, EndIndex) ->
 %% @private
 -spec gen_progress_marker(sentinel_record(), direction(), entry_index()) ->
     progress_marker().
-gen_progress_marker(#sentinel{entry_count = EntryCount}, ?FORWARD, EndIndex) when EndIndex >= EntryCount - 1 ->
+gen_progress_marker(#sentinel{total_entry_count = EntryCount}, ?FORWARD, EndIndex) when EndIndex >= EntryCount - 1 ->
     done;
 gen_progress_marker(_, ?FORWARD, _) ->
     more;
-gen_progress_marker(_, ?BACKWARD, EndIndex) when EndIndex =< 0 ->
+gen_progress_marker(#sentinel{oldest_entry_index = OldestIndex}, ?BACKWARD, EndIndex) when EndIndex =< OldestIndex ->
     done;
 gen_progress_marker(_, ?BACKWARD, _) ->
     more.
@@ -199,24 +197,26 @@ calc_end_index(?BACKWARD, StartIndex, Limit) ->
 %% @doc
 %% Transform the start_from() parameter to the corresponding starting offset,
 %% relevant for given direction (so that the zero offset is the oldest entry
-%% for ?FORWARD direction and the latest entry for ?BACKWARD direction).
+%% for ?FORWARD direction and the newest entry for ?BACKWARD direction).
 %% The returned starting offset can still be adjusted using the offset listing opt.
-%% Every offset lower than 0 is rounded up to 0.
+%% Every offset lower than the oldest index is rounded up to it.
 %% Every offset exceeding the log length is rounded down to the next index after the last element.
 %% @end
 %%--------------------------------------------------------------------
 -spec start_from_param_to_offset(sentinel_record(), direction(), start_from()) ->
     entry_index().
-start_from_param_to_offset(_Sentinel, _, undefined) ->
+start_from_param_to_offset(#sentinel{oldest_entry_index = OldestIndex}, ?FORWARD, undefined) ->
+    OldestIndex;
+start_from_param_to_offset(_Sentinel, ?BACKWARD, undefined) ->
     0;
-start_from_param_to_offset(#sentinel{entry_count = EntryCount}, ?FORWARD, {index, EntryIndex}) ->
-    snap_to_range(EntryIndex, {0, EntryCount});
-start_from_param_to_offset(#sentinel{entry_count = EntryCount}, ?BACKWARD, {index, EntryIndex}) ->
-    snap_to_range(EntryCount - 1 - EntryIndex, {0, EntryCount});
+start_from_param_to_offset(#sentinel{total_entry_count = EntryCount} = S, ?FORWARD, {index, EntryIdx}) ->
+    snap_to_range(EntryIdx, {S#sentinel.oldest_entry_index, EntryCount});
+start_from_param_to_offset(#sentinel{total_entry_count = EntryCount} = S, ?BACKWARD, {index, EntryIdx}) ->
+    snap_to_range(EntryCount - 1 - EntryIdx, {0, EntryCount - S#sentinel.oldest_entry_index});
 start_from_param_to_offset(Sentinel, Direction, {timestamp, Timestamp}) ->
     SS1 = #search_state{sentinel = Sentinel, direction = Direction, target_tstamp = Timestamp},
-    SS2 = set_search_since(SS1, 0, Sentinel#sentinel.oldest_timestamp),
-    SS3 = set_search_until(SS2, Sentinel#sentinel.entry_count - 1, Sentinel#sentinel.newest_timestamp),
+    SS2 = set_search_since(SS1, Sentinel#sentinel.oldest_entry_index, Sentinel#sentinel.oldest_timestamp),
+    SS3 = set_search_until(SS2, Sentinel#sentinel.total_entry_count - 1, Sentinel#sentinel.newest_timestamp),
     EntryIndex = locate_timestamp(SS3),
     start_from_param_to_offset(Sentinel, Direction, {index, EntryIndex}).
 
@@ -246,7 +246,7 @@ set_search_until(SS = #search_state{sentinel = Sentinel}, NewestIndex, NewestTim
 %% @doc
 %% Uses a heuristic approach to find an entry with requested timestamp in a
 %% range of entries (or the closest one relevant for given direction).
-%% Knowing the latest entry and its timestamp as well as oldest entry and timestamp
+%% Knowing the newest entry and its timestamp as well as oldest entry and timestamp
 %% in the range, approximates the target index assuming that the timestamps are
 %% growing linearly. This yields two separate ranges, and the algorithm is called
 %% recursively for the range which includes the timestamp, until the search is
@@ -287,7 +287,7 @@ locate_timestamp_within_one_node(#search_state{
         {included, IndexInNode} ->
             index_in_node_to_entry_index(Sentinel, NodeNumber, IndexInNode);
         {newer_than, _} ->
-            entry_index_newer_than_latest_in_node(Sentinel, NodeNumber, Direction)
+            entry_index_newer_than_newest_in_node(Sentinel, NodeNumber, Direction)
     end.
 
 
@@ -337,7 +337,7 @@ locate_timestamp_within_more_than_two_nodes(SS = #search_state{
 -spec lookup_timestamp_in_node(sentinel_record(), node_number(), direction(), timestamp()) ->
     {older_than, timestamp()} | {included, index_in_node()} | {newer_than, timestamp()}.
 lookup_timestamp_in_node(Sentinel, NodeNumber, Direction, TargetTimestamp) ->
-    Node = infinite_log_sentinel:get_node_by_number(Sentinel, NodeNumber),
+    {ok, Node} = infinite_log_sentinel:get_node_by_number(Sentinel, NodeNumber),
     case compare_timestamp_against_node(Node, Direction, TargetTimestamp) of
         older ->
             {older_than, Node#node.oldest_timestamp};
@@ -398,9 +398,9 @@ entry_index_older_than_first_in_node(Sentinel, NodeNumber, Direction) ->
 
 
 %% @private
--spec entry_index_newer_than_latest_in_node(sentinel_record(), node_number(), direction()) ->
+-spec entry_index_newer_than_newest_in_node(sentinel_record(), node_number(), direction()) ->
     entry_index().
-entry_index_newer_than_latest_in_node(Sentinel, NodeNumber, Direction) ->
+entry_index_newer_than_newest_in_node(Sentinel, NodeNumber, Direction) ->
     NewestIndex = index_in_node_to_entry_index(Sentinel, NodeNumber + 1, 0) - 1,
     case Direction of
         ?FORWARD -> NewestIndex;
