@@ -36,9 +36,6 @@
     {"create_and_destroy", fun create_and_destroy/2},
     {"set_ttl", fun set_ttl/2},
 
-    {"list_inexistent_log", fun list_inexistent_log/2},
-    {"list_empty_log", fun list_empty_log/2},
-
     {"list", fun list/2},
     {"list_from_id", fun list_from_id/2},
     {"list_from_timestamp", fun list_from_timestamp/2},
@@ -52,6 +49,10 @@
     {"size_based_pruning_with_low_threshold", fun size_based_pruning_with_low_threshold/2},
     {"age_based_pruning", fun age_based_pruning/2},
     {"age_based_pruning_with_ttl_set", fun age_based_pruning_with_ttl_set/2},
+
+    {"list_inexistent_log", fun list_inexistent_log/2},
+    {"list_empty_log", fun list_empty_log/2},
+    {"list_log_with_missing_nodes", fun list_log_with_missing_nodes/2},
 
     {"append_with_time_warps", fun append_with_time_warps/2},
     {"append_too_large_content", fun append_too_large_content/2}
@@ -144,27 +145,6 @@ set_ttl(LogId, MaxEntriesPerNode) ->
     ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD}, allow_updates)),
     ?assertEqual({error, not_found}, infinite_log:append(LogId, <<"log">>)),
     ?assertEqual({error, not_found}, infinite_log:set_ttl(LogId, Ttl)).
-
-
-list_inexistent_log(_, _) ->
-    InexistentLogId = str_utils:rand_hex(16),
-    ?assertEqual({error, not_found}, infinite_log:list(InexistentLogId, #{
-        direction => lists_utils:random_element([?FORWARD, ?BACKWARD]),
-        start_from => lists_utils:random_element([undefined, {index, ?rand(1000)}, {timestamp, ?rand(1000)}]),
-        offset => ?rand(1000) - 500,
-        limit => ?rand(1000)
-    }, allow_updates)).
-
-
-list_empty_log(_, _) ->
-    lists:foreach(fun(_) ->
-        ?testList([], ?BACKWARD, undefined, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
-        ?testList([], ?FORWARD, undefined, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
-        ?testList([], ?BACKWARD, {index, ?rand(1000)}, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
-        ?testList([], ?FORWARD, {index, ?rand(1000)}, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
-        ?testList([], ?BACKWARD, {timestamp, ?rand(1000)}, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
-        ?testList([], ?FORWARD, {timestamp, ?rand(1000)}, #{offset => 500 - ?rand(1000), limit => ?rand(1000)})
-    end, ?range(1, 100)).
 
 
 list(_, _) ->
@@ -635,6 +615,54 @@ age_based_pruning_with_ttl_set(_, MaxEntriesPerNode) ->
     ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD}, allow_updates)),
     ?assertEqual({error, not_found}, infinite_log:append(LogId, <<"log">>)),
     ?assertEqual({error, not_found}, infinite_log:set_ttl(LogId, Threshold)).
+
+
+list_inexistent_log(_, _) ->
+    InexistentLogId = str_utils:rand_hex(16),
+    ?assertEqual({error, not_found}, infinite_log:list(InexistentLogId, #{
+        direction => lists_utils:random_element([?FORWARD, ?BACKWARD]),
+        start_from => lists_utils:random_element([undefined, {index, ?rand(1000)}, {timestamp, ?rand(1000)}]),
+        offset => ?rand(1000) - 500,
+        limit => ?rand(1000)
+    }, allow_updates)).
+
+
+list_empty_log(_, _) ->
+    lists:foreach(fun(_) ->
+        ?testList([], ?BACKWARD, undefined, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
+        ?testList([], ?FORWARD, undefined, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
+        ?testList([], ?BACKWARD, {index, ?rand(1000)}, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
+        ?testList([], ?FORWARD, {index, ?rand(1000)}, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
+        ?testList([], ?BACKWARD, {timestamp, ?rand(1000)}, #{offset => 500 - ?rand(1000), limit => ?rand(1000)}),
+        ?testList([], ?FORWARD, {timestamp, ?rand(1000)}, #{offset => 500 - ?rand(1000), limit => ?rand(1000)})
+    end, ?range(1, 100)).
+
+
+list_log_with_missing_nodes(LogId, MaxEntriesPerNode) ->
+    % make sure that there is at least one archival node
+    EntryCount = max(1000, MaxEntriesPerNode + 1),
+    append(#{count => EntryCount}),
+
+    % simulate a situation when some nodes are missing - this is possible for
+    % example when the listing intertwines with documents' expiring - in such
+    % case the code such not crash, but return an error
+    MaxNodeNumber = (EntryCount - 1) div MaxEntriesPerNode,
+    ArchivalNodeNumbers = lists:seq(0, MaxNodeNumber - 1),
+    MissingNodeNumbers = lists_utils:random_sublist(ArchivalNodeNumbers, 1, all),
+    lists:foreach(fun(NodeNumber) ->
+        ?assertEqual(ok, infinite_log_node:delete(LogId, NodeNumber))
+    end, MissingNodeNumbers),
+    ?assertEqual({error, internal_server_error}, infinite_log:list(LogId, #{
+        direction => lists_utils:random_element([?FORWARD, ?BACKWARD]),
+        limit => EntryCount
+    }, allow_updates)),
+
+    % if the sentinel is gone, the whole log is considered to be inexistent
+    ?assertEqual(ok, infinite_log_sentinel:delete(LogId)),
+    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{
+        direction => lists_utils:random_element([?FORWARD, ?BACKWARD]),
+        limit => EntryCount
+    }, allow_updates)).
 
 
 append_with_time_warps(LogId, _) ->

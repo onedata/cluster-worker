@@ -126,7 +126,7 @@ create(LogId, Opts) ->
 
 -spec destroy(log_id()) -> ok | {error, term()}.
 destroy(LogId) ->
-    case infinite_log_sentinel:acquire(LogId, skip_pruning, readonly) of
+    case infinite_log_sentinel:acquire(LogId, skip_pruning, allow_updates) of
         {ok, Sentinel} ->
             case apply_for_archival_log_nodes(Sentinel, fun infinite_log_node:delete/2) of
                 {error, _} = Error ->
@@ -141,7 +141,7 @@ destroy(LogId) ->
 
 -spec append(log_id(), content()) -> ok | {error, term()}.
 append(LogId, Content) when is_binary(LogId) ->
-    case infinite_log_sentinel:acquire(LogId, skip_pruning, readonly) of
+    case infinite_log_sentinel:acquire(LogId, skip_pruning, allow_updates) of
         {error, _} = AcquireError ->
             AcquireError;
         {ok, Sentinel} ->
@@ -163,7 +163,14 @@ list(LogId, Opts, AccessMode) ->
         {error, _} = AcquireError ->
             AcquireError;
         {ok, Sentinel} ->
-            {ok, infinite_log_browser:list(Sentinel, Opts)}
+            try
+                {ok, infinite_log_browser:list(Sentinel, Opts)}
+            catch Class:Reason ->
+                ?error_stacktrace("Unexpected error during infinite log listing (id: ~s) - ~w:~p", [
+                    LogId, Class, Reason
+                ]),
+                {error, internal_server_error}
+            end
     end.
 
 
@@ -175,7 +182,7 @@ list(LogId, Opts, AccessMode) ->
 %%--------------------------------------------------------------------
 -spec set_ttl(log_id(), time:seconds()) -> ok | {error, term()}.
 set_ttl(LogId, Ttl) ->
-    case infinite_log_sentinel:acquire(LogId, skip_pruning, readonly) of
+    case infinite_log_sentinel:acquire(LogId, skip_pruning, allow_updates) of
         {error, _} = AcquireError ->
             AcquireError;
         {ok, Sentinel} ->
