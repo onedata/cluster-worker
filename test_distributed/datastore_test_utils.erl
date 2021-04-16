@@ -137,6 +137,26 @@ mock_model(Model) ->
         {get_links_trees, fun(Key) ->
             Ctx = get_ctx(Model),
             datastore_model:get_links_trees(Ctx, Key)
+        end},
+        {infinite_log_create, fun(Key, Opts) ->
+            Ctx = get_ctx(Model),
+            datastore_infinite_log:create(Ctx, Key, Opts)
+        end},
+        {infinite_log_destroy, fun(Key) ->
+            Ctx = get_ctx(Model),
+            datastore_infinite_log:destroy(Ctx, Key)
+        end},
+        {infinite_log_append, fun(Key, Content) ->
+            Ctx = get_ctx(Model),
+            datastore_infinite_log:append(Ctx, Key, Content)
+        end},
+        {infinite_log_list, fun(Key, Opts) ->
+            Ctx = get_ctx(Model),
+            datastore_infinite_log:list(Ctx, Key, Opts)
+        end},
+        {infinite_log_set_ttl, fun(Key, Ttl) ->
+            Ctx = get_ctx(Model),
+            datastore_infinite_log:set_ttl(Ctx, Key, Ttl)
         end}
     ]).
 

@@ -7,16 +7,16 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% API related to the infinite_log_node datastore model.
-%%% @TODO VFS-7411 This module will be reworked during integration with datastore
 %%% @end
 %%%-------------------------------------------------------------------
 -module(infinite_log_node).
 -author("Lukasz Opiola").
 
+-include("modules/datastore/datastore_models.hrl").
 -include("modules/datastore/infinite_log.hrl").
 
 %% Model API
--export([get/2, save/3, delete/2, set_ttl/3]).
+-export([get/4, save/5, delete/4, set_ttl/5, set_ttl/6]).
 %% Convenience functions
 -export([append_entry/2]).
 -export([get_node_entries_length/2]).
@@ -29,67 +29,69 @@
 % nodes are numbered from 0 (oldest entries), and the newest node is always
 % stored inside the sentinel
 -type node_number() :: non_neg_integer().
--type record() :: #node{}.
+-type record() :: #infinite_log_node{}.
 -export_type([id/0, node_number/0, record/0]).
+
+%% Datastore API
+-export([get_ctx/0, get_record_version/0, get_record_struct/1]).
+
+-define(CTX, #{
+    model => ?MODULE
+}).
 
 
 %%=====================================================================
 %% Model API
 %%=====================================================================
 
--spec get(infinite_log:log_id(), node_number()) -> {ok, term()} | {error, term()}.
-get(LogId, NodeNumber) ->
+-spec get(infinite_log:ctx(), infinite_log:log_id(), node_number(), infinite_log:batch()) -> 
+    {{ok, term()} | {error, term()}, infinite_log:batch()}.
+get(Ctx, LogId, NodeNumber, Batch) ->
     NodeId = build_node_id(LogId, NodeNumber),
-    case node_cache:get({?MODULE, NodeId}, undefined) of
-        undefined -> {error, not_found};
-        Record -> {ok, Record}
+    case datastore_doc:fetch(Ctx, NodeId, Batch) of
+        {{ok, #document{value = Value}}, Batch2} ->
+            {{ok, Value}, Batch2};
+        {{error, _}, _} = Error ->
+            Error
     end.
 
 
--spec save(infinite_log:log_id(), node_number(), term()) -> ok | {error, term()}.
-save(LogId, NodeNumber, Value) ->
+-spec save(infinite_log:ctx(), infinite_log:log_id(), node_number(), term(), infinite_log:batch()) -> 
+    {ok | {error, term()}, infinite_log:batch()}.
+save(Ctx, LogId, NodeNumber, Value, Batch) ->
     NodeId = build_node_id(LogId, NodeNumber),
-    %% @TODO VFS-7411 trick dialyzer into thinking that errors can be returned
-    %% they actually will after integration with datastore
-    case NodeId of
-        <<"123">> -> {error, etmpfail};
-        _ -> node_cache:put({?MODULE, NodeId}, Value)
+    case datastore_doc:save(Ctx, NodeId, #document{key = NodeId, value = Value}, Batch) of
+        {{ok, _}, Batch2} -> {ok, Batch2};
+        {{error, _}, _} = Error -> Error
     end.
 
 
--spec delete(infinite_log:log_id(), node_number()) -> ok | {error, term()}.
-delete(LogId, NodeNumber) ->
+-spec delete(infinite_log:ctx(), infinite_log:log_id(), node_number(), infinite_log:batch()) -> 
+    {ok | {error, term()}, infinite_log:batch()}.
+delete(Ctx, LogId, NodeNumber, Batch) ->
     NodeId = build_node_id(LogId, NodeNumber),
-    %% @TODO VFS-7411 trick dialyzer into thinking that errors can be returned
-    %% they actually will after integration with datastore
-    case NodeId of
-        <<"123">> -> {error, etmpfail};
-        %% @TODO VFS-7411 should return ok if the document is not found
-        _ -> node_cache:clear({?MODULE, NodeId})
-    end.
+    datastore_doc:delete(Ctx, NodeId, Batch).
 
 
--spec set_ttl(infinite_log:log_id(), node_number(), time:seconds()) -> ok | {error, term()}.
-set_ttl(LogId, NodeNumber, Ttl) ->
-    NodeId = build_node_id(LogId, NodeNumber),
-    %% @TODO VFS-7411 trick dialyzer into thinking that errors can be returned
-    %% they actually will after integration with datastore
-    case NodeId of
-        <<"123">> ->
-            {error, etmpfail};
-        _ ->
-            %% @TODO VFS-7411 adjust to CB's way of handling expiration
-            {ok, Record} = get(LogId, NodeNumber),
-            node_cache:put({?MODULE, NodeId}, Record, Ttl)
-    end.
+-spec set_ttl(infinite_log:ctx(), infinite_log:log_id(), node_number(), time:seconds(), infinite_log:batch()) -> 
+    {ok | {error, term()}, infinite_log:batch()}.
+set_ttl(Ctx, LogId, NodeNumber, Ttl, Batch) ->
+    {{ok, Record}, Batch1} = get(Ctx, LogId, NodeNumber, Batch),
+    set_ttl(Ctx, LogId, NodeNumber, Record, Ttl, Batch1).
+
+-spec set_ttl(infinite_log:ctx(), infinite_log:log_id(), node_number(), record(), time:seconds(), infinite_log:batch()) ->
+    {ok | {error, term()}, infinite_log:batch()}.
+set_ttl(Ctx, LogId, NodeNumber, Record, Ttl, Batch) ->
+    Ctx1 = datastore_doc:set_expiry_in_ctx(Ctx, Ttl),
+    save(Ctx1, LogId, NodeNumber, Record, Batch).
 
 %%=====================================================================
 %% Convenience functions
 %%=====================================================================
 
 -spec append_entry(record(), infinite_log:entry()) -> record().
-append_entry(Node = #node{entries = Entries, oldest_timestamp = OldestTimestamp}, Entry = {Timestamp, _}) ->
-    Node#node{
+append_entry(Node = #infinite_log_node{entries = Entries, oldest_timestamp = OldestTimestamp}, Entry = {Timestamp, _}) ->
+    Node#infinite_log_node{
         entries = [Entry | Entries],
         newest_timestamp = Timestamp,
         oldest_timestamp = case Entries of
@@ -102,28 +104,28 @@ append_entry(Node = #node{entries = Entries, oldest_timestamp = OldestTimestamp}
 %% Entries length can be easily calculated to avoid calling the length/1 function.
 -spec get_node_entries_length(infinite_log_sentinel:record(), node_number()) ->
     node_number().
-get_node_entries_length(Sentinel = #sentinel{max_entries_per_node = MaxEntriesPerNode}, NodeNumber) ->
+get_node_entries_length(Sentinel = #infinite_log_sentinel{max_entries_per_node = MaxEntriesPerNode}, NodeNumber) ->
     case newest_node_number(Sentinel) of
         NodeNumber ->
-            Sentinel#sentinel.total_entry_count - (NodeNumber * MaxEntriesPerNode);
+            Sentinel#infinite_log_sentinel.total_entry_count - (NodeNumber * MaxEntriesPerNode);
         _ ->
             MaxEntriesPerNode
     end.
 
 
 -spec newest_node_number(infinite_log_sentinel:record()) -> node_number().
-newest_node_number(Sentinel = #sentinel{total_entry_count = EntryCount}) ->
+newest_node_number(Sentinel = #infinite_log_sentinel{total_entry_count = EntryCount}) ->
     entry_index_to_node_number(Sentinel, EntryCount - 1).
 
 
 -spec oldest_node_number(infinite_log_sentinel:record()) -> node_number().
-oldest_node_number(Sentinel = #sentinel{oldest_entry_index = PrunedEntryCount}) ->
+oldest_node_number(Sentinel = #infinite_log_sentinel{oldest_entry_index = PrunedEntryCount}) ->
     entry_index_to_node_number(Sentinel, PrunedEntryCount).
 
 
 -spec entry_index_to_node_number(infinite_log_sentinel:record(), infinite_log:entry_index()) ->
     node_number().
-entry_index_to_node_number(#sentinel{max_entries_per_node = MaxEntriesPerNode}, EntryIndex) ->
+entry_index_to_node_number(#infinite_log_sentinel{max_entries_per_node = MaxEntriesPerNode}, EntryIndex) ->
     EntryIndex div MaxEntriesPerNode.
 
 %%=====================================================================
@@ -134,3 +136,27 @@ entry_index_to_node_number(#sentinel{max_entries_per_node = MaxEntriesPerNode}, 
 -spec build_node_id(infinite_log:log_id(), node_number()) -> id().
 build_node_id(LogId, NodeNumber) ->
     datastore_key:build_adjacent(integer_to_binary(NodeNumber), LogId).
+
+
+%%%===================================================================
+%%% Datastore API
+%%%===================================================================
+
+-spec get_ctx() -> datastore_model:ctx().
+get_ctx() ->
+    ?CTX.
+
+
+-spec get_record_version() -> datastore_model:record_version().
+get_record_version() ->
+    1.
+
+
+-spec get_record_struct(datastore_model:record_version()) ->
+    datastore_model:record_struct().
+get_record_struct(1) ->
+    {record, [
+        {entries, [{integer, binary}]},
+        {oldest_timestamp, integer},
+        {newest_timestamp, integer}
+    ]}.

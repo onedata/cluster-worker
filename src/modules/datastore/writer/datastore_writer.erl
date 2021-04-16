@@ -26,9 +26,11 @@
 -export([create/3, save/3, update/3, update/4, create_backup/2, fetch/2, delete/3]).
 -export([add_links/4, check_and_add_links/5, fetch_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, fetch_links_trees/2]).
+-export([infinite_log_create/3, infinite_log_destroy/2, infinite_log_append/3, 
+    infinite_log_list/3, infinite_log_set_ttl/3]).
 -export([generic_call/2, call_if_alive/2]).
 %% For ct tests
--export([call/4, call_async/4, wait/2]).
+-export([call/4, call_async/5, wait/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -225,14 +227,50 @@ fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
 fetch_links_trees(Ctx, Key) ->
     call(Ctx, get_key(Ctx, Key, links), fetch_links_trees, [Key]).
 
+
+-spec infinite_log_create(ctx(), key(), infinite_log:log_opts()) -> ok.
+infinite_log_create(Ctx, Key, Opts) ->
+    call(Ctx, get_key(Ctx, Key, links), infinite_log, create, [Key, Opts]).
+
+
+-spec infinite_log_destroy(ctx(), key()) -> ok.
+infinite_log_destroy(Ctx, Key) ->
+    call(Ctx, get_key(Ctx, Key, links), infinite_log, destroy, [Key]).
+
+
+-spec infinite_log_append(ctx(), key(), infinite_log:content()) -> ok.
+infinite_log_append(Ctx, Key, Content) ->
+    call(Ctx, get_key(Ctx, Key, links), infinite_log, append, [Key, Content]).
+
+
+-spec infinite_log_list(ctx(), key(), infinite_log_browser:listing_opts()) -> ok.
+infinite_log_list(Ctx, Key, Opts) ->
+    call(Ctx, get_key(Ctx, Key, links), infinite_log, list, [Key, Opts]).
+
+
+-spec infinite_log_set_ttl(ctx(), key(), time:seconds()) -> ok.
+infinite_log_set_ttl(Ctx, Key, Ttl) ->
+    call(Ctx, get_key(Ctx, Key, links), infinite_log, set_ttl, [Key, Ttl]).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv call(Ctx, Key, undefined, Function, Args)
+%% @end
+%%--------------------------------------------------------------------
+-spec call(ctx(), tp_key(), atom(), list()) -> term().
+call(Ctx, Key, Function, Args) ->
+    call(Ctx, Key, undefined, Function, Args).
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% @equiv call(Ctx, Key, Function, Args, ?INTERRUPTED_CALL_INITIAL_SLEEP, ?INTERRUPTED_CALL_RETRIES)
 %% @end
 %%--------------------------------------------------------------------
--spec call(ctx(), tp_key(), atom(), list()) -> term().
-call(Ctx, Key, Function, Args) ->
-    call(Ctx, Key, Function, Args, ?INTERRUPTED_CALL_INITIAL_SLEEP, ?INTERRUPTED_CALL_RETRIES).
+-spec call(ctx(), tp_key(), module() | undefined, atom(), list()) -> term().
+call(Ctx, Key, Module, Function, Args) ->
+    call(Ctx, Key, Module, Function, Args, ?INTERRUPTED_CALL_INITIAL_SLEEP, ?INTERRUPTED_CALL_RETRIES).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -240,9 +278,9 @@ call(Ctx, Key, Function, Args) ->
 %% with a key. Repeats in case of interrupted_call error.
 %% @end
 %%--------------------------------------------------------------------
--spec call(ctx(), tp_key(), atom(), list(), non_neg_integer(), non_neg_integer()) -> term().
-call(Ctx, Key, Function, Args, Sleep, InterruptedCallRetries) ->
-    case call_async(Ctx, Key, Function, Args) of
+-spec call(ctx(), tp_key(), module() | undefined, atom(), list(), non_neg_integer(), non_neg_integer()) -> term().
+call(Ctx, Key, Module, Function, Args, Sleep, InterruptedCallRetries) ->
+    case call_async(Ctx, Key, Module, Function, Args) of
         {{ok, Ref}, Pid} ->
             case wait(Ref, Pid) of
                 % TODO - VFS-6847 Currently if internal_call occurs, all elements of the list are the same.
@@ -262,7 +300,7 @@ call(Ctx, Key, Function, Args, Sleep, InterruptedCallRetries) ->
                             "~p retries left, next retry in ~p ms",
                                 [Function, Args, Key, Ctx, InterruptedCallRetries, Sleep]),
                             timer:sleep(Sleep),
-                            call(Ctx, Key, Function, Args, Sleep * 2, InterruptedCallRetries - 1)
+                            call(Ctx, Key, Module, Function, Args, Sleep * 2, InterruptedCallRetries - 1)
                     end
             end;
         {error, Reason} ->
@@ -290,10 +328,10 @@ multi_call(Ctx, Key, Function, Args, Size) ->
 %% @equiv generic_call(Key, #datastore_request{function = Function, ctx = Ctx, args = Args})
 %% @end
 %%--------------------------------------------------------------------
--spec call_async(ctx(), tp_key(), atom(), list()) ->
+-spec call_async(ctx(), tp_key(), module() | undefined, atom(), list()) ->
     {{ok, reference()}, pid()} | {error, term()}.
-call_async(Ctx, Key, Function, Args) ->
-    generic_call(Key, #datastore_request{function = Function, ctx = Ctx, args = Args}).
+call_async(Ctx, Key, Module, Function, Args) ->
+    generic_call(Key, #datastore_request{module = Module, function = Function, ctx = Ctx, args = Args}).
 
 %%--------------------------------------------------------------------
 %% @doc

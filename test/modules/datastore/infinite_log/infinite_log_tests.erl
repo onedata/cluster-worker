@@ -34,9 +34,9 @@
 % appending to log is tested during listing tests
 -define(TEST_CASES, [
     {"create_and_destroy", fun create_and_destroy/2},
-    {"set_ttl", fun set_ttl/2},
+    {"set_ttl", fun set_ttl_test/2},
 
-    {"list", fun list/2},
+    {"list", fun list_test/2},
     {"list_from_id", fun list_from_id/2},
     {"list_from_timestamp", fun list_from_timestamp/2},
     {"list_log_with_the_same_timestamps", fun list_log_with_the_same_timestamps/2},
@@ -62,25 +62,32 @@
     1, 2, 3, 5, 11, 99, 301, 1000, 1099
 ]).
 
+-define(DATASTORE_CTX, #{disc_driver_ctx => #{}}).
+-define(DATASTORE_BATCH, datastore_batch).
+
 
 inf_log_test_() ->
     {foreach,
         fun() ->
-            clock_freezer_mock:setup_locally([infinite_log_sentinel, node_cache]),
-            node_cache:init()
+            clock_freezer_mock:setup_locally([
+                infinite_log_sentinel, node_cache, couchbase_driver, ?MODULE
+            ]),
+            node_cache:init(),
+            mock_datastore_doc()
         end,
         fun(_) ->
             clock_freezer_mock:teardown_locally(),
-            node_cache:destroy()
+            node_cache:destroy(),
+            meck:unload(datastore_doc)
         end,
         lists:flatmap(fun({Name, Fun}) ->
             lists:map(fun(MaxEntriesPerNode) ->
-                {str_utils:format("~s [~B]", [Name, MaxEntriesPerNode]), fun() ->
+                {timeout, 120, {str_utils:format("~s [~B]", [Name, MaxEntriesPerNode]), fun() ->
                     LogId = create_log_for_test(#{
                         max_entries_per_node => MaxEntriesPerNode
                     }),
                     Fun(LogId, MaxEntriesPerNode)
-                end}
+                end}}
             end, ?ELEMENTS_PER_NODE_VARIANTS)
         end, ?TEST_CASES)
     }.
@@ -104,25 +111,25 @@ create_and_destroy(LogId, MaxEntriesPerNode) ->
         ?assert(node_exists(LogId, NodeNumber))
     end),
 
-    ?assertEqual(ok, infinite_log:destroy(LogId)),
+    ?assertEqual(ok, destroy(LogId)),
     ?assertNot(sentinel_exists(LogId)),
     foreach_archival_node_number(EntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
         ?assertNot(node_exists(LogId, NodeNumber))
     end),
 
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?FORWARD}, allow_updates)),
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD}, allow_updates)),
-    ?assertEqual({error, not_found}, infinite_log:append(LogId, <<"log">>)),
-    ?assertEqual(ok, infinite_log:destroy(LogId)).
+    ?assertEqual({error, not_found}, list(LogId, #{direction => ?FORWARD}, allow_updates)),
+    ?assertEqual({error, not_found}, list(LogId, #{direction => ?BACKWARD}, allow_updates)),
+    ?assertEqual({error, not_found}, append(LogId, <<"log">>)),
+    ?assertEqual(ok, destroy(LogId)).
 
 
-set_ttl(LogId, MaxEntriesPerNode) ->
+set_ttl_test(LogId, MaxEntriesPerNode) ->
     % the log is created in test setup
     EntryCount = 5000,
     append(#{count => EntryCount, first_at => 0, interval => 1}),
 
     Ttl = rand:uniform(100000000),
-    ?assertEqual(ok, infinite_log:set_ttl(LogId, Ttl)),
+    ?assertEqual(ok, set_ttl(LogId, Ttl)),
 
     clock_freezer_mock:simulate_seconds_passing(Ttl - 1),
     ?assert(sentinel_exists(LogId)),
@@ -141,13 +148,13 @@ set_ttl(LogId, MaxEntriesPerNode) ->
         ?assertNot(node_exists(LogId, NodeNumber))
     end),
 
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?FORWARD}, allow_updates)),
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD}, allow_updates)),
-    ?assertEqual({error, not_found}, infinite_log:append(LogId, <<"log">>)),
-    ?assertEqual({error, not_found}, infinite_log:set_ttl(LogId, Ttl)).
+    ?assertEqual({error, not_found}, list(LogId, #{direction => ?FORWARD}, allow_updates)),
+    ?assertEqual({error, not_found}, list(LogId, #{direction => ?BACKWARD}, allow_updates)),
+    ?assertEqual({error, not_found}, append(LogId, <<"log">>)),
+    ?assertEqual({error, not_found}, set_ttl(LogId, Ttl)).
 
 
-list(_, _) ->
+list_test(_, _) ->
     append(#{count => 5000}),
 
     ?testList([4999], ?BACKWARD, undefined, #{offset => 0, limit => 1}),
@@ -589,7 +596,7 @@ age_based_pruning_with_ttl_set(_, MaxEntriesPerNode) ->
     append(#{count => MaxEntriesPerNode, first_at => Threshold div 4 * 2 * 1000, interval => 0}),
     append(#{count => MaxEntriesPerNode, first_at => Threshold div 4 * 3 * 1000, interval => 0}),
 
-    ?assertEqual(ok, infinite_log:set_ttl(LogId, Threshold div 4 * 3)),
+    ?assertEqual(ok, set_ttl(LogId, Threshold div 4 * 3)),
 
     ?testList([0], ?FORWARD, undefined, #{limit => 1}),
     ?testList([4 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
@@ -611,15 +618,15 @@ age_based_pruning_with_ttl_set(_, MaxEntriesPerNode) ->
         ?assertNot(node_exists(LogId, NodeNumber))
     end),
 
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?FORWARD}, allow_updates)),
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{direction => ?BACKWARD}, allow_updates)),
-    ?assertEqual({error, not_found}, infinite_log:append(LogId, <<"log">>)),
-    ?assertEqual({error, not_found}, infinite_log:set_ttl(LogId, Threshold)).
+    ?assertEqual({error, not_found}, list(LogId, #{direction => ?FORWARD}, allow_updates)),
+    ?assertEqual({error, not_found}, list(LogId, #{direction => ?BACKWARD}, allow_updates)),
+    ?assertEqual({error, not_found}, append(LogId, <<"log">>)),
+    ?assertEqual({error, not_found}, set_ttl(LogId, Threshold)).
 
 
 list_inexistent_log(_, _) ->
     InexistentLogId = str_utils:rand_hex(16),
-    ?assertEqual({error, not_found}, infinite_log:list(InexistentLogId, #{
+    ?assertEqual({error, not_found}, list(InexistentLogId, #{
         direction => lists_utils:random_element([?FORWARD, ?BACKWARD]),
         start_from => lists_utils:random_element([undefined, {index, ?rand(1000)}, {timestamp, ?rand(1000)}]),
         offset => ?rand(1000) - 500,
@@ -650,16 +657,16 @@ list_log_with_missing_nodes(LogId, MaxEntriesPerNode) ->
     ArchivalNodeNumbers = lists:seq(0, MaxNodeNumber - 1),
     MissingNodeNumbers = lists_utils:random_sublist(ArchivalNodeNumbers, 1, all),
     lists:foreach(fun(NodeNumber) ->
-        ?assertEqual(ok, infinite_log_node:delete(LogId, NodeNumber))
+        ?assertEqual(ok, delete_node(LogId, NodeNumber))
     end, MissingNodeNumbers),
-    ?assertEqual({error, internal_server_error}, infinite_log:list(LogId, #{
+    ?assertEqual({error, internal_server_error}, list(LogId, #{
         direction => lists_utils:random_element([?FORWARD, ?BACKWARD]),
         limit => EntryCount
     }, allow_updates)),
 
     % if the sentinel is gone, the whole log is considered to be inexistent
-    ?assertEqual(ok, infinite_log_sentinel:delete(LogId)),
-    ?assertEqual({error, not_found}, infinite_log:list(LogId, #{
+    ?assertEqual(ok, delete_sentinel(LogId)),
+    ?assertEqual({error, not_found}, list(LogId, #{
         direction => lists_utils:random_element([?FORWARD, ?BACKWARD]),
         limit => EntryCount
     }, allow_updates)).
@@ -669,21 +676,21 @@ append_with_time_warps(LogId, _) ->
     % in case of backward time warps, the infinite log should artificially
     % keep the entries monotonic - consecutive entry cannot be older than the previous
     clock_freezer_mock:set_current_time_millis(1000),
-    infinite_log:append(LogId, str_utils:rand_hex(100)),
+    append(LogId, str_utils:rand_hex(100)),
 
     clock_freezer_mock:set_current_time_millis(950),
-    infinite_log:append(LogId, str_utils:rand_hex(100)),
+    append(LogId, str_utils:rand_hex(100)),
 
     clock_freezer_mock:set_current_time_millis(953),
-    infinite_log:append(LogId, str_utils:rand_hex(100)),
+    append(LogId, str_utils:rand_hex(100)),
 
     clock_freezer_mock:set_current_time_millis(993),
-    infinite_log:append(LogId, str_utils:rand_hex(100)),
+    append(LogId, str_utils:rand_hex(100)),
 
     clock_freezer_mock:set_current_time_millis(1000),
-    infinite_log:append(LogId, str_utils:rand_hex(100)),
+    append(LogId, str_utils:rand_hex(100)),
 
-    {ok, {done, ListResultsPrim}} = infinite_log:list(LogId, #{direction => ?FORWARD}, allow_updates),
+    {ok, {done, ListResultsPrim}} = list(LogId, #{direction => ?FORWARD}, allow_updates),
     ?assertEqual(
         [1000, 1000, 1000, 1000, 1000],
         extract_timestamps(ListResultsPrim)
@@ -691,21 +698,21 @@ append_with_time_warps(LogId, _) ->
 
     % forward time warp should cause the new entries to get later timestamps
     clock_freezer_mock:set_current_time_millis(1300),
-    infinite_log:append(LogId, str_utils:rand_hex(100)),
+    append(LogId, str_utils:rand_hex(100)),
 
     clock_freezer_mock:set_current_time_millis(1306),
-    infinite_log:append(LogId, str_utils:rand_hex(100)),
+    append(LogId, str_utils:rand_hex(100)),
 
     clock_freezer_mock:set_current_time_millis(1296),
-    infinite_log:append(LogId, str_utils:rand_hex(100)),
+    append(LogId, str_utils:rand_hex(100)),
 
     clock_freezer_mock:set_current_time_millis(1296),
-    infinite_log:append(LogId, str_utils:rand_hex(100)),
+    append(LogId, str_utils:rand_hex(100)),
 
     clock_freezer_mock:set_current_time_millis(1318),
-    infinite_log:append(LogId, str_utils:rand_hex(100)),
+    append(LogId, str_utils:rand_hex(100)),
 
-    {ok, {done, ListResultsBis}} = infinite_log:list(LogId, #{direction => ?FORWARD}, allow_updates),
+    {ok, {done, ListResultsBis}} = list(LogId, #{direction => ?FORWARD}, allow_updates),
     ?assertEqual(
         [1000, 1000, 1000, 1000, 1000, 1300, 1306, 1306, 1306, 1318],
         extract_timestamps(ListResultsBis)
@@ -716,7 +723,7 @@ append_too_large_content(LogId, MaxEntriesPerNode) ->
     TooLargeSize = 20000000 div MaxEntriesPerNode,
     % rand hex returns two output bytes for every input byte
     Content = str_utils:rand_hex(TooLargeSize div 2),
-    ?assertEqual({error, log_content_too_large}, infinite_log:append(LogId, Content)).
+    ?assertEqual({error, log_content_too_large}, append(LogId, Content)).
 
 %%=====================================================================
 %% Helper functions
@@ -724,7 +731,7 @@ append_too_large_content(LogId, MaxEntriesPerNode) ->
 
 create_log_for_test(LogOpts) ->
     LogId = datastore_key:new(),
-    ?assertEqual(ok, infinite_log:create(LogId, LogOpts)),
+    ?assertEqual(ok, create(LogId, LogOpts)),
     store_current_log_id(LogId),
     LogId.
 
@@ -744,7 +751,7 @@ append(Spec) ->
         EntryNumber = get_entry_count(LogId),
         Timestamp = clock_freezer_mock:current_time_millis(),
         store_entry(LogId, EntryNumber, {Timestamp, Content}),
-        infinite_log:append(LogId, Content),
+        append(LogId, Content),
         store_entry_count(LogId, EntryNumber + 1),
         clock_freezer_mock:simulate_millis_passing(case Interval of
             random -> ?rand(10000);
@@ -770,10 +777,10 @@ list_indices_and_verify(ExpectedIndices, Direction, StartFrom, OtherOpts) ->
         Result = case RequiredAccess of
             readonly ->
                 RandomAccessMode = lists_utils:random_element([readonly, allow_updates]),
-                infinite_log:list(LogId, ListOpts, RandomAccessMode);
+                list(LogId, ListOpts, RandomAccessMode);
             allow_updates ->
-                ?assertEqual({error, update_required}, infinite_log:list(LogId, ListOpts, readonly)),
-                infinite_log:list(LogId, ListOpts, allow_updates)
+                ?assertEqual({error, update_required}, list(LogId, ListOpts, readonly)),
+                list(LogId, ListOpts, allow_updates)
         end,
         ?assertMatch({ok, {_, _}}, Result),
         {ok, {ProgressMarker, Batch}} = Result,
@@ -792,7 +799,7 @@ list_indices_and_verify(ExpectedIndices, Direction, StartFrom, OtherOpts) ->
                     ?FORWARD ->
                         get_entry_count(LogId) - 1;
                     ?BACKWARD ->
-                        {ok, {_, [{FirstIndex, _}]}} = infinite_log:list(LogId, #{
+                        {ok, {_, [{FirstIndex, _}]}} = list(LogId, #{
                             direction => ?FORWARD,
                             limit => 1
                         }, allow_updates),
@@ -840,14 +847,14 @@ get_entry(Id, EntryIndex) ->
 
 
 sentinel_exists(LogId) ->
-    case infinite_log_sentinel:acquire(LogId, skip_pruning, readonly) of
+    case acquire_sentinel(LogId, skip_pruning, readonly) of
         {ok, _} -> true;
         {error, not_found} -> false
     end.
 
 
 node_exists(LogId, NodeNumber) ->
-    case infinite_log_node:get(LogId, NodeNumber) of
+    case get_node(LogId, NodeNumber) of
         {ok, _} -> true;
         {error, not_found} -> false
     end.
@@ -874,5 +881,71 @@ signum(X) when X < 0 -> -1;
 signum(X) when X == 0 -> 0;
 signum(X) when X > 0 -> 1.
 
+
+mock_datastore_doc() ->
+    meck:new(datastore_doc, [passthrough]),
+    meck:expect(datastore_doc, fetch,
+        fun(_Ctx, Id, Batch) ->
+            {node_cache:get({?MODULE, Id}, {error, not_found}), Batch}
+        end
+    ),
+    meck:expect(datastore_doc, save,
+        fun(Ctx, Id, Document, Batch) ->
+            Ttl = kv_utils:get([disc_driver_ctx, expiry], Ctx, infinity),
+            MockTtl = case is_integer(Ttl) andalso Ttl > 2592000 of
+                true -> Ttl - global_clock:timestamp_seconds();
+                false -> Ttl
+            end,
+            node_cache:put({?MODULE, Id}, {ok, Document}, MockTtl),
+            {{ok, Document}, Batch}
+        end
+    ),
+    meck:expect(datastore_doc, delete,
+        fun(_Ctx, Id, Batch) ->
+            node_cache:clear({?MODULE, Id}),
+            {ok, Batch}
+        end
+    ),
+    ok.
+
+%%=====================================================================
+%% Convenience functions
+%%=====================================================================
+
+create(LogId, Opts) ->
+    {Res, _} = infinite_log:create(?DATASTORE_CTX, LogId, Opts, ?DATASTORE_BATCH),
+    Res.
+
+destroy(LogId) ->
+    {Res, _} = infinite_log:destroy(?DATASTORE_CTX, LogId, ?DATASTORE_BATCH),
+    Res.
+
+append(LogId, Content) ->
+    {Res, _} = infinite_log:append(?DATASTORE_CTX, LogId, Content, ?DATASTORE_BATCH),
+    Res.
+
+list(LogId, Opts, AccessMode) ->
+    {Res, _} = infinite_log:list(?DATASTORE_CTX, LogId, Opts, AccessMode, ?DATASTORE_BATCH),
+    Res.
+
+set_ttl(LogId, Ttl) ->
+    {Res, _} = infinite_log:set_ttl(?DATASTORE_CTX, LogId, Ttl, ?DATASTORE_BATCH),
+    Res.
+
+delete_node(LogId, NodeNumber) ->
+    {Res, _} = infinite_log_node:delete(?DATASTORE_CTX, LogId, NodeNumber, ?DATASTORE_BATCH),
+    Res.
+
+delete_sentinel(LogId) ->
+    {Res, _} = infinite_log_sentinel:delete(?DATASTORE_CTX, LogId, ?DATASTORE_BATCH),
+    Res.
+
+acquire_sentinel(LogId, skip_pruning, readonly) ->
+    {Res, _} = infinite_log_sentinel:acquire(?DATASTORE_CTX, LogId, skip_pruning, readonly, ?DATASTORE_BATCH),
+    Res.
+
+get_node(LogId, NodeNumber) -> 
+    {Res, _} = infinite_log_node:get(?DATASTORE_CTX, LogId, NodeNumber, ?DATASTORE_BATCH),
+    Res.
 
 -endif.

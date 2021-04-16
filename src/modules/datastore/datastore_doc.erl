@@ -23,6 +23,7 @@
 -export([create/4, save/4, update/4, update/5]).
 -export([fetch/3, fetch/4, fetch_deleted/3]).
 -export([delete/3, delete/4]).
+-export([set_expiry_in_ctx/2]).
 
 -type ctx() :: datastore:ctx().
 -type key() :: undefined | datastore_key:key().
@@ -227,6 +228,20 @@ delete(Ctx, Key, Pred, Batch) ->
             {ok, Batch2};
         {{error, Reason}, Batch2} ->
             {{error, Reason}, Batch2}
+    end.
+
+
+%%%===================================================================
+%%% API
+%%%===================================================================
+
+-spec set_expiry_in_ctx(ctx(), time:seconds()) -> ctx().
+set_expiry_in_ctx(Ctx, undefined) -> Ctx;
+set_expiry_in_ctx(Ctx, ExpirationTime) ->
+    case maps:find(disc_driver_ctx, Ctx) of
+        error -> Ctx;
+        {ok, DiscDriverCtx} ->
+            Ctx#{disc_driver_ctx => couchbase_driver:set_expiry(DiscDriverCtx, ExpirationTime)}
     end.
 
 %%%===================================================================

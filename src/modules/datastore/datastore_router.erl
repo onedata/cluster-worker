@@ -194,7 +194,8 @@ select_module(Function) when
     Function == get;
     Function == exists;
     Function == get_links;
-    Function == get_links_trees ->
+    Function == get_links_trees;
+    Function == infinite_log_list ->
     datastore_reader;
 select_module(_) ->
     datastore_writer.

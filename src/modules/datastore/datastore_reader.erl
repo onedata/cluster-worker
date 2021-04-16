@@ -16,6 +16,7 @@
 
 -export([get/3, exists/3]).
 -export([get_links/5, get_links_trees/3]).
+-export([infinite_log_list/4]).
 
 -type tree_id() :: datastore_links:tree_id().
 -type link() :: datastore_links:link().
@@ -106,6 +107,30 @@ get_links_trees(FetchNode, Ctx, Key) ->
     catch
         _:_ ->
             datastore_router:execute_on_node(FetchNode, datastore_writer, fetch_links_trees, [Ctx, Key])
+    end.
+
+
+-spec infinite_log_list(node(),  datastore_doc:ctx(), datastore_doc:key(), infinite_log_browser:listing_opts()) -> ok.
+infinite_log_list(FetchNode, Ctx, Key, Opts) ->
+    Fallback = fun() ->
+        datastore_router:execute_on_node(FetchNode, datastore_writer, infinite_log_list, [Ctx, Key, Opts])
+    end,
+    try
+        MemoryCtx = case {Ctx, node()} of
+            {#{disc_driver := undefined}, FetchNode} -> Ctx;
+            _ -> Ctx#{disc_driver => undefined, remote_driver => undefined, throw_not_found => true}
+        end,
+        case infinite_log:list(MemoryCtx, Key, Opts, readonly, undefined) of
+            {{ok, Result}, _} ->
+                {ok, Result};
+            {{error, update_required}, _} ->
+                Fallback();
+            {{error, Reason}, _} ->
+                {error, Reason}
+        end
+    catch
+        _:_ ->
+            Fallback()
     end.
 
 %%%===================================================================

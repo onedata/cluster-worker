@@ -33,6 +33,8 @@
     traverse_tasks_scheduler,
     view_traverse_job,
     node_internal_services,
+    infinite_log_sentinel,
+    infinite_log_node,
     % Model used for performance testing (mocked models cannot be used as they affect performance)
     performance_test_record
 ]).
