@@ -207,13 +207,14 @@ tree_fold_should_return_targets_from_link(Config) ->
     LinksNum = 1000,
     AllLinks = add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID, LinksNum),
     Names = lists:map(fun(#link{name = Name}) -> Name end, AllLinks),
+    SortedNames = lists:sort(Names),
     lists:foreach(fun({Offset, Name}) ->
         Links = fold_links(Worker, ?CTX(?KEY), ?KEY, #{
             prev_tree_id => ?LINK_TREE_ID,
             prev_link_name => Name
         }),
         ?assertEqual(get_expected_links(AllLinks, Offset), Links)
-    end, lists:zip(lists:seq(1, LinksNum), lists:sort(Names))).
+    end, lists_utils:enumerate(SortedNames)).
 
 tree_fold_should_return_targets_from_not_existing_id(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -439,13 +440,14 @@ multi_tree_fold_should_return_targets_from_link(Config) ->
     LinkPoints = lists:map(fun(#link{tree_id = TreeId, name = Name}) ->
         {Name, TreeId}
     end, AllLinks),
+    LinkPointsSorted = lists:sort(LinkPoints),
     lists:foreach(fun({Offset, {Name, TreeId}}) ->
         Links = fold_links(Worker, ?CTX(?KEY), ?KEY, #{
             prev_tree_id => TreeId,
             prev_link_name => Name
         }),
         ?assertEqual(get_expected_links(AllLinks, Offset), Links)
-    end, lists:zip(lists:seq(1, TreesNum * LinksNum), lists:sort(LinkPoints))).
+    end, lists_utils:enumerate(LinkPointsSorted)).
 
 multi_tree_fold_should_return_all_using_ids(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
