@@ -14,6 +14,13 @@
 -ifndef(INFINITE_LOG_HRL).
 -define(INFINITE_LOG_HRL, 1).
 
+-define(DEFAULT_MAX_ENTRIES_PER_NODE, 1000).
+
+-define(MAX_LISTING_BATCH, 1000).
+% possible directions of listing
+-define(BACKWARD, backward_from_newest).
+-define(FORWARD, forward_from_oldest).
+
 -record(node, {
     entries = []  :: [infinite_log:entry()],
     oldest_timestamp = 0 :: infinite_log:timestamp(),
@@ -26,15 +33,24 @@
 % it becomes full - to optimize the performance.
 -record(sentinel, {
     log_id :: infinite_log:log_id(),
-    max_entries_per_node :: pos_integer(),
-    entry_count = 0 :: non_neg_integer(),
+    max_entries_per_node = ?DEFAULT_MAX_ENTRIES_PER_NODE :: pos_integer(),
+
+    % current entry count is equal to (total - oldest_entry_index)
+    total_entry_count = 0 :: non_neg_integer(),
+    % modified when the log is pruned
+    oldest_entry_index = 0 :: non_neg_integer(),
+
     oldest_timestamp = 0 :: infinite_log:timestamp(),
     newest_timestamp = 0 :: infinite_log:timestamp(),
-    buffer = #node{} :: infinite_log_node:record()
-}).
+    oldest_node_timestamp = 0 :: infinite_log:timestamp(),
+    buffer = #node{} :: infinite_log_node:record(),
 
-% possible directions of listing
--define(BACKWARD, backward_from_newest).
--define(FORWARD, forward_from_oldest).
+    size_pruning_threshold :: undefined | non_neg_integer(),
+    age_pruning_threshold :: undefined | time:seconds(),
+    % the log's expiration time must be tracked so that newly created documents
+    % (archival nodes) are expired adequately and so that the interaction of TTL
+    % and the age-based pruning can be properly handled
+    expiration_time :: undefined | time:seconds()
+}).
 
 -endif.
