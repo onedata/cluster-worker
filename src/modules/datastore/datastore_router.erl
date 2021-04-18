@@ -84,9 +84,9 @@ route(Function, Args) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec process(module(), atom(), list()) -> term().
-process(datastore_doc, Function, Args) ->
+process(datastore_reader, Function, Args) ->
     ?update_counter(?EXOMETER_NAME(Function)),
-    apply(datastore_doc, Function, Args);
+    apply(datastore_reader, Function, Args);
 process(Module, Function, Args = [#{model := Model} | _]) ->
     ?update_counter(?EXOMETER_NAME(Function)),
     case datastore_throttling:throttle_model(Model) of
@@ -195,6 +195,6 @@ select_module(Function) when
     Function == exists;
     Function == get_links;
     Function == get_links_trees ->
-    datastore_doc;
+    datastore_reader;
 select_module(_) ->
     datastore_writer.
