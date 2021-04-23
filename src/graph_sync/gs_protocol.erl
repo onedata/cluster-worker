@@ -117,7 +117,8 @@
 % resources or disambiguate issuer of an operation.
 -type auth_hint() :: undefined | {
     throughUser | throughGroup | throughSpace | throughProvider |
-    throughHandleService | throughHandle | throughHarvester | throughCluster |
+    throughHandleService | throughHandle | throughHarvester
+    | throughCluster | throughInventory |
     asUser | asGroup | asSpace | asHarvester,
     EntityId :: binary()
 }.
@@ -844,6 +845,7 @@ auth_hint_to_json(?THROUGH_HANDLE_SERVICE(HSId)) -> <<"throughHandleService:", H
 auth_hint_to_json(?THROUGH_HANDLE(HandleId)) -> <<"throughHandle:", HandleId/binary>>;
 auth_hint_to_json(?THROUGH_HARVESTER(HarvesterId)) -> <<"throughHarvester:", HarvesterId/binary>>;
 auth_hint_to_json(?THROUGH_CLUSTER(ClusterId)) -> <<"throughCluster:", ClusterId/binary>>;
+auth_hint_to_json(?THROUGH_ATM_INVENTORY(AtmInventoryId)) -> <<"throughAtmInventory:", AtmInventoryId/binary>>;
 auth_hint_to_json(?AS_USER(UserId)) -> <<"asUser:", UserId/binary>>;
 auth_hint_to_json(?AS_GROUP(GroupId)) -> <<"asGroup:", GroupId/binary>>;
 auth_hint_to_json(?AS_SPACE(SpaceId)) -> <<"asSpace:", SpaceId/binary>>;
@@ -860,6 +862,7 @@ json_to_auth_hint(<<"throughHandleService:", HSId/binary>>) -> ?THROUGH_HANDLE_S
 json_to_auth_hint(<<"throughHandle:", HandleId/binary>>) -> ?THROUGH_HANDLE(HandleId);
 json_to_auth_hint(<<"throughHarvester:", HarvesterId/binary>>) -> ?THROUGH_HARVESTER(HarvesterId);
 json_to_auth_hint(<<"throughCluster:", ClusterId/binary>>) -> ?THROUGH_CLUSTER(ClusterId);
+json_to_auth_hint(<<"throughAtmInventory:", AtmInventoryId/binary>>) -> ?THROUGH_ATM_INVENTORY(AtmInventoryId);
 json_to_auth_hint(<<"asUser:", UserId/binary>>) -> ?AS_USER(UserId);
 json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId);
 json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId);
