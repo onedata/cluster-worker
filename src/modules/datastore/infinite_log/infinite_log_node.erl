@@ -16,7 +16,7 @@
 -include("modules/datastore/infinite_log.hrl").
 
 %% Model API
--export([get/4, save/5, delete/4, set_ttl/5, set_ttl/6]).
+-export([get/4, save/5, delete/4, set_ttl/5, save_with_ttl/6]).
 %% Convenience functions
 -export([append_entry/2]).
 -export([get_node_entries_length/2]).
@@ -45,23 +45,23 @@
 %%=====================================================================
 
 -spec get(infinite_log:ctx(), infinite_log:log_id(), node_number(), infinite_log:batch()) -> 
-    {{ok, term()} | {error, term()}, infinite_log:batch()}.
+    {{ok, record()} | {error, term()}, infinite_log:batch()}.
 get(Ctx, LogId, NodeNumber, Batch) ->
     NodeId = build_node_id(LogId, NodeNumber),
     case datastore_doc:fetch(Ctx, NodeId, Batch) of
-        {{ok, #document{value = Value}}, Batch2} ->
-            {{ok, Value}, Batch2};
+        {{ok, #document{value = Record}}, UpdatedBatch} ->
+            {{ok, Record}, UpdatedBatch};
         {{error, _}, _} = Error ->
             Error
     end.
 
 
--spec save(infinite_log:ctx(), infinite_log:log_id(), node_number(), term(), infinite_log:batch()) -> 
+-spec save(infinite_log:ctx(), infinite_log:log_id(), node_number(), record(), infinite_log:batch()) -> 
     {ok | {error, term()}, infinite_log:batch()}.
-save(Ctx, LogId, NodeNumber, Value, Batch) ->
+save(Ctx, LogId, NodeNumber, Record, Batch) ->
     NodeId = build_node_id(LogId, NodeNumber),
-    case datastore_doc:save(Ctx, NodeId, #document{key = NodeId, value = Value}, Batch) of
-        {{ok, _}, Batch2} -> {ok, Batch2};
+    case datastore_doc:save(Ctx, NodeId, #document{key = NodeId, value = Record}, Batch) of
+        {{ok, _}, UpdatedBatch} -> {ok, UpdatedBatch};
         {{error, _}, _} = Error -> Error
     end.
 
@@ -76,12 +76,12 @@ delete(Ctx, LogId, NodeNumber, Batch) ->
 -spec set_ttl(infinite_log:ctx(), infinite_log:log_id(), node_number(), time:seconds(), infinite_log:batch()) -> 
     {ok | {error, term()}, infinite_log:batch()}.
 set_ttl(Ctx, LogId, NodeNumber, Ttl, Batch) ->
-    {{ok, Record}, Batch1} = get(Ctx, LogId, NodeNumber, Batch),
-    set_ttl(Ctx, LogId, NodeNumber, Record, Ttl, Batch1).
+    {{ok, Record}, UpdatedBatch} = get(Ctx, LogId, NodeNumber, Batch),
+    save_with_ttl(Ctx, LogId, NodeNumber, Record, Ttl, UpdatedBatch).
 
--spec set_ttl(infinite_log:ctx(), infinite_log:log_id(), node_number(), record(), time:seconds(), infinite_log:batch()) ->
+-spec save_with_ttl(infinite_log:ctx(), infinite_log:log_id(), node_number(), record(), time:seconds(), infinite_log:batch()) ->
     {ok | {error, term()}, infinite_log:batch()}.
-set_ttl(Ctx, LogId, NodeNumber, Record, Ttl, Batch) ->
+save_with_ttl(Ctx, LogId, NodeNumber, Record, Ttl, Batch) ->
     Ctx1 = datastore_doc:set_expiry_in_ctx(Ctx, Ttl),
     save(Ctx1, LogId, NodeNumber, Record, Batch).
 

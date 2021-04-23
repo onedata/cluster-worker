@@ -131,12 +131,12 @@ create(Ctx, LogId, Opts, InitialBatch) ->
 -spec destroy(ctx(), log_id(), batch()) -> {ok | {error, term()}, batch()}.
 destroy(Ctx, LogId, InitialBatch) ->
     case infinite_log_sentinel:acquire(Ctx, LogId, skip_pruning, allow_updates, InitialBatch) of
-        {{ok, Sentinel}, Batch1} ->
-            Callback = fun(LogId, NodeNumber, InternalBatch) -> 
-                infinite_log_node:delete(Ctx, LogId, NodeNumber, InternalBatch) 
+        {{ok, Sentinel}, AcquireBatch} ->
+            Callback = fun(LogId, NodeNumber, AccBatch) -> 
+                infinite_log_node:delete(Ctx, LogId, NodeNumber, AccBatch) 
             end,
-            case apply_for_archival_log_nodes(Sentinel, Callback, Batch1) of
-                {{error, _}, _ReturnedBatch} = ErrorResponse ->
+            case apply_for_archival_log_nodes(Sentinel, Callback, AcquireBatch) of
+                {{error, _}, _} = ErrorResponse ->
                     ErrorResponse;
                 {ok, ReturnedBatch} ->
                     infinite_log_sentinel:delete(Ctx, LogId, ReturnedBatch)
@@ -149,7 +149,7 @@ destroy(Ctx, LogId, InitialBatch) ->
 -spec append(ctx(), log_id(), content(), batch()) -> {ok | {error, term()}, batch()}.
 append(Ctx, LogId, Content, InitialBatch) when is_binary(LogId) ->
     case infinite_log_sentinel:acquire(Ctx, LogId, skip_pruning, allow_updates, InitialBatch) of
-        {{error, _}, _ReturnedBatch} = AcquireError ->
+        {{error, _}, _} = AcquireError ->
             AcquireError;
         {{ok, Sentinel}, AcquireBatch} ->
             case sanitize_append_request(Sentinel, Content) of
@@ -167,7 +167,7 @@ list(Ctx, LogId, Opts, AccessMode, InitialBatch) ->
     % age based pruning must be attempted at every listing as some of
     % the log nodes may have expired
     case infinite_log_sentinel:acquire(Ctx, LogId, apply_pruning, AccessMode, InitialBatch) of
-        {{error, _}, _AcquireBatch} = AcquireError ->
+        {{error, _}, _} = AcquireError ->
             AcquireError;
         {{ok, Sentinel}, AcquireBatch} ->
             try
@@ -191,17 +191,17 @@ list(Ctx, LogId, Opts, AccessMode, InitialBatch) ->
 -spec set_ttl(ctx(), log_id(), time:seconds(), batch()) -> {ok | {error, term()}, batch()}.
 set_ttl(Ctx, LogId, Ttl, InitialBatch) ->
     case infinite_log_sentinel:acquire(Ctx, LogId, skip_pruning, allow_updates, InitialBatch) of
-        {{error, _}, _AcquireBatch} = AcquireError ->
+        {{error, _}, _} = AcquireError ->
             AcquireError;
         {{ok, Sentinel}, AcquireBatch} ->
             SetNodeTtl = fun(LogId, NodeNumber, InternalBatch) ->
                 infinite_log_node:set_ttl(Ctx, LogId, NodeNumber, Ttl, InternalBatch)
             end,
             case apply_for_archival_log_nodes(Sentinel, SetNodeTtl, AcquireBatch) of
-                {{error, _}, _ResponseBatch} = SetTtlError ->
+                {{error, _}, _} = SetTtlError ->
                     SetTtlError;
-                {ok, ResponseBatch} ->
-                    infinite_log_sentinel:set_ttl(Ctx, LogId, Ttl, ResponseBatch)
+                {ok, UpdatedBatch} ->
+                    infinite_log_sentinel:set_ttl(Ctx, LogId, Ttl, UpdatedBatch)
             end
     end.
 
@@ -245,14 +245,14 @@ safe_log_content_size(#infinite_log_sentinel{max_entries_per_node = MaxEntriesPe
     batch()
 ) ->
     {ok | {error, term()}, batch()}.
-apply_for_archival_log_nodes(Sentinel = #infinite_log_sentinel{log_id = LogId}, Callback, InitBatch) ->
+apply_for_archival_log_nodes(Sentinel = #infinite_log_sentinel{log_id = LogId}, Callback, InitialBatch) ->
     BufferNodeNumber = infinite_log_node:newest_node_number(Sentinel),
     ArchivalNodeNumbers = lists:seq(0, BufferNodeNumber - 1),
-    lists_utils:foldl_while(fun(NodeNumber, {ok, Batch}) ->
-        case Callback(LogId, NodeNumber, Batch) of
+    lists_utils:foldl_while(fun(NodeNumber, {ok, AccBatch}) ->
+        case Callback(LogId, NodeNumber, AccBatch) of
             {ok, _} = OkResponse->
                 {cont, OkResponse};
             {{error, _}, _} = ErrorResponse ->
                 {halt, ErrorResponse}
         end
-    end, {ok, InitBatch}, ArchivalNodeNumbers).
+    end, {ok, InitialBatch}, ArchivalNodeNumbers).
