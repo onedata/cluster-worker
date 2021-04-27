@@ -311,8 +311,8 @@ get_links_trees(Ctx, Key) ->
 
 
 -spec infinite_log_operation(ctx(), key(), atom(), [term()]) -> 
-    ok |{ok, infinite_log_browser:listing_result()} | {error, term()}.
+    ok | {ok, infinite_log_browser:listing_result()} | {error, term()}.
 infinite_log_operation(Ctx, Key, Function, Args) ->
     datastore_hooks:wrap(Ctx, Key, Function, Args, fun
-        (Function, Args) -> datastore_router:route(list_to_atom("infinite_log_" ++  atom_to_list(Function)), Args)
+        (Function, Args) -> datastore_router:route_infinite_log_operation(Function, Args)
     end).

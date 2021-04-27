@@ -236,7 +236,6 @@ delete(Ctx, Key, Pred, Batch) ->
 %%%===================================================================
 
 -spec set_expiry_in_ctx(ctx(), time:seconds()) -> ctx().
-set_expiry_in_ctx(Ctx, undefined) -> Ctx;
 set_expiry_in_ctx(Ctx, ExpirationTime) ->
     case maps:find(disc_driver_ctx, Ctx) of
         error -> Ctx;

@@ -17,7 +17,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% Model API
--export([acquire/5, save/4, delete/3, set_ttl/4]).
+-export([acquire/5, save/4, delete/3, sve_with_ttl/4]).
 %% Convenience functions
 -export([append/4]).
 -export([get_node_by_number/4]).
@@ -91,9 +91,9 @@ delete(Ctx, LogId, Batch) ->
     datastore_doc:delete(Ctx, LogId, Batch).
 
 
--spec set_ttl(infinite_log:ctx(), infinite_log:log_id(), time:seconds(), infinite_log:batch()) -> 
+-spec sve_with_ttl(infinite_log:ctx(), infinite_log:log_id(), time:seconds(), infinite_log:batch()) -> 
     {ok | {error, term()}, infinite_log:batch()} .
-set_ttl(Ctx, LogId, Ttl, Batch) ->
+sve_with_ttl(Ctx, LogId, Ttl, Batch) ->
     {{ok, Record}, UpdatedBatch} = infinite_log_sentinel:acquire(Ctx, LogId, skip_pruning, allow_updates, Batch),
     ExpirationTime = current_timestamp(Record) div 1000 + Ttl,
     save(Ctx, LogId, Record#infinite_log_sentinel{

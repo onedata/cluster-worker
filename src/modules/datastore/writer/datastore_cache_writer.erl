@@ -531,7 +531,12 @@ batch_requests([#datastore_internal_request{pid = Pid, ref = Ref, request = Requ
 %%--------------------------------------------------------------------
 -spec batch_request(term(), batch(), cached_token_map()) ->
     {term(), batch()} | {term(), batch(), cached_token_map()}.
-batch_request(#datastore_request{module = undefined, function = create, ctx = Ctx, args = [Key, Doc]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{module = infinite_log = Module, function = Function, ctx = Ctx, args = Args}, Batch, _LinkTokens) ->
+    batch_apply(Batch, fun(Batch2) ->
+        erlang:apply(Module, Function, [set_mutator_pid(Ctx) | Args] ++ [Batch2])
+    end);
+%% @TODO VFS-7614 Add module value to datastore_request record for each call
+batch_request(#datastore_request{function = create, ctx = Ctx, args = [Key, Doc]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:create(set_mutator_pid(Ctx), Key, Doc, Batch2)
     end);
@@ -691,14 +696,6 @@ batch_request(#datastore_request{function = fold_links, ctx = Ctx, args = [Key, 
 batch_request(#datastore_request{function = fetch_links_trees, ctx = Ctx, args = [Key]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_links:get_links_trees(set_mutator_pid(Ctx), Key, Batch2)
-    end);
-batch_request(#datastore_request{module = infinite_log = Module, function = list, ctx = Ctx, args = [Key, Opts]}, Batch, _LinkTokens) ->
-    batch_apply(Batch, fun(Batch2) ->
-        erlang:apply(Module, list, [set_mutator_pid(Ctx), Key, Opts, allow_updates, Batch2])
-    end);
-batch_request(#datastore_request{module = infinite_log = Module, function = Function, ctx = Ctx, args = Args}, Batch, _LinkTokens) ->
-    batch_apply(Batch, fun(Batch2) ->
-        erlang:apply(Module, Function, [set_mutator_pid(Ctx) | Args] ++ [Batch2])
     end);
 batch_request(#datastore_request{function = Function, ctx = Ctx, args = Args}, Batch, _LinkTokens) ->
     apply(datastore_doc_batch, Function, [Ctx | Args] ++ [Batch]).

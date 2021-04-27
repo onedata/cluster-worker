@@ -956,33 +956,44 @@ infinite_log_destroy_test(Config) ->
 
 
 infinite_log_operations_test(Config) ->
-    infinite_log_operations_test_base(Config, normal_access, ?TEST_MODELS).
-
-
-infinite_log_operations_direct_access_test(Config) ->
-    infinite_log_operations_test_base(Config, direct_access, ?TEST_PERSISTENT_MODELS).
-
-
-infinite_log_operations_test_base(Config, AccessType, Models) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
-        Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY),
-            ?MEM_CTX(Model)),
         ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 8}]),
         
         ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary">>])),
-        AccessType == direct_access andalso clean_cache(Worker, Model, Ctx),
         ?assertMatch({ok, {done, [{0, {_, <<"some_binary">>}}]}}, rpc:call(Worker, Model,
             infinite_log_list, [?KEY, #{}])),
-        AccessType == direct_access andalso clean_cache(Worker, Model, Ctx),
         ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"another_binary">>])),
-        AccessType == direct_access andalso clean_cache(Worker, Model, Ctx),
         ?assertMatch({ok, {done, [{1, {_, <<"another_binary">>}}]}}, rpc:call(Worker, Model,
             infinite_log_list, [?KEY, #{limit => 1, start_from => {index, 1}}])),
-        AccessType == direct_access andalso clean_cache(Worker, Model, Ctx),
-            
+        
         ok = rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
-    end, Models).
+    end, ?TEST_MODELS).
+
+
+infinite_log_operations_direct_access_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        MemoryOnlyCtx = (datastore_test_utils:get_ctx(Model))#{disc_driver => undefined, disc_driver_ctx => #{}}, 
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 8}]),
+        ExtendedMemTableCtx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY), ?MEM_CTX(Model)),
+        
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary">>])),
+        ?assertMatch(
+            {ok, {done, [{0, {_, <<"some_binary">>}}]}},
+                check_direct_access_operation(Worker, Model, datastore_infinite_log, list, [?KEY, #{}], ExtendedMemTableCtx)),
+    
+        clean_cache(Worker, Model, ExtendedMemTableCtx),
+        ?assertEqual({error, not_found}, rpc:call(Worker, datastore_infinite_log, append, [MemoryOnlyCtx, ?KEY, <<"another_binary">>])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"another_binary">>])),
+        
+        ?assertMatch(
+            {ok, {done, [{1, {_, <<"another_binary">>}}]}},
+            check_direct_access_operation(Worker, Model, datastore_infinite_log, list, [?KEY, #{limit => 1, start_from => {index, 1}}], ExtendedMemTableCtx)),
+        
+        clean_cache(Worker, Model, ExtendedMemTableCtx),
+        ok = rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
+    end, ?TEST_CACHED_MODELS).
 
 
 infinite_log_set_ttl_test(Config) ->
@@ -1657,6 +1668,17 @@ del_one_by_one(Model, Key, Tree, ExpectedLinkNames) ->
     lists:map(fun(Name) ->
         apply(Model, delete_links, [Key, Tree, Name])
     end, ExpectedLinkNames).
+
+
+check_direct_access_operation(Worker, Model, Module, Function, Args, ExtendedMemTableCtx) ->
+    Ctx = datastore_test_utils:get_ctx(Model),
+    MemoryOnlyCtx = Ctx#{disc_driver => undefined, disc_driver_ctx => #{}},
+    {ok, Res} = ?assertMatch({ok, _}, rpc:call(Worker, Module, Function, [MemoryOnlyCtx | Args])),
+    clean_cache(Worker, Model, ExtendedMemTableCtx),
+    ?assertMatch({error, not_found}, rpc:call(Worker, Module, Function, [MemoryOnlyCtx | Args])),
+    ?assertMatch({ok, Res}, rpc:call(Worker, Module, Function, [Ctx | Args])),
+    ?assertMatch({ok, Res}, rpc:call(Worker, Module, Function, [MemoryOnlyCtx | Args])).
+
 
 clean_cache(Worker, Model, Ctx) when 
     Model =:= ets_only_model;

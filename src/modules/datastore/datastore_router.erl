@@ -19,7 +19,7 @@
 -include_lib("ctool/include/hashing/consistent_hashing.hrl").
 
 %% API
--export([route/2, execute_on_node/4]).
+-export([route/2, route_infinite_log_operation/2, execute_on_node/4]).
 -export([init_counters/0, init_report/0]).
 -export([get_routing_key/2]).
 %% Internal RPC API
@@ -72,11 +72,18 @@ init_report() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec route(atom(), list()) -> term().
-route(Function, Args) ->
-    case route_internal(Function, Args) of
-        {error, nodedown} -> retry_route(Function, Args, ?RETRY_SLEEP_BASE, ?RETRY_COUNT);
+route(Function, [Ctx | Args]) ->
+    Module = select_module(Function),
+    case route_internal(Module, Function, Ctx, Args) of
+        {error, nodedown} -> retry_route(Module, Function, Args, ?RETRY_SLEEP_BASE, ?RETRY_COUNT);
         Ans -> Ans
     end.
+
+-spec route_infinite_log_operation(atom(), list()) -> term().
+route_infinite_log_operation(list, [Ctx | Args]) ->
+    route_internal(datastore_reader, infinite_log_operation, Ctx, [list, Args]);
+route_infinite_log_operation(Function, [Ctx | Args]) ->
+    route_internal(datastore_writer, infinite_log_operation, Ctx, [Function, Args]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -122,31 +129,30 @@ get_routing_key(Ctx, #document{key = Key}) ->
 %%%===================================================================
 
 %% @private
--spec route_internal(atom(), list()) -> term().
-route_internal(Function, Args) ->
-    Module = select_module(Function),
+-spec route_internal(module(), atom(), datastore:ctx(), list()) -> term().
+route_internal(Module, Function, Ctx, Args) ->
     try
-        {Node, Args2, TryLocalRead} = select_node(Args),
+        {Node, Ctx2, TryLocalRead} = select_node(Ctx),
         case {Module, TryLocalRead} of
             {datastore_writer, _} ->
-                execute_on_node(Node, datastore_router, process, [Module, Function, Args2]);
+                execute_on_node(Node, datastore_router, process, [Module, Function, [Ctx2 | Args]]);
             {_, true} ->
-                datastore_router:process(Module, Function, [Node | Args2]);
+                datastore_router:process(Module, Function, [Node, Ctx2 | Args]);
             _ ->
-                execute_on_node(Node, datastore_router, process, [Module, Function, [Node | Args2]])
+                execute_on_node(Node, datastore_router, process, [Module, Function, [Node, Ctx2 | Args]])
         end
     catch
         _:Reason2 -> {error, Reason2}
     end.
 
 %% @private
--spec retry_route(atom(), list(), non_neg_integer(), non_neg_integer()) -> term().
-retry_route(_Function, _Args, _Sleep, 0) ->
+-spec retry_route(module(), atom(), list(), non_neg_integer(), non_neg_integer()) -> term().
+retry_route(_Module, _Function, _Args, _Sleep, 0) ->
     {error, nodedown};
-retry_route(Function, Args, Sleep, Attempts) ->
+retry_route(Module, Function, [Ctx | ArgsTail] = Args, Sleep, Attempts) ->
     timer:sleep(Sleep),
-    case route_internal(Function, Args) of
-        {error, nodedown} -> retry_route(Function, Args, 2 * Sleep, Attempts - 1);
+    case route_internal(Module, Function, Ctx, ArgsTail) of
+        {error, nodedown} -> retry_route(Module, Function, Args, 2 * Sleep, Attempts - 1);
         Ans -> Ans
     end.
 
@@ -157,10 +163,10 @@ retry_route(Function, Args, Sleep, Attempts) ->
 %% Extends context with information about memory_copies nodes.
 %% @end
 %%--------------------------------------------------------------------
--spec select_node(list()) -> {node(), list(), local_read()}.
-select_node([#{routing := local} | _] = Args) ->
-    {node(), Args, true};
-select_node([#{memory_copies := MemCopies, routing_key := Key} = Ctx | ArgsTail]) ->
+-spec select_node(datastore:ctx()) -> {node(), datastore:ctx(), local_read()}.
+select_node(#{routing := local} = Ctx) ->
+    {node(), Ctx, true};
+select_node(#{memory_copies := MemCopies, routing_key := Key} = Ctx) ->
     Seed = datastore_key:get_chash_seed(Key),
     #node_routing_info{assigned_nodes = [MasterNode | _] = Nodes,
         failed_nodes = FailedNodes, all_nodes = AllNodes} = consistent_hashing:get_routing_info(Seed),
@@ -176,12 +182,12 @@ select_node([#{memory_copies := MemCopies, routing_key := Key} = Ctx | ArgsTail]
                 none ->
                     {Ctx2, false}
             end,
-            {Node, [Ctx3 | ArgsTail], TryLocalRead};
+            {Node, Ctx3, TryLocalRead};
         [] ->
             throw(all_responsible_nodes_failed)
     end;
-select_node([Ctx | Args]) ->
-    select_node([Ctx#{memory_copies => none} | Args]).
+select_node(Ctx) ->
+    select_node(Ctx#{memory_copies => none}).
 
 %%--------------------------------------------------------------------
 %% @private

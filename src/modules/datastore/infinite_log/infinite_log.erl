@@ -72,7 +72,7 @@
 %% API
 -export([create/4, destroy/3]).
 -export([append/4]).
--export([list/5]).
+-export([list/4, list/5]).
 -export([set_ttl/4]).
 
 % unit of timestamps used across the module for stamping entries and searching
@@ -161,6 +161,12 @@ append(Ctx, LogId, Content, InitialBatch) when is_binary(LogId) ->
     end.
 
 
+-spec list(ctx(), log_id(), infinite_log_browser:listing_opts(), batch()) ->
+    {{ok, infinite_log_browser:listing_result()} | {error, term()}, batch()}.
+list(Ctx, LogId, Opts, InitialBatch) ->
+    list(Ctx, LogId, Opts, allow_updates, InitialBatch).
+
+
 -spec list(ctx(), log_id(), infinite_log_browser:listing_opts(), access_mode(), batch()) ->
     {{ok, infinite_log_browser:listing_result()} | {error, term()}, batch()}.
 list(Ctx, LogId, Opts, AccessMode, InitialBatch) ->
@@ -201,7 +207,7 @@ set_ttl(Ctx, LogId, Ttl, InitialBatch) ->
                 {{error, _}, _} = SetTtlError ->
                     SetTtlError;
                 {ok, UpdatedBatch} ->
-                    infinite_log_sentinel:set_ttl(Ctx, LogId, Ttl, UpdatedBatch)
+                    infinite_log_sentinel:sve_with_ttl(Ctx, LogId, Ttl, UpdatedBatch)
             end
     end.
 
