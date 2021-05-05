@@ -1285,10 +1285,10 @@ infinite_log_append_test_base(Config) ->
                 "max entries per node:   ~p\n"
                 "size pruning threshold: ~p\n"
                 "age pruning threshold:  ~p\n"
-                "time:                   ~p [us]\n"
-                "appends per us:         ~p"
-                    , [ProcNum, ProcRepeats, AppendSize, MaxEntriesPerNode, SizePruningThreshold, AgePruningThreshold, Time,
-                        ProcNum * ProcRepeats / Time])
+                "time:                   ~p [ms]\n"
+                "appends per ms:         ~p"
+                    , [ProcNum, ProcRepeats, AppendSize, MaxEntriesPerNode, SizePruningThreshold, AgePruningThreshold,
+                        Time / 1000, 1000 * ProcNum * ProcRepeats / Time])
             end, MaxEntriesPerNodeList)
         end, AgePruningThresholdList)
     end, SizePruningThresholdList).
@@ -1514,11 +1514,11 @@ infinite_log_list_test_base(Config) ->
                 "list starting from:     ~p\n"
                 "offset:                 ~p\n"
                 "limit:                  ~p\n"
-                "time:                   ~p [us]\n"
-                "lists per us:           ~p\n"
+                "time:                   ~p [ms]\n"
+                "lists per ms:           ~p\n"
                     , [ProcNum, ProcRepeats, AppendSize, MaxEntriesPerNode, SizePruningThreshold, AgePruningThreshold,
                         ListDirection, ListStartFrom, ListOffset, ListLimit,
-                        Time, ProcNum * ProcRepeats / Time])
+                        Time / 1000, 1000 * ProcNum * ProcRepeats / Time])
             end, MaxEntriesPerNodeList)
         end, AgePruningThresholdList)
     end, SizePruningThresholdList).
@@ -1839,16 +1839,13 @@ del_one_by_one(Model, Key, Tree, ExpectedLinkNames) ->
 
 perform_parallel_appends(Worker, LogId, AppendSize, ProcRepeats, ProcNum) ->
     Self = self(),
+    Stopwatch = stopwatch:start(),
     Pids = [spawn_link(Worker, fun() ->
-        Stopwatch = stopwatch:start(),
         perform_appends(Worker, LogId, AppendSize, ProcRepeats),
-        Self ! {self(), {ok, stopwatch:read_micros(Stopwatch)}}
+        Self ! {self(), ok}
     end) || _ <- lists:seq(1, ProcNum)],
-    Responses = [receive {Pid, Resp} -> Resp  end || Pid <- Pids],
-
-    lists:foldl(fun({ok, Time}, TimeAcc) ->
-        Time + TimeAcc
-    end, 0, Responses).
+    Times = [receive {Pid, ok} -> stopwatch:read_micros(Stopwatch) end || Pid <- Pids],
+    lists:max(Times).
 
 
 perform_appends(Worker, LogId, AppendSize, Repeats) ->
@@ -1866,13 +1863,10 @@ perform_lists(Worker, LogId, ListOpts, AccessMode, Repeats) ->
 
 perform_parallel_lists(Worker, LogId, ListOpts, AccessMode, ProcRepeats, ProcNum) ->
     Self = self(),
+    Stopwatch = stopwatch:start(),
     Pids = [spawn_link(Worker, fun() ->
-        Stopwatch = stopwatch:start(),
         perform_lists(Worker, LogId, ListOpts, AccessMode, ProcRepeats),
-        Self ! {self(), {ok, stopwatch:read_micros(Stopwatch)}}
+        Self ! {self(), ok}
     end) || _ <- lists:seq(1, ProcNum)],
-    Responses = [receive {Pid, Resp} -> Resp end || Pid <- Pids],
-
-    lists:foldl(fun({ok, Time}, TimeAcc) ->
-        Time + TimeAcc
-    end, 0, Responses).
+    Times = [receive {Pid, ok} -> stopwatch:read_micros(Stopwatch) end || Pid <- Pids],
+    lists:max(Times).
