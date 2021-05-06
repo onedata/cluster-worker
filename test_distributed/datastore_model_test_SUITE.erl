@@ -1332,7 +1332,7 @@ infinite_log_list_test(Config) ->
             {parameters, [
                 [{name, proc_num}, {value, 1}],
                 [{name, proc_repeats}, {value, 10000}],
-                [{name, listing_start_from_type}, size],
+                [{name, listing_start_from_type}, {value, index}],
                 [{name, listing_start_from_value}, {value, 1000}],
                 [{name, listing_offset}, {value, 0}],
                 [{name, listing_limit}, {value, 1000}]
@@ -1344,7 +1344,7 @@ infinite_log_list_test(Config) ->
             {parameters, [
                 [{name, proc_num}, {value, 1}],
                 [{name, proc_repeats}, {value, 10000}],
-                [{name, listing_start_from_type}, timestamp],
+                [{name, listing_start_from_type}, {value, timestamp}],
                 [{name, listing_start_from_value}, {value, 200}],
                 [{name, listing_offset}, {value, 0}],
                 [{name, listing_limit}, {value, 1000}]
@@ -1368,7 +1368,7 @@ infinite_log_list_test(Config) ->
             {parameters, [
                 [{name, proc_num}, {value, 1}],
                 [{name, proc_repeats}, {value, 10000}],
-                [{name, listing_start_from_type}, size],
+                [{name, listing_start_from_type}, {value, index}],
                 [{name, listing_start_from_value}, {value, 1000}],
                 [{name, listing_offset}, {value, 2500}],
                 [{name, listing_limit}, {value, 1000}]
@@ -1380,7 +1380,7 @@ infinite_log_list_test(Config) ->
             {parameters, [
                 [{name, proc_num}, {value, 1}],
                 [{name, proc_repeats}, {value, 10000}],
-                [{name, listing_start_from_type}, timestamp],
+                [{name, listing_start_from_type}, {value, timestamp}],
                 [{name, listing_start_from_value}, {value, 200}],
                 [{name, listing_offset}, {value, 2500}],
                 [{name, listing_limit}, {value, 1000}]
@@ -1404,7 +1404,7 @@ infinite_log_list_test(Config) ->
             {parameters, [
                 [{name, proc_num}, {value, 100}],
                 [{name, proc_repeats}, {value, 100}],
-                [{name, listing_start_from_type}, size],
+                [{name, listing_start_from_type}, {value, index}],
                 [{name, listing_start_from_value}, {value, 1000}],
                 [{name, listing_offset}, {value, 0}],
                 [{name, listing_limit}, {value, 1000}]
@@ -1416,7 +1416,7 @@ infinite_log_list_test(Config) ->
             {parameters, [
                 [{name, proc_num}, {value, 100}],
                 [{name, proc_repeats}, {value, 100}],
-                [{name, listing_start_from_type}, timestamp],
+                [{name, listing_start_from_type}, {value, timestamp}],
                 [{name, listing_start_from_value}, {value, 200}],
                 [{name, listing_offset}, {value, 0}],
                 [{name, listing_limit}, {value, 1000}]
@@ -1440,7 +1440,7 @@ infinite_log_list_test(Config) ->
             {parameters, [
                 [{name, proc_num}, {value, 100}],
                 [{name, proc_repeats}, {value, 100}],
-                [{name, listing_start_from_type}, size],
+                [{name, listing_start_from_type}, {value, index}],
                 [{name, listing_start_from_value}, {value, 1000}],
                 [{name, listing_offset}, {value, 2500}],
                 [{name, listing_limit}, {value, 1000}]
@@ -1452,7 +1452,7 @@ infinite_log_list_test(Config) ->
             {parameters, [
                 [{name, proc_num}, {value, 100}],
                 [{name, proc_repeats}, {value, 100}],
-                [{name, listing_start_from_type}, timestamp],
+                [{name, listing_start_from_type}, {value, timestamp}],
                 [{name, listing_start_from_value}, {value, 200}],
                 [{name, listing_offset}, {value, 2500}],
                 [{name, listing_limit}, {value, 1000}]
