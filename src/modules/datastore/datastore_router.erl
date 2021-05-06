@@ -75,7 +75,7 @@ init_report() ->
 route(Function, [Ctx | Args]) ->
     Module = select_module(Function),
     case route_internal(Module, Function, Ctx, Args) of
-        {error, nodedown} -> retry_route(Module, Function, Args, ?RETRY_SLEEP_BASE, ?RETRY_COUNT);
+        {error, nodedown} -> retry_route(Module, Function, [Ctx, Args], ?RETRY_SLEEP_BASE, ?RETRY_COUNT);
         Ans -> Ans
     end.
 
