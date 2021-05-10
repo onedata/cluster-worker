@@ -44,7 +44,7 @@
 %% Model API
 %%=====================================================================
 
--spec get(infinite_log:ctx(), infinite_log:log_id(), node_number(), infinite_log:batch()) -> 
+-spec get(infinite_log:ctx(), infinite_log:log_id(), node_number(), infinite_log:batch()) ->
     {{ok, record()} | {error, term()}, infinite_log:batch()}.
 get(Ctx, LogId, NodeNumber, Batch) ->
     NodeId = build_node_id(LogId, NodeNumber),
@@ -56,7 +56,7 @@ get(Ctx, LogId, NodeNumber, Batch) ->
     end.
 
 
--spec save(infinite_log:ctx(), infinite_log:log_id(), node_number(), record(), infinite_log:batch()) -> 
+-spec save(infinite_log:ctx(), infinite_log:log_id(), node_number(), record(), infinite_log:batch()) ->
     {ok | {error, term()}, infinite_log:batch()}.
 save(Ctx, LogId, NodeNumber, Record, Batch) ->
     NodeId = build_node_id(LogId, NodeNumber),
@@ -66,14 +66,14 @@ save(Ctx, LogId, NodeNumber, Record, Batch) ->
     end.
 
 
--spec delete(infinite_log:ctx(), infinite_log:log_id(), node_number(), infinite_log:batch()) -> 
+-spec delete(infinite_log:ctx(), infinite_log:log_id(), node_number(), infinite_log:batch()) ->
     {ok | {error, term()}, infinite_log:batch()}.
 delete(Ctx, LogId, NodeNumber, Batch) ->
     NodeId = build_node_id(LogId, NodeNumber),
     datastore_doc:delete(Ctx, NodeId, Batch).
 
 
--spec set_ttl(infinite_log:ctx(), infinite_log:log_id(), node_number(), time:seconds(), infinite_log:batch()) -> 
+-spec set_ttl(infinite_log:ctx(), infinite_log:log_id(), node_number(), time:seconds(), infinite_log:batch()) ->
     {ok | {error, term()}, infinite_log:batch()}.
 set_ttl(Ctx, LogId, NodeNumber, Ttl, Batch) ->
     {{ok, Record}, UpdatedBatch} = get(Ctx, LogId, NodeNumber, Batch),
@@ -115,7 +115,7 @@ get_node_entries_length(Sentinel = #infinite_log_sentinel{max_entries_per_node =
 
 -spec newest_node_number(infinite_log_sentinel:record()) -> node_number().
 newest_node_number(Sentinel = #infinite_log_sentinel{total_entry_count = EntryCount}) ->
-    entry_index_to_node_number(Sentinel, EntryCount - 1).
+    entry_index_to_node_number(Sentinel, max(0, EntryCount - 1)).
 
 
 -spec oldest_node_number(infinite_log_sentinel:record()) -> node_number().

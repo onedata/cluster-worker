@@ -48,6 +48,7 @@
     {"size_based_pruning", fun size_based_pruning/2},
     {"size_based_pruning_with_low_threshold", fun size_based_pruning_with_low_threshold/2},
     {"age_based_pruning", fun age_based_pruning/2},
+    {"age_based_pruning_with_zero_log_interval", fun age_based_pruning_with_zero_log_interval/2},
     {"age_based_pruning_with_ttl_set", fun age_based_pruning_with_ttl_set/2},
 
     {"list_inexistent_log", fun list_inexistent_log/2},
@@ -582,6 +583,31 @@ age_based_pruning(LogId, MaxEntriesPerNode) ->
     ?testList([5 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
     ?testList([5 * MaxEntriesPerNode], ?BACKWARD, undefined, #{limit => 1}),
     ?assertNot(nodes_up_to_number_exist(LogId, 4)).
+
+
+age_based_pruning_with_zero_log_interval(LogId, MaxEntriesPerNode) ->
+    Threshold = MaxEntriesPerNode * 2,
+    create_log_for_test(#{
+        max_entries_per_node => MaxEntriesPerNode,
+        age_pruning_threshold => Threshold
+    }),
+
+    append(#{count => MaxEntriesPerNode, interval => 0}),
+    ?testList([0], ?FORWARD, undefined, #{limit => 1}),
+    ?testList([MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
+
+    append(#{count => 4 * MaxEntriesPerNode, interval => 0}),
+    ?testList([0], ?FORWARD, undefined, #{limit => 1}),
+    ?testList([5 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
+
+    % when age pruning is enabled, nodes should expire by themselves with corresponding ttl
+    clock_freezer_mock:simulate_seconds_passing(Threshold),
+    ?assertNot(nodes_up_to_number_exist(LogId, 4)),
+
+    % nodes should be pruned even if no update operations are performed,
+    % but excluding the newest node
+    ?testList([4 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
+    ?testList([5 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}).
 
 
 age_based_pruning_with_ttl_set(_, MaxEntriesPerNode) ->

@@ -1027,7 +1027,7 @@ infinite_log_age_pruning_test(Config) ->
     lists:foreach(fun(Model) ->
         Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY),
             ?MEM_CTX(Model)),
-        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 2, age_pruning_threshold => 2}]),
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 1, age_pruning_threshold => 2}]),
         
         ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary1">>])),
         ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary2">>])),
