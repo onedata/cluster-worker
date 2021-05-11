@@ -1043,7 +1043,6 @@ infinite_log_age_pruning_test(Config) ->
         timer:sleep(timer:seconds(3)),
         
         ?assertMatch({ok, {done, [
-            {2, {_, <<"some_binary3">>}},
             {3, {_, <<"some_binary4">>}}
         ]}}, rpc:call(Worker, Model, infinite_log_list, [?KEY, #{}])),
     
