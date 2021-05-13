@@ -72,10 +72,10 @@ init_report() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec route(atom(), list()) -> term().
-route(Function, [Ctx | Args]) ->
+route(Function, [Ctx | Args] = OriginalArgs) ->
     Module = select_module(Function),
     case route_internal(Module, Function, Ctx, Args) of
-        {error, nodedown} -> retry_route(Module, Function, [Ctx, Args], ?RETRY_SLEEP_BASE, ?RETRY_COUNT);
+        {error, nodedown} -> retry_route(Module, Function, OriginalArgs, ?RETRY_SLEEP_BASE, ?RETRY_COUNT);
         Ans -> Ans
     end.
 
@@ -200,8 +200,7 @@ select_module(Function) when
     Function == get;
     Function == exists;
     Function == get_links;
-    Function == get_links_trees;
-    Function == infinite_log_list ->
+    Function == get_links_trees ->
     datastore_reader;
 select_module(_) ->
     datastore_writer.

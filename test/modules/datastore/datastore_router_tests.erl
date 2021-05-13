@@ -37,7 +37,7 @@ datastore_router_test_() ->
                     }
                 end, [all, none])
             end, [{ok, ok}, {error, nodedown}])
-        end, [reader, writer])
+        end, [datastore_reader, datastore_writer])
     }.
 
 setup() ->
@@ -59,11 +59,19 @@ teardown(_) ->
 %%%===================================================================
 
 route_test_base(FunPlaceholder, ExpResult, MemCopies) ->
-    meck:expect(datastore_router, process, fun(_, _, _) -> ExpResult end),
+    FunctionName = placeholder_to_function_name(FunPlaceholder),
+    PassedArgs = lists:seq(1, rand:uniform(8) - 1),
+    meck:expect(datastore_router, process, 
+        fun (Module, Function, AllArgs) ->
+            case {Module, Function, retrieve_passed_args(FunPlaceholder, AllArgs)} of
+                {FunPlaceholder, FunctionName, PassedArgs} -> ExpResult;
+                _ -> error
+            end
+        end),
     ?assertEqual(ExpResult, 
         datastore_router:route(
-            placeholder_to_function_name(FunPlaceholder), 
-            [?CTX#{memory_copies => MemCopies}, [args]]
+            FunctionName, 
+            [?CTX#{memory_copies => MemCopies} | PassedArgs]
         )).
 
 %%%===================================================================
@@ -71,13 +79,17 @@ route_test_base(FunPlaceholder, ExpResult, MemCopies) ->
 %%%===================================================================
 
 gen_test_name(Function, ExpResult, MemCopies) ->
-    [T, _] = tuple_to_list(ExpResult),
+    [T | _] = tuple_to_list(ExpResult),
     atom_to_list(Function) ++ "; " ++ atom_to_list(T) ++ "; " ++ atom_to_list(MemCopies).
 
 
-placeholder_to_function_name(reader) ->
+placeholder_to_function_name(datastore_reader) ->
     lists_utils:random_element([get, exists,  get_links,  get_links_trees]);
-placeholder_to_function_name(writer) ->
-    writer.
+placeholder_to_function_name(datastore_writer) ->
+    some_writer_function.
+
+
+retrieve_passed_args(datastore_reader, [_Node, _Ctx | ArgsTail]) -> ArgsTail;
+retrieve_passed_args(datastore_writer, [_Ctx | ArgsTail]) -> ArgsTail.
 
 -endif.
