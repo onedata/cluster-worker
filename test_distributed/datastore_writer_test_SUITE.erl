@@ -70,7 +70,7 @@ requests_should_be_processed_in_order(Config) ->
 
     lists:map(fun(N) ->
         rpc:call(Worker, datastore_writer, call_async, [
-            ?CTX, ?KEY, test_call, [fun() -> Self ! N end]
+            ?CTX, ?KEY, undefined, test_call, [fun() -> Self ! N end]
         ])
     end, lists:seq(1, OpsNum)),
 
@@ -116,7 +116,7 @@ datastore_writer_should_flush_cache(Config) ->
 
     lists:map(fun(N) ->
         rpc:call(Worker, datastore_writer, call_async, [
-            ?CTX, ?KEY, test_call, [N]
+            ?CTX, ?KEY, undefined, test_call, [N]
         ])
     end, lists:seq(1, OpsNum)),
 
@@ -131,7 +131,7 @@ datastore_writer_should_retry_cache_flush(Config) ->
     FlushDelay = ?config(flush_delay, Config),
 
     rpc:call(Worker, datastore_writer, call_async, [
-        ?CTX, ?KEY, test_call, [{flush_error, 1}]
+        ?CTX, ?KEY, undefined, test_call, [{flush_error, 1}]
     ]),
 
     {ok, Cooldown} = test_utils:get_env(Worker, ?CLUSTER_WORKER_APP_NAME,

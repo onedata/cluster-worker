@@ -70,10 +70,10 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([create/2, destroy/1]).
--export([append/2]).
--export([list/3]).
--export([set_ttl/2]).
+-export([create/4, destroy/3]).
+-export([append/4]).
+-export([list/4, list/5]).
+-export([set_ttl/4]).
 
 % unit of timestamps used across the module for stamping entries and searching
 -type timestamp() :: time:millis().
@@ -96,7 +96,7 @@
 % single entry in the log, numbered from 0 (oldest entry)
 -type entry_index() :: non_neg_integer().
 
--export_type([timestamp/0, log_id/0, content/0, entry/0, entry_index/0]).
+-export_type([timestamp/0, log_id/0, log_opts/0, content/0, entry/0, entry_index/0]).
 
 % Indicates if the calling process is suitable for updating the log data, or may
 % only cause read only access to the documents. In case of 'readonly' access
@@ -104,6 +104,10 @@
 % the operation will fail with '{error, update_required}'.
 -type access_mode() :: readonly | allow_updates.
 -export_type([access_mode/0]).
+
+-type ctx() :: datastore_doc:ctx().
+-type batch() :: datastore_doc:batch() | undefined.
+-export_type([ctx/0, batch/0]).
 
 % macros used to determine safe log content size
 % couchbase sets the document size limit at 20MB, assume 19MB as safe
@@ -114,62 +118,72 @@
 %% API
 %%=====================================================================
 
--spec create(log_id(), log_opts()) -> ok | {error, term()}.
-create(LogId, Opts) ->
-    infinite_log_sentinel:save(LogId, #sentinel{
+-spec create(ctx(), log_id(), log_opts(), batch()) -> {ok | {error, term()}, batch()}.
+create(Ctx, LogId, Opts, InitialBatch) ->
+    infinite_log_sentinel:save(Ctx, LogId, #infinite_log_sentinel{
         log_id = LogId,
         max_entries_per_node = maps:get(max_entries_per_node, Opts, ?DEFAULT_MAX_ENTRIES_PER_NODE),
         size_pruning_threshold = maps:get(size_pruning_threshold, Opts, undefined),
         age_pruning_threshold = maps:get(age_pruning_threshold, Opts, undefined)
-    }).
+    }, InitialBatch).
 
 
--spec destroy(log_id()) -> ok | {error, term()}.
-destroy(LogId) ->
-    case infinite_log_sentinel:acquire(LogId, skip_pruning, allow_updates) of
-        {ok, Sentinel} ->
-            case apply_for_archival_log_nodes(Sentinel, fun infinite_log_node:delete/2) of
-                {error, _} = Error ->
-                    Error;
-                ok ->
-                    infinite_log_sentinel:delete(LogId)
+-spec destroy(ctx(), log_id(), batch()) -> {ok | {error, term()}, batch()}.
+destroy(Ctx, LogId, InitialBatch) ->
+    case infinite_log_sentinel:acquire(Ctx, LogId, skip_pruning, allow_updates, InitialBatch) of
+        {{ok, Sentinel}, AcquireBatch} ->
+            Callback = fun(LogId, NodeNumber, AccBatch) -> 
+                infinite_log_node:delete(Ctx, LogId, NodeNumber, AccBatch) 
+            end,
+            case apply_for_archival_log_nodes(Sentinel, Callback, AcquireBatch) of
+                {{error, _}, _} = ErrorResponse ->
+                    ErrorResponse;
+                {ok, ReturnedBatch} ->
+                    infinite_log_sentinel:delete(Ctx, LogId, ReturnedBatch)
             end;
-        {error, not_found} ->
-            ok
+        {{error, not_found}, Batch2} ->
+            {ok, Batch2}
     end.
 
 
--spec append(log_id(), content()) -> ok | {error, term()}.
-append(LogId, Content) when is_binary(LogId) ->
-    case infinite_log_sentinel:acquire(LogId, skip_pruning, allow_updates) of
-        {error, _} = AcquireError ->
+-spec append(ctx(), log_id(), content(), batch()) -> {ok | {error, term()}, batch()}.
+append(Ctx, LogId, Content, InitialBatch) when is_binary(LogId) ->
+    case infinite_log_sentinel:acquire(Ctx, LogId, skip_pruning, allow_updates, InitialBatch) of
+        {{error, _}, _} = AcquireError ->
             AcquireError;
-        {ok, Sentinel} ->
+        {{ok, Sentinel}, AcquireBatch} ->
             case sanitize_append_request(Sentinel, Content) of
                 {error, _} = SanitizeError ->
-                    SanitizeError;
+                    {SanitizeError, AcquireBatch};
                 ok ->
-                    infinite_log_sentinel:append(Sentinel, Content)
+                    infinite_log_sentinel:append(Ctx, Sentinel, Content, AcquireBatch)
             end
     end.
 
 
--spec list(log_id(), infinite_log_browser:listing_opts(), access_mode()) ->
-    {ok, infinite_log_browser:listing_result()} | {error, term()}.
-list(LogId, Opts, AccessMode) ->
+-spec list(ctx(), log_id(), infinite_log_browser:listing_opts(), batch()) ->
+    {{ok, infinite_log_browser:listing_result()} | {error, term()}, batch()}.
+list(Ctx, LogId, Opts, InitialBatch) ->
+    list(Ctx, LogId, Opts, allow_updates, InitialBatch).
+
+
+-spec list(ctx(), log_id(), infinite_log_browser:listing_opts(), access_mode(), batch()) ->
+    {{ok, infinite_log_browser:listing_result()} | {error, term()}, batch()}.
+list(Ctx, LogId, Opts, AccessMode, InitialBatch) ->
     % age based pruning must be attempted at every listing as some of
     % the log nodes may have expired
-    case infinite_log_sentinel:acquire(LogId, apply_pruning, AccessMode) of
-        {error, _} = AcquireError ->
+    case infinite_log_sentinel:acquire(Ctx, LogId, apply_pruning, AccessMode, InitialBatch) of
+        {{error, _}, _} = AcquireError ->
             AcquireError;
-        {ok, Sentinel} ->
+        {{ok, Sentinel}, AcquireBatch} ->
             try
-                {ok, infinite_log_browser:list(Sentinel, Opts)}
+                {Res, FinalDatastoreBatch} = infinite_log_browser:list(Ctx, Sentinel, Opts, AcquireBatch),
+                {{ok, Res}, FinalDatastoreBatch}
             catch Class:Reason ->
                 ?error_stacktrace("Unexpected error during infinite log listing (id: ~s) - ~w:~p", [
                     LogId, Class, Reason
                 ]),
-                {error, internal_server_error}
+                {{error, internal_server_error}, AcquireBatch}
             end
     end.
 
@@ -180,20 +194,20 @@ list(LogId, Opts, AccessMode) ->
 %% The procedure iterates through all documents used up by the log.
 %% @end
 %%--------------------------------------------------------------------
--spec set_ttl(log_id(), time:seconds()) -> ok | {error, term()}.
-set_ttl(LogId, Ttl) ->
-    case infinite_log_sentinel:acquire(LogId, skip_pruning, allow_updates) of
-        {error, _} = AcquireError ->
+-spec set_ttl(ctx(), log_id(), time:seconds(), batch()) -> {ok | {error, term()}, batch()}.
+set_ttl(Ctx, LogId, Ttl, InitialBatch) ->
+    case infinite_log_sentinel:acquire(Ctx, LogId, skip_pruning, allow_updates, InitialBatch) of
+        {{error, _}, _} = AcquireError ->
             AcquireError;
-        {ok, Sentinel} ->
-            SetNodeTtl = fun(LogId, NodeNumber) ->
-                infinite_log_node:set_ttl(LogId, NodeNumber, Ttl)
+        {{ok, Sentinel}, AcquireBatch} ->
+            SetNodeTtl = fun(LogId, NodeNumber, InternalBatch) ->
+                infinite_log_node:set_ttl(Ctx, LogId, NodeNumber, Ttl, InternalBatch)
             end,
-            case apply_for_archival_log_nodes(Sentinel, SetNodeTtl) of
-                {error, _} = SetTtlError ->
+            case apply_for_archival_log_nodes(Sentinel, SetNodeTtl, AcquireBatch) of
+                {{error, _}, _} = SetTtlError ->
                     SetTtlError;
-                ok ->
-                    infinite_log_sentinel:set_ttl(LogId, Ttl)
+                {ok, UpdatedBatch} ->
+                    infinite_log_sentinel:sve_with_ttl(Ctx, LogId, Ttl, UpdatedBatch)
             end
     end.
 
@@ -219,7 +233,7 @@ sanitize_append_request(Sentinel, Content) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec safe_log_content_size(infinite_log_sentinel:record()) -> integer().
-safe_log_content_size(#sentinel{max_entries_per_node = MaxEntriesPerNode}) ->
+safe_log_content_size(#infinite_log_sentinel{max_entries_per_node = MaxEntriesPerNode}) ->
     ?SAFE_NODE_DB_SIZE div MaxEntriesPerNode - ?APPROXIMATE_EMPTY_ENTRY_DB_SIZE.
 
 
@@ -233,17 +247,18 @@ safe_log_content_size(#sentinel{max_entries_per_node = MaxEntriesPerNode}) ->
 %%--------------------------------------------------------------------
 -spec apply_for_archival_log_nodes(
     infinite_log_sentinel:record(),
-    fun((log_id(), infinite_log_node:node_number()) -> ok | {error, term()})
+    fun((log_id(), infinite_log_node:node_number(), batch()) -> {ok | {error, term()}, batch()}),
+    batch()
 ) ->
-    ok | {error, term()}.
-apply_for_archival_log_nodes(Sentinel = #sentinel{log_id = LogId}, Callback) ->
+    {ok | {error, term()}, batch()}.
+apply_for_archival_log_nodes(Sentinel = #infinite_log_sentinel{log_id = LogId}, Callback, InitialBatch) ->
     BufferNodeNumber = infinite_log_node:newest_node_number(Sentinel),
     ArchivalNodeNumbers = lists:seq(0, BufferNodeNumber - 1),
-    lists_utils:foldl_while(fun(NodeNumber, _) ->
-        case Callback(LogId, NodeNumber) of
-            ok ->
-                {cont, ok};
-            {error, _} = Error ->
-                {halt, Error}
+    lists_utils:foldl_while(fun(NodeNumber, {ok, AccBatch}) ->
+        case Callback(LogId, NodeNumber, AccBatch) of
+            {ok, _} = OkResponse->
+                {cont, OkResponse};
+            {{error, _}, _} = ErrorResponse ->
+                {halt, ErrorResponse}
         end
-    end, ok, ArchivalNodeNumbers).
+    end, {ok, InitialBatch}, ArchivalNodeNumbers).

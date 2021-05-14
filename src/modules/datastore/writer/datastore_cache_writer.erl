@@ -531,6 +531,11 @@ batch_requests([#datastore_internal_request{pid = Pid, ref = Ref, request = Requ
 %%--------------------------------------------------------------------
 -spec batch_request(term(), batch(), cached_token_map()) ->
     {term(), batch()} | {term(), batch(), cached_token_map()}.
+batch_request(#datastore_request{module = infinite_log = Module, function = Function, ctx = Ctx, args = Args}, Batch, _LinkTokens) ->
+    batch_apply(Batch, fun(Batch2) ->
+        erlang:apply(Module, Function, [set_mutator_pid(Ctx) | Args] ++ [Batch2])
+    end);
+%% @TODO VFS-7614 Add module value to datastore_request record for each call
 batch_request(#datastore_request{function = create, ctx = Ctx, args = [Key, Doc]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:create(set_mutator_pid(Ctx), Key, Doc, Batch2)

@@ -324,12 +324,12 @@ query_view(#{bucket := Bucket} = Ctx, DesignName, ViewName, Opts) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Sets expiry field in context.
-%% Couchbase treats numbers smaller or equal to 2592000 as document's time to live
-%% and greater values as timestamp of deletion
-%% Translate expiry time to couchbase format
+%% Translates expiry time to couchbase format.
+%% Couchbase treats numbers smaller or equal to 2592000 (30 days) 
+%% as document's time to live and greater values as timestamp of deletion.
 %% @end
 %%--------------------------------------------------------------------
--spec set_expiry(ctx() | datastore:ctx(), non_neg_integer()) -> ctx() | datastore:ctx().
+-spec set_expiry(ctx() | datastore:ctx(), time:seconds()) -> ctx() | datastore:ctx().
 set_expiry(Ctx, Expiry) when Expiry =< 2592000 ->
     Ctx#{expiry => Expiry};
 set_expiry(Ctx, Expiry) ->

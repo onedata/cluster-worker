@@ -21,7 +21,7 @@
 -define(BACKWARD, backward_from_newest).
 -define(FORWARD, forward_from_oldest).
 
--record(node, {
+-record(infinite_log_node, {
     entries = []  :: [infinite_log:entry()],
     oldest_timestamp = 0 :: infinite_log:timestamp(),
     newest_timestamp = 0 :: infinite_log:timestamp()
@@ -31,7 +31,7 @@
 % log id, which holds information required to access entries in the log.
 % In addition, it contains the newest node, to which all appends are done until
 % it becomes full - to optimize the performance.
--record(sentinel, {
+-record(infinite_log_sentinel, {
     log_id :: infinite_log:log_id(),
     max_entries_per_node = ?DEFAULT_MAX_ENTRIES_PER_NODE :: pos_integer(),
 
@@ -43,7 +43,7 @@
     oldest_timestamp = 0 :: infinite_log:timestamp(),
     newest_timestamp = 0 :: infinite_log:timestamp(),
     oldest_node_timestamp = 0 :: infinite_log:timestamp(),
-    buffer = #node{} :: infinite_log_node:record(),
+    buffer = #infinite_log_node{} :: infinite_log_node:record(),
 
     size_pruning_threshold :: undefined | non_neg_integer(),
     age_pruning_threshold :: undefined | time:seconds(),
