@@ -24,7 +24,7 @@
 
 %%% Setters and getters API
 -export([update_description/4, update_status/4, fix_description/4,
-    get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1,
+    get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1, get_description/1,
     get_additional_data/1, get_additional_data/2, update_additional_data/4]).
 
 %% datastore_model callbacks
@@ -490,6 +490,11 @@ get_execution_info(Pool, TaskId) ->
         Other ->
             Other
     end.
+
+-spec get_description(doc()) -> {ok, traverse:description()}.
+get_description(#document{value = #traverse_task{description = Description}}) ->
+    {ok, Description}.
+
 
 -spec get_additional_data(doc()) -> {ok, traverse:additional_data()}.
 get_additional_data(#document{value = #traverse_task{additional_data = AdditionalData}}) ->
