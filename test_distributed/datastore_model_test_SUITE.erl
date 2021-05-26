@@ -68,6 +68,13 @@
     stress_performance_test_base/1,
     memory_only_stress_performance_test/1,
     memory_only_stress_performance_test_base/1,
+    infinite_log_create_test/1,
+    infinite_log_destroy_test/1,
+    infinite_log_operations_test/1,
+    infinite_log_operations_direct_access_test/1,
+    infinite_log_set_ttl_test/1,
+    infinite_log_age_pruning_test/1,
+    memory_only_stress_performance_test_base/1,
     infinite_log_append_test/1,
     infinite_log_append_test_base/1,
     infinite_log_list_test/1,
@@ -119,7 +126,13 @@ all() ->
         fold_links_id_should_succeed,
         fold_links_token_and_id_should_succeed,
         memory_only_stress_performance_test,
-        stress_performance_test
+        stress_performance_test,
+        infinite_log_create_test,
+        infinite_log_destroy_test,
+        infinite_log_operations_test,
+        infinite_log_operations_direct_access_test,
+        infinite_log_set_ttl_test,
+        infinite_log_age_pruning_test
     ], [
         links_performance,
         create_get_performance,
@@ -484,6 +497,7 @@ get_links_after_expiration_time_should_succeed(Config) ->
     {LinksNames, _} = lists:unzip(Links),
 
 
+
     % Check links deletion
     ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
         ?KEY, ?LINK_TREE_ID, Links
@@ -508,6 +522,7 @@ get_links_after_expiration_time_should_succeed(Config) ->
     )),
 
 
+
     % Check links adding after deletion
     ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
         ?KEY, ?LINK_TREE_ID, Links
@@ -529,7 +544,6 @@ get_links_after_expiration_time_should_succeed(Config) ->
         [?KEY, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
     )),
     ?assertEqual(LinksNum, length(Results3)),
-
 
     % Test fold links
     ?assertMatch({ok, #document{}},
@@ -921,6 +935,130 @@ link_del_should_delay_inactivate(Config) ->
 
     ?assertNotEqual(undefined, Timestamp),
     ?assert(Timestamp - Now > timer:seconds(5)).
+
+
+infinite_log_create_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        ?assertMatch(ok,
+            rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 8}])
+        ),
+        assert_in_memory(Worker, Model, ?KEY),
+        assert_on_disc(Worker, Model, ?KEY)
+    end, ?TEST_MODELS).
+
+
+infinite_log_destroy_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 8}]),
+        ?assertMatch(ok,
+            rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
+        ),
+        assert_in_memory(Worker, Model, ?KEY, true),
+        assert_on_disc(Worker, Model, ?KEY, true)
+    end, ?TEST_MODELS).
+
+
+infinite_log_operations_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 8}]),
+
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary">>])),
+        ?assertMatch({ok, {done, [{0, {_, <<"some_binary">>}}]}}, rpc:call(Worker, Model,
+            infinite_log_list, [?KEY, #{}])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"another_binary">>])),
+        ?assertMatch({ok, {done, [{1, {_, <<"another_binary">>}}]}}, rpc:call(Worker, Model,
+            infinite_log_list, [?KEY, #{limit => 1, start_from => {index, 1}}])),
+
+        ok = rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
+    end, ?TEST_MODELS).
+
+
+infinite_log_operations_direct_access_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        MemoryOnlyCtx = (datastore_test_utils:get_ctx(Model))#{disc_driver => undefined, disc_driver_ctx => #{}},
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 8}]),
+        ExtendedMemTableCtx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY), ?MEM_CTX(Model)),
+
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary">>])),
+        ?assertMatch(
+            {ok, {done, [{0, {_, <<"some_binary">>}}]}},
+                check_direct_access_operation(Worker, Model, datastore_infinite_log, list, [?KEY, #{}], ExtendedMemTableCtx)),
+
+        clean_cache(Worker, Model, ExtendedMemTableCtx),
+        ?assertEqual({error, not_found}, rpc:call(Worker, datastore_infinite_log, append, [MemoryOnlyCtx, ?KEY, <<"another_binary">>])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"another_binary">>])),
+
+        ?assertMatch(
+            {ok, {done, [{1, {_, <<"another_binary">>}}]}},
+            check_direct_access_operation(Worker, Model, datastore_infinite_log, list, [?KEY, #{limit => 1, start_from => {index, 1}}], ExtendedMemTableCtx)),
+
+        clean_cache(Worker, Model, ExtendedMemTableCtx),
+        ok = rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
+    end, ?TEST_CACHED_MODELS).
+
+
+infinite_log_set_ttl_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY),
+            ?MEM_CTX(Model)),
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 1}]),
+
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary1">>])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary2">>])),
+        ?assertMatch({ok, {done, [
+            {0, {_, <<"some_binary1">>}},
+            {1, {_, <<"some_binary2">>}}
+        ]}}, rpc:call(Worker, Model, infinite_log_list, [?KEY, #{}])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_set_ttl, [?KEY, 2])),
+        clean_cache(Worker, Model, Ctx),
+        timer:sleep(timer:seconds(3)),
+
+        ?assertEqual({error, not_found}, rpc:call(Worker, Model,
+            infinite_log_append, [?KEY, <<"another_binary">>])),
+        ?assertMatch({error, not_found}, rpc:call(Worker, Model,
+            infinite_log_list, [?KEY, #{}])),
+
+        ok = rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
+    end, ?TEST_MODELS).
+
+
+infinite_log_age_pruning_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY),
+            ?MEM_CTX(Model)),
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 1, age_pruning_threshold => 2}]),
+
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary1">>])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary2">>])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary3">>])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary4">>])),
+        ?assertMatch({ok, {done, [
+            {0, {_, <<"some_binary1">>}},
+            {1, {_, <<"some_binary2">>}},
+            {2, {_, <<"some_binary3">>}},
+            {3, {_, <<"some_binary4">>}}
+        ]}}, rpc:call(Worker, Model, infinite_log_list, [?KEY, #{}])),
+        clean_cache(Worker, Model, Ctx),
+        timer:sleep(timer:seconds(3)),
+
+        ?assertMatch({ok, {done, [
+            {3, {_, <<"some_binary4">>}}
+        ]}}, rpc:call(Worker, Model, infinite_log_list, [?KEY, #{}])),
+
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"another_binary">>])),
+        ?assertMatch({ok, {done, [
+            {4, {_, <<"another_binary">>}}
+        ]}}, rpc:call(Worker, Model, infinite_log_list, [?KEY, #{}])),
+
+        ok = rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
+    end, ?TEST_PERSISTENT_MODELS).
+
 
 %%%===================================================================
 %%% Stress tests
@@ -1835,6 +1973,35 @@ del_one_by_one(Model, Key, Tree, ExpectedLinkNames) ->
     lists:map(fun(Name) ->
         apply(Model, delete_links, [Key, Tree, Name])
     end, ExpectedLinkNames).
+
+
+check_direct_access_operation(Worker, Model, Module, Function, Args, ExtendedMemTableCtx) ->
+    Ctx = datastore_test_utils:get_ctx(Model),
+    MemoryOnlyCtx = Ctx#{disc_driver => undefined, disc_driver_ctx => #{}},
+    {ok, Res} = ?assertMatch({ok, _}, rpc:call(Worker, Module, Function, [MemoryOnlyCtx | Args])),
+    clean_cache(Worker, Model, ExtendedMemTableCtx),
+    ?assertMatch({error, not_found}, rpc:call(Worker, Module, Function, [MemoryOnlyCtx | Args])),
+    ?assertMatch({ok, Res}, rpc:call(Worker, Module, Function, [Ctx | Args])),
+    ?assertMatch({ok, Res}, rpc:call(Worker, Module, Function, [MemoryOnlyCtx | Args])).
+
+
+clean_cache(Worker, Model, Ctx) when
+    Model =:= ets_only_model;
+    Model =:= ets_cached_model ->
+    % wait for documents to be saved on disc
+    timer:sleep(timer:seconds(1)),
+    rpc:call(Worker, ets_driver, delete_all, [Ctx]);
+clean_cache(Worker, Model, Ctx) when
+    Model =:= mnesia_only_model;
+    Model =:= mnesia_cached_model ->
+    % wait for documents to be saved on disc
+    timer:sleep(timer:seconds(1)),
+    {ok, Keys} = rpc:call(Worker, mnesia_driver, fold, [Ctx, fun(Key, _, Acc) -> {ok, [Key | Acc]} end, []]),
+    lists:foreach(fun(Key) ->
+        ok = rpc:call(Worker, mnesia_driver, delete, [Ctx, Key])
+    end, Keys);
+clean_cache(_Worker, _Model, _Ctx) ->
+    ok.
 
 
 perform_parallel_appends(Worker, LogId, AppendSize, ProcRepeats, ProcNum) ->
