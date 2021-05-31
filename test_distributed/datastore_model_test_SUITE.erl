@@ -74,11 +74,10 @@
     infinite_log_operations_direct_access_test/1,
     infinite_log_set_ttl_test/1,
     infinite_log_age_pruning_test/1,
-    memory_only_stress_performance_test_base/1,
-    infinite_log_append_test/1,
-    infinite_log_append_test_base/1,
-    infinite_log_list_test/1,
-    infinite_log_list_test_base/1
+    infinite_log_append_performance_test/1,
+    infinite_log_append_performance_test_base/1,
+    infinite_log_list_performance_test/1,
+    infinite_log_list_performance_test_base/1
 ]).
 
 % for rpc
@@ -138,8 +137,8 @@ all() ->
         create_get_performance,
         memory_only_stress_performance_test,
         stress_performance_test,
-        infinite_log_append_test,
-        infinite_log_list_test
+        infinite_log_append_performance_test,
+        infinite_log_list_performance_test
     ]).
 
 -define(DOC(Model), ?DOC(?KEY, Model)).
@@ -497,7 +496,6 @@ get_links_after_expiration_time_should_succeed(Config) ->
     {LinksNames, _} = lists:unzip(Links),
 
 
-
     % Check links deletion
     ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
         ?KEY, ?LINK_TREE_ID, Links
@@ -520,7 +518,6 @@ get_links_after_expiration_time_should_succeed(Config) ->
     ?assertEqual({ok, []}, rpc:call(Worker, Model, fold_links,
         [?KEY, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
     )),
-
 
 
     % Check links adding after deletion
@@ -986,7 +983,7 @@ infinite_log_operations_direct_access_test(Config) ->
         ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary">>])),
         ?assertMatch(
             {ok, {done, [{0, {_, <<"some_binary">>}}]}},
-                check_direct_access_operation(Worker, Model, datastore_infinite_log, list, [?KEY, #{}], ExtendedMemTableCtx)),
+            check_direct_access_operation(Worker, Model, datastore_infinite_log, list, [?KEY, #{}], ExtendedMemTableCtx)),
 
         clean_cache(Worker, Model, ExtendedMemTableCtx),
         ?assertEqual({error, not_found}, rpc:call(Worker, datastore_infinite_log, append, [MemoryOnlyCtx, ?KEY, <<"another_binary">>])),
@@ -1362,309 +1359,297 @@ test_create_get() ->
     {ok, {Diff1, Diff2, Diff3, Diff4, Diff5}}.
 
 
-infinite_log_append_test(Config) ->
+infinite_log_append_performance_test(Config) ->
     ?PERFORMANCE(Config, [
         {repeats, ?REPEATS},
         {success_rate, ?SUCCESS_RATE},
-        {description, "Append to infinite-log testcase."},
+        {description, "Append to infinite-log performance test case."},
         {parameters, [
-            [{name, max_entries_per_node}, {value, [10, 100, 1000, 10000]},
-                {description, "Max entries in node sizes to be tested."}],
-            [{name, append_size}, {value, 10},
-                {description, "Number of bytes for single log entry."}],
-            [{name, size_pruning}, {value, [undefined, 1000]},
-                {description, "Size pruning values to be tested"}],
-            [{name, age_pruning}, {value, [undefined, 1000]},
-                {description, "Age pruning values to be tested"}]
+            [{name, proc_count_list}, {value, [1, 100, 10000]}, {description, "Processes to be used."}],
+            [{name, log_size}, {value, 10}, {description, "Number of bytes for single log entry."}],
+            [{name, appends_count}, {value, 10000}, {description, "Total logs append count."}],
+            [{name, max_entries_per_node_list}, {value, [50, 100, 200, 300, 400, 500, 1000, 2000, 5000]},
+                {description, "Max entries in node sizes to be tested."}]
         ]},
         {config, [
-            {name, single_process},
+            {name, pruning_off},
             {parameters, [
-                [{name, proc_num}, {value, 1}],
-                [{name, proc_repeats}, {value, 10000}]
+                [{name, size_pruning}, {value, undefined}],
+                [{name, age_pruning}, {value, undefined}]
             ]},
-            {description, "Append using single proccess"}
+            {description, "Append with no pruning."}
         ]},
         {config, [
-            {name, many_process_pruning_off},
+            {name, age_pruning_on},
             {parameters, [
-                [{name, proc_num}, {value, 100}],
-                [{name, proc_repeats}, {value, 100}]
+                [{name, size_pruning}, {value, undefined}],
+                [{name, age_pruning}, {value, 500}]
             ]},
-            {description, "Append using many proccess"}
+            {description, "Append with age pruning."}
+        ]},
+        {config, [
+            {name, size_pruning_on},
+            {parameters, [
+                [{name, size_pruning}, {value, 5000}],
+                [{name, age_pruning}, {value, undefined}]
+            ]},
+            {description, "Append with size pruning."}
+        ]},
+        {config, [
+            {name, size_pruning_on},
+            {parameters, [
+                [{name, size_pruning}, {value, 2000}],
+                [{name, age_pruning}, {value, 500}]
+            ]},
+            {description, "Append with size and age pruning."}
         ]}
     ]).
 
 
-infinite_log_append_test_base(Config) ->
+infinite_log_append_performance_test_base(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ProcNum = ?config(proc_num, Config),
-    ProcRepeats = ?config(proc_repeats, Config),
-    MaxEntriesPerNodeList = ?config(max_entries_per_node, Config),
-    SizePruningThresholdList = ?config(size_pruning, Config),
-    AgePruningThresholdList = ?config(age_pruning, Config),
-    AppendSize = ?config(append_size, Config),
+    Model = ets_only_model,
 
-    lists:foreach(fun(SizePruningThreshold) ->
-        lists:foreach(fun(AgePruningThreshold) ->
-            lists:foreach(fun(MaxEntriesPerNode) ->
-                LogOpts = #{
-                    max_entries_per_node => MaxEntriesPerNode,
-                    size_pruning_threshold => SizePruningThreshold,
-                    age_pruning_threshold => AgePruningThreshold
-                },
-                LogId = str_utils:rand_hex(10),
-                ?assertMatch(ok, rpc:call(Worker, infinite_log, create, [LogId, LogOpts]), ?ATTEMPTS),
-                Time = perform_parallel_appends(Worker, LogId, AppendSize, ProcRepeats, ProcNum),
-                ct:pal("Results for infinite log append tests:\n"
-                "process num:            ~p\n"
-                "process repeats:        ~p\n"
-                "append size:            ~p\n"
-                "max entries per node:   ~p\n"
-                "size pruning threshold: ~p\n"
-                "age pruning threshold:  ~p\n"
-                "time:                   ~p [ms]\n"
-                "appends per ms:         ~p"
-                    , [ProcNum, ProcRepeats, AppendSize, MaxEntriesPerNode, SizePruningThreshold, AgePruningThreshold,
-                        Time / 1000, 1000 * ProcNum * ProcRepeats / Time])
-            end, MaxEntriesPerNodeList)
-        end, AgePruningThresholdList)
-    end, SizePruningThresholdList).
+    ProcCountList = ?config(proc_count_list, Config),
+    AppendsCount = ?config(appends_count, Config),
+    LogSize = ?config(log_size, Config),
+
+    MaxEntriesPerNodeList = ?config(max_entries_per_node_list, Config),
+    SizePruningThreshold = ?config(size_pruning, Config),
+    AgePruningThreshold = ?config(age_pruning, Config),
 
 
-infinite_log_list_test(Config) ->
+    lists:foreach(fun(ProcCount) ->
+        lists:foreach(fun(MaxEntriesPerNode) ->
+            AppendsPerProcess = AppendsCount div ProcCount,
+            LogId = str_utils:rand_hex(10),
+            LogOpts = #{
+                max_entries_per_node => MaxEntriesPerNode,
+                size_pruning_threshold => SizePruningThreshold,
+                age_pruning_threshold => AgePruningThreshold
+            },
+            ?assertMatch(ok, rpc:call(Worker, Model, infinite_log_create, [LogId, LogOpts])),
+            AppendTimes = perform_infinite_log_appends(Worker, Model, LogId, LogSize, ProcCount, AppendsPerProcess),
+            AvgTime = lists:sum(AppendTimes) / ProcCount,
+            ct:pal("Results for infinite log append tests:\n"
+            "process num:            ~p~n"
+            "process repeats:        ~p~n"
+            "append size:            ~p~n"
+            "max entries per node:   ~p~n"
+            "size pruning threshold: ~p~n"
+            "age pruning threshold:  ~p~n"
+            "time:                   ~p [ms]~n"
+            "efficiency:             ~p [B/s]"
+                , [ProcCount, AppendsPerProcess, LogSize, MaxEntriesPerNode, SizePruningThreshold, AgePruningThreshold,
+                    AvgTime, 1000 * AppendsCount * LogSize / AvgTime])
+        end, MaxEntriesPerNodeList)
+    end, ProcCountList).
+
+
+infinite_log_list_performance_test(Config) ->
     ?PERFORMANCE(Config, [
         {repeats, ?REPEATS},
         {success_rate, ?SUCCESS_RATE},
         {description, "List from infinite-log testcase"},
         {parameters, [
-            [{name, max_entries_per_node}, {value, [10, 100, 1000, 10000]},
-                {description, "Max entries in node sizes to be tested."}],
-            [{name, append_size}, {value, 10},
-                {description, "Number of bytes for single log entry."}],
-            [{name, appends_num}, {value, 10000},
-                {description, "Number of initial appends to infinite-log."}],
-            [{name, list_access_mode}, {value, readonly},
-                {description, "List access mode in testcase"}],
-            [{name, listing_direction}, {value, forward_from_oldest},
-                {description, "Listing direction in tests"}],
-            [{name, size_pruning}, {value, [undefined, 1000]},
-                {description, "Size pruning values to be tested"}],
-            [{name, age_pruning}, {value, [undefined, 1000]},
-                {description, "Age pruning values to be tested"}]
+            [{name, listing_direction_list}, {value, [backward_from_newest, forward_from_oldest]}, {description, "Listing directions to be tested."}],
+            [{name, listing_start_from_list}, {value, [undefined, #{index => 3000}, #{timestamp => 100}]}, {description, "Starting from options to be tested."}],
+            [{name, listing_offset_list}, {value, [0, 5000]}, {description, "Listing offsets to be tested."}],
+            [{name, listing_limit_list}, {value, [1, 100, 1000]}, {description, "Listing limits to be tested."}],
+            [{name, proc_count_list}, {value, [1, 100, 10000]}, {description, "Processes to be used."}],
+            [{name, listings_count}, {value, 10000}, {description, "Total listings count to be performed."}],
+            [{name, appends_count}, {value, 10000}, {description, "Total logs append count"}],
+            [{name, log_size}, {value, 50}, {description, "Size of each log"}]
         ]},
         {config, [
-            {name, single_process_start_from_undefined},
+            {name, small_entries_per_node},
             {parameters, [
-                [{name, proc_num}, {value, 1}],
-                [{name, proc_repeats}, {value, 10000}],
-                [{name, listing_start_from_type}, undefined],
-                [{name, listing_start_from_value}, {value, undefined}],
-                [{name, listing_offset}, {value, 0}],
-                [{name, listing_limit}, {value, 1000}]
+                [{name, max_entries_per_node}, {value, 10}],
+                [{name, size_pruning_threshold}, {value, undefined}],
+                [{name, age_pruning_threshold}, {value, undefined}]
             ]},
-            {description, "Single process, start from undefined"}
+            {description, "Small entries per node"}
         ]},
         {config, [
-            {name, single_process_start_from_size},
+            {name, medium_entries_per_node},
             {parameters, [
-                [{name, proc_num}, {value, 1}],
-                [{name, proc_repeats}, {value, 10000}],
-                [{name, listing_start_from_type}, {value, index}],
-                [{name, listing_start_from_value}, {value, 1000}],
-                [{name, listing_offset}, {value, 0}],
-                [{name, listing_limit}, {value, 1000}]
+                [{name, max_entries_per_node}, {value, 400}],
+                [{name, size_pruning_threshold}, {value, undefined}],
+                [{name, age_pruning_threshold}, {value, undefined}]
             ]},
-            {description, "Single process, start from size"}
+            {description, "Medium entries per node"}
         ]},
         {config, [
-            {name, single_process_start_from_size},
+            {name, many_entries_per_node},
             {parameters, [
-                [{name, proc_num}, {value, 1}],
-                [{name, proc_repeats}, {value, 10000}],
-                [{name, listing_start_from_type}, {value, timestamp}],
-                [{name, listing_start_from_value}, {value, 200}],
-                [{name, listing_offset}, {value, 0}],
-                [{name, listing_limit}, {value, 1000}]
+                [{name, max_entries_per_node}, {value, 1000}],
+                [{name, size_pruning_threshold}, {value, undefined}],
+                [{name, age_pruning_threshold}, {value, undefined}]
             ]},
-            {description, "Single process, start from timestamp"}
+            {description, "Many entries per node"}
         ]},
         {config, [
-            {name, single_process_start_from_undefined_with_offset},
+            {name, small_entries_per_node_size_pruning_on},
             {parameters, [
-                [{name, proc_num}, {value, 1}],
-                [{name, proc_repeats}, {value, 10000}],
-                [{name, listing_start_from_type}, undefined],
-                [{name, listing_start_from_value}, {value, undefined}],
-                [{name, listing_offset}, {value, 2500}],
-                [{name, listing_limit}, {value, 1000}]
+                [{name, max_entries_per_node}, {value, 10}],
+                [{name, size_pruning_threshold}, {value, 1000}],
+                [{name, age_pruning_threshold}, {value, undefined}]
             ]},
-            {description, "Single process, start from undefined, with offset"}
+            {description, "Small entries per node, size pruning on"}
         ]},
         {config, [
-            {name, single_process_start_from_size_with_offset},
+            {name, medium_entries_per_node_size_pruning_on},
             {parameters, [
-                [{name, proc_num}, {value, 1}],
-                [{name, proc_repeats}, {value, 10000}],
-                [{name, listing_start_from_type}, {value, index}],
-                [{name, listing_start_from_value}, {value, 1000}],
-                [{name, listing_offset}, {value, 2500}],
-                [{name, listing_limit}, {value, 1000}]
+                [{name, max_entries_per_node}, {value, 400}],
+                [{name, size_pruning_threshold}, {value, 1000}],
+                [{name, age_pruning_threshold}, {value, undefined}]
             ]},
-            {description, "Single process, start from size, with offset"}
+            {description, "Medium entries per node, size pruning on"}
         ]},
         {config, [
-            {name, single_process_start_from_size_with_offset},
+            {name, many_entries_per_node_size_pruning_on},
             {parameters, [
-                [{name, proc_num}, {value, 1}],
-                [{name, proc_repeats}, {value, 10000}],
-                [{name, listing_start_from_type}, {value, timestamp}],
-                [{name, listing_start_from_value}, {value, 200}],
-                [{name, listing_offset}, {value, 2500}],
-                [{name, listing_limit}, {value, 1000}]
+                [{name, max_entries_per_node}, {value, 1000}],
+                [{name, size_pruning_threshold}, {value, 1000}],
+                [{name, age_pruning_threshold}, {value, undefined}]
             ]},
-            {description, "Single process, start from timestamp, with offset"}
+            {description, "Many entries per node, size pruning on"}
         ]},
         {config, [
-            {name, many_process_start_from_undefined},
+            {name, small_entries_per_node_age_pruning_on},
             {parameters, [
-                [{name, proc_num}, {value, 100}],
-                [{name, proc_repeats}, {value, 100}],
-                [{name, listing_start_from_type}, undefined],
-                [{name, listing_start_from_value}, {value, undefined}],
-                [{name, listing_offset}, {value, 0}],
-                [{name, listing_limit}, {value, 1000}]
+                [{name, max_entries_per_node}, {value, 10}],
+                [{name, size_pruning_threshold}, {value, undefined}],
+                [{name, age_pruning_threshold}, {value, 100}]
             ]},
-            {description, "Many process, start from undefined"}
+            {description, "Small entries per node, age pruning on"}
         ]},
         {config, [
-            {name, many_process_start_from_size},
+            {name, medium_entries_per_node_size_age_on},
             {parameters, [
-                [{name, proc_num}, {value, 100}],
-                [{name, proc_repeats}, {value, 100}],
-                [{name, listing_start_from_type}, {value, index}],
-                [{name, listing_start_from_value}, {value, 1000}],
-                [{name, listing_offset}, {value, 0}],
-                [{name, listing_limit}, {value, 1000}]
+                [{name, max_entries_per_node}, {value, 400}],
+                [{name, size_pruning_threshold}, {value, undefined}],
+                [{name, age_pruning_threshold}, {value, 100}]
             ]},
-            {description, "Many process, start from size"}
+            {description, "Medium entries per node, age pruning on"}
         ]},
         {config, [
-            {name, many_process_start_from_size},
+            {name, many_entries_per_node_age_pruning_on},
             {parameters, [
-                [{name, proc_num}, {value, 100}],
-                [{name, proc_repeats}, {value, 100}],
-                [{name, listing_start_from_type}, {value, timestamp}],
-                [{name, listing_start_from_value}, {value, 200}],
-                [{name, listing_offset}, {value, 0}],
-                [{name, listing_limit}, {value, 1000}]
+                [{name, max_entries_per_node}, {value, 1000}],
+                [{name, size_pruning_threshold}, {value, undefined}],
+                [{name, age_pruning_threshold}, {value, 100}]
             ]},
-            {description, "Many process, start from timestamp"}
+            {description, "Many entries per node, age pruning on"}
         ]},
         {config, [
-            {name, many_process_start_from_undefined_with_offset},
+            {name, small_entries_per_node_both_pruning_on},
             {parameters, [
-                [{name, proc_num}, {value, 100}],
-                [{name, proc_repeats}, {value, 100}],
-                [{name, listing_start_from_type}, undefined],
-                [{name, listing_start_from_value}, {value, undefined}],
-                [{name, listing_offset}, {value, 2500}],
-                [{name, listing_limit}, {value, 1000}]
+                [{name, max_entries_per_node}, {value, 10}],
+                [{name, size_pruning_threshold}, {value, 1000}],
+                [{name, age_pruning_threshold}, {value, 100}]
             ]},
-            {description, "Many process, start from undefined, with offset"}
+            {description, "Small entries per node, both pruning on"}
         ]},
         {config, [
-            {name, many_process_start_from_size_with_offset},
+            {name, medium_entries_per_node_both_age_on},
             {parameters, [
-                [{name, proc_num}, {value, 100}],
-                [{name, proc_repeats}, {value, 100}],
-                [{name, listing_start_from_type}, {value, index}],
-                [{name, listing_start_from_value}, {value, 1000}],
-                [{name, listing_offset}, {value, 2500}],
-                [{name, listing_limit}, {value, 1000}]
+                [{name, max_entries_per_node}, {value, 400}],
+                [{name, size_pruning_threshold}, {value, 1000}],
+                [{name, age_pruning_threshold}, {value, 100}]
             ]},
-            {description, "Many process, start from size, with offset"}
+            {description, "Medium entries per node, both pruning on"}
         ]},
         {config, [
-            {name, many_process_start_from_size_with_offset},
+            {name, many_entries_per_node_both_pruning_on},
             {parameters, [
-                [{name, proc_num}, {value, 100}],
-                [{name, proc_repeats}, {value, 100}],
-                [{name, listing_start_from_type}, {value, timestamp}],
-                [{name, listing_start_from_value}, {value, 200}],
-                [{name, listing_offset}, {value, 2500}],
-                [{name, listing_limit}, {value, 1000}]
+                [{name, max_entries_per_node}, {value, 1000}],
+                [{name, size_pruning_threshold}, {value, 1000}],
+                [{name, age_pruning_threshold}, {value, 100}]
             ]},
-            {description, "Many process, start from timestamp, with offset"}
+            {description, "Many entries per node, both pruning on"}
         ]}
     ]).
 
 
-infinite_log_list_test_base(Config) ->
+infinite_log_list_performance_test_base(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ProcNum = ?config(proc_num, Config),
-    ProcRepeats = ?config(proc_repeats, Config),
-    MaxEntriesPerNodeList = ?config(max_entries_per_node, Config),
-    SizePruningThresholdList = ?config(size_pruning, Config),
-    AgePruningThresholdList = ?config(age_pruning, Config),
-    AppendSize = ?config(append_size, Config),
-    AppendsNum = ?config(appends_num, Config),
-    ListDirection = ?config(listing_direction, Config),
+    Model = ets_only_model,
 
-    % start-from data could be passed directly form config as touple, but some jiffy error occurres
-    ListStartFromType = ?config(listing_start_from_type, Config),
-    ListStartFrom = case ListStartFromType of
-        undefined -> undefined;
-        IndexOrTimestamp -> {IndexOrTimestamp, ?config(listing_start_from_value, Config)}
-    end,
-    ListOffset = ?config(listing_offset, Config),
-    ListLimit = ?config(listing_limit, Config),
-    AccessMode = ?config(list_access_mode, Config),
+    ProcCountList = ?config(proc_count_list, Config),
+    ListingsCount = ?config(listings_count, Config),
 
-    lists:foreach(fun(SizePruningThreshold) ->
-        lists:foreach(fun(AgePruningThreshold) ->
-            lists:foreach(fun(MaxEntriesPerNode) ->
-                LogId = str_utils:rand_hex(10),
-                LogOpts = #{
-                    max_entries_per_node => MaxEntriesPerNode,
-                    size_pruning_threshold => SizePruningThreshold,
-                    age_pruning_threshold => AgePruningThreshold
-                },
-                ?assertMatch(ok, rpc:call(Worker, infinite_log, create, [LogId, LogOpts]), ?ATTEMPTS),
-                perform_appends(Worker, LogId, AppendSize, AppendsNum),
+    % Log options
+    LogId = str_utils:rand_hex(10),
+    LogSize = ?config(log_size, Config),
+    AppendsCount = ?config(appends_count, Config),
+    MaxEntriesPerNode = ?config(max_entries_per_node, Config),
+    SizePruningThreshold = ?config(size_pruning_threshold, Config),
+    AgePruningThreshold = ?config(age_pruning_threshold, Config),
+    LogOpts = #{
+        max_entries_per_node => MaxEntriesPerNode,
+        size_pruning_threshold => SizePruningThreshold,
+        age_pruning_threshold => AgePruningThreshold
+    },
 
-                ListOpts = #{
-                    direction => ListDirection,
-                    start_from => ListStartFrom,
-                    offset => ListOffset,
-                    limit => ListLimit
-                },
-                Time = perform_parallel_lists(Worker, LogId, ListOpts, AccessMode, ProcRepeats, ProcNum),
+    % Listing options
+    ListingDirectionList = ?config(listing_direction_list, Config),
+    ListingStartFromList = ?config(listing_start_from_list, Config),
+    ListingOffsetList = ?config(listing_offset_list, Config),
+    ListingLimitList = ?config(listing_limit_list, Config),
 
-                ct:pal("Results for infinite log list tests:\n"
-                "process num:            ~p\n"
-                "process repeats:        ~p\n"
-                "append size:            ~p\n"
-                "max entries per node:   ~p\n"
-                "size pruning threshold: ~p\n"
-                "age pruning threshold:  ~p\n"
-                "list direction:         ~p\n"
-                "list starting from:     ~p\n"
-                "offset:                 ~p\n"
-                "limit:                  ~p\n"
-                "time:                   ~p [ms]\n"
-                "lists per ms:           ~p\n"
-                    , [ProcNum, ProcRepeats, AppendSize, MaxEntriesPerNode, SizePruningThreshold, AgePruningThreshold,
-                        ListDirection, ListStartFrom, ListOffset, ListLimit,
-                        Time / 1000, 1000 * ProcNum * ProcRepeats / Time])
-            end, MaxEntriesPerNodeList)
-        end, AgePruningThresholdList)
-    end, SizePruningThresholdList).
+    AppendProcessesCount = 100,
+    ?assertMatch(ok, rpc:call(Worker, Model, infinite_log_create, [LogId, LogOpts])),
+    perform_infinite_log_appends(Worker, Model, LogId, LogSize, AppendProcessesCount, AppendsCount div AppendProcessesCount),
+
+    lists:foreach(fun(ProcCount) ->
+        lists:foreach(fun(ListingDirection) ->
+            lists:foreach(fun(ListingStartFrom) ->
+                lists:foreach(fun(ListingOffset) ->
+                    lists:foreach(fun(ListingLimit) ->
+                        ListingsPerProcess = ListingsCount div ProcCount,
+
+                        ListingStartFromParsed = case is_map(ListingStartFrom) of
+                            true -> {hd(maps:keys(ListingStartFrom)), hd(maps:values(ListingStartFrom))};
+                            false -> undefined
+                        end,
+
+                        ListOpts = #{
+                            direction => ListingDirection,
+                            start_from => ListingStartFromParsed,
+                            offset => ListingOffset,
+                            limit => ListingLimit
+                        },
+                        ListingTimes = perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess),
+                        AvgTime = lists:sum(ListingTimes) / ProcCount,
+
+                        ct:pal("Results for infinite log list tests:\n"
+                        "process num:            ~p~n"
+                        "process repeats:        ~p~n"
+                        "append size:            ~p~n"
+                        "max entries per node:   ~p~n"
+                        "size pruning threshold: ~p~n"
+                        "age pruning threshold:  ~p~n"
+                        "list direction:         ~p~n"
+                        "list starting from:     ~p~n"
+                        "offset:                 ~p~n"
+                        "limit:                  ~p~n"
+                        "time:                   ~p [ms]~n"
+                        "efficiency:             ~p [listings/s]"
+                            , [ProcCount, ListingsPerProcess, LogSize, MaxEntriesPerNode, SizePruningThreshold, AgePruningThreshold,
+                                ListingDirection, ListingStartFromParsed, ListingOffset, ListingLimit,
+                                AvgTime, 1000 * ProcCount * ListingsPerProcess / AvgTime])
+                    end, ListingLimitList)
+                end, ListingOffsetList)
+            end, ListingStartFromList)
+        end, ListingDirectionList)
+    end, ProcCountList).
 
 
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
+
 
 init_per_suite(Config) ->
     datastore_test_utils:init_suite(?TEST_MODELS, Config,
@@ -1735,6 +1720,16 @@ init_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_li
     ok = test_utils:mock_new(Workers, datastore_model),
     ok = test_utils:mock_new(Workers, datastore),
     init_per_testcase(?DEFAULT_CASE(Case), Config);
+init_per_testcase(Case, Config) when Case =:= infinite_log_append_performance_test orelse
+    Case =:= infinite_log_list_performance_test ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    application:load(cluster_worker),
+    application:set_env(cluster_worker, tp_subtrees_number, 10),
+    test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 10),
+    clock_freezer_mock:setup_locally([
+        infinite_log_sentinel, node_cache, couchbase_driver
+    ]),
+    Config;
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     application:load(cluster_worker),
@@ -1772,8 +1767,12 @@ end_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_lis
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{}),
     test_utils:mock_unload(Workers, [datastore_model, datastore]);
+end_per_testcase(Case, Config) when Case =:= infinite_log_append_performance_test orelse
+    Case =:= infinite_log_list_performance_test ->
+    clock_freezer_mock:teardown_locally();
 end_per_testcase(_Case, _Config) ->
     ok.
+
 
 end_per_suite(_Config) ->
     ok.
@@ -2004,36 +2003,36 @@ clean_cache(_Worker, _Model, _Ctx) ->
     ok.
 
 
-perform_parallel_appends(Worker, LogId, AppendSize, ProcRepeats, ProcNum) ->
-    Self = self(),
-    Stopwatch = stopwatch:start(),
-    Pids = [spawn_link(Worker, fun() ->
-        perform_appends(Worker, LogId, AppendSize, ProcRepeats),
-        Self ! {self(), ok}
-    end) || _ <- lists:seq(1, ProcNum)],
-    Times = [receive {Pid, ok} -> stopwatch:read_micros(Stopwatch) end || Pid <- Pids],
-    lists:max(Times).
+%% @private
+-spec perform_infinite_log_appends(node(), atom(), binary(), integer(), integer(), integer()) -> [integer()].
+perform_infinite_log_appends(Worker, Model, LogId, AppendSize, ProcCount, 1) ->
+    AppendFun = fun(_) ->
+        AppendLog = str_utils:rand_hex(AppendSize div 2),
+        Stopwatch = stopwatch:start(),
+        Start = stopwatch:read_millis(Stopwatch),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [LogId, AppendLog])),
+        Stop = stopwatch:read_millis(Stopwatch),
+        Stop - Start
+    end,
+    lists_utils:pmap(AppendFun, lists:seq(1, ProcCount));
+perform_infinite_log_appends(Worker, Model, LogId, AppendSize, ProcCount, AppendsPerProcess) ->
+    lists:foldl(fun(_, TimesListAcc) ->
+        Times = perform_infinite_log_appends(Worker, Model, LogId, AppendSize, ProcCount, 1),
+        clock_freezer_mock:simulate_seconds_passing(1),
+        lists:zipwith(fun(Time, TimeAcc) -> Time + TimeAcc end, Times, TimesListAcc)
+    end, [0 || _ <- lists:seq(1, ProcCount)], lists:seq(1, AppendsPerProcess)).
 
 
-perform_appends(Worker, LogId, AppendSize, Repeats) ->
-    AppendLog = str_utils:rand_hex(AppendSize),
-    lists:foreach(fun(_) ->
-        ?assertMatch(ok, rpc:call(Worker, infinite_log, append, [LogId, AppendLog]), ?ATTEMPTS)
-    end, lists:seq(1, Repeats)).
-
-
-perform_lists(Worker, LogId, ListOpts, AccessMode, Repeats) ->
-    lists:foreach(fun(_) ->
-        ?assertMatch({ok, _}, rpc:call(Worker, infinite_log, list, [LogId, ListOpts, AccessMode]), ?ATTEMPTS)
-    end, lists:seq(1, Repeats)).
-
-
-perform_parallel_lists(Worker, LogId, ListOpts, AccessMode, ProcRepeats, ProcNum) ->
-    Self = self(),
-    Stopwatch = stopwatch:start(),
-    Pids = [spawn_link(Worker, fun() ->
-        perform_lists(Worker, LogId, ListOpts, AccessMode, ProcRepeats),
-        Self ! {self(), ok}
-    end) || _ <- lists:seq(1, ProcNum)],
-    Times = [receive {Pid, ok} -> stopwatch:read_micros(Stopwatch) end || Pid <- Pids],
-    lists:max(Times).
+%% @private
+-spec perform_infinite_log_listings(node(), atom(), binary(), map(), integer(), integer()) -> [integer()].
+perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess) ->
+    ListingFun = fun(_) ->
+        Stopwatch = stopwatch:start(),
+        Start = stopwatch:read_millis(Stopwatch),
+        lists:foreach(fun(_) ->
+            ?assertMatch({ok, _}, rpc:call(Worker, Model, infinite_log_list, [LogId, ListOpts]))
+        end, lists:seq(1, ListingsPerProcess)),
+        Stop = stopwatch:read_millis(Stopwatch),
+        Stop - Start
+    end,
+    lists_utils:pmap(ListingFun, lists:seq(1, ProcCount)).
