@@ -133,11 +133,11 @@ all() ->
         infinite_log_set_ttl_test,
         infinite_log_age_pruning_test
     ], [
-        links_performance,
-        create_get_performance,
-        memory_only_stress_performance_test,
-        stress_performance_test,
-        infinite_log_append_performance_test,
+%%        links_performance,
+%%        create_get_performance,
+%%        memory_only_stress_performance_test,
+%%        stress_performance_test,
+%%        infinite_log_append_performance_test
         infinite_log_list_performance_test
     ]).
 
@@ -1365,11 +1365,13 @@ infinite_log_append_performance_test(Config) ->
         {success_rate, ?SUCCESS_RATE},
         {description, "Append to infinite-log performance test case."},
         {parameters, [
-            [{name, proc_count_list}, {value, [1, 100, 10000]}, {description, "Processes to be used."}],
+            [{name, repeats}, {value, 3}, {description, "Repeats of each append test."}],
+            [{name, proc_count_list}, {value, [1, 100, 1000]}, {description, "Processes to be used."}],
             [{name, log_size}, {value, 10}, {description, "Number of bytes for single log entry."}],
-            [{name, appends_count}, {value, 10000}, {description, "Total logs append count."}],
-            [{name, max_entries_per_node_list}, {value, [50, 100, 200, 300, 400, 500, 1000, 2000, 5000]},
-                {description, "Max entries in node sizes to be tested."}]
+            [{name, appends_count}, {value, 100000}, {description, "Total logs append count."}],
+            [{name, max_entries_per_node_list},
+                {value, [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 2000, 5000]},
+                {description, "Max entries per node values to be tested."}]
         ]},
         {config, [
             {name, pruning_off},
@@ -1396,7 +1398,7 @@ infinite_log_append_performance_test(Config) ->
             {description, "Append with size pruning."}
         ]},
         {config, [
-            {name, size_pruning_on},
+            {name, size_and_age_pruning_on},
             {parameters, [
                 [{name, size_pruning}, {value, 2000}],
                 [{name, age_pruning}, {value, 500}]
@@ -1407,6 +1409,7 @@ infinite_log_append_performance_test(Config) ->
 
 
 infinite_log_append_performance_test_base(Config) ->
+    Repeats = ?config(repeats, Config),
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Model = ets_only_model,
 
@@ -1429,19 +1432,18 @@ infinite_log_append_performance_test_base(Config) ->
                 age_pruning_threshold => AgePruningThreshold
             },
             ?assertMatch(ok, rpc:call(Worker, Model, infinite_log_create, [LogId, LogOpts])),
-            AppendTimes = perform_infinite_log_appends(Worker, Model, LogId, LogSize, ProcCount, AppendsPerProcess),
-            AvgTime = lists:sum(AppendTimes) / ProcCount,
+            AvgTime = repeat_infinite_log_appends(Repeats, Worker, Model, LogId, LogSize, ProcCount, AppendsPerProcess),
             ct:pal("Results for infinite log append tests:\n"
-            "process num:            ~p~n"
+            "process count:            ~p~n"
             "process repeats:        ~p~n"
-            "append size:            ~p~n"
+            "log size:               ~p~n"
             "max entries per node:   ~p~n"
             "size pruning threshold: ~p~n"
             "age pruning threshold:  ~p~n"
             "time:                   ~p [ms]~n"
-            "efficiency:             ~p [B/s]"
+            "efficiency:             ~p [kB/s]"
                 , [ProcCount, AppendsPerProcess, LogSize, MaxEntriesPerNode, SizePruningThreshold, AgePruningThreshold,
-                    AvgTime, 1000 * AppendsCount * LogSize / AvgTime])
+                    AvgTime, AppendsCount * LogSize / AvgTime])
         end, MaxEntriesPerNodeList)
     end, ProcCountList).
 
@@ -1452,48 +1454,44 @@ infinite_log_list_performance_test(Config) ->
         {success_rate, ?SUCCESS_RATE},
         {description, "List from infinite-log testcase"},
         {parameters, [
+            [{name, repeats}, {value, 3}, {description, "Repeats of each listing test."}],
             [{name, listing_direction_list}, {value, [backward_from_newest, forward_from_oldest]}, {description, "Listing directions to be tested."}],
             [{name, listing_start_from_list}, {value, [undefined, #{index => 3000}, #{timestamp => 100}]}, {description, "Starting from options to be tested."}],
             [{name, listing_offset_list}, {value, [0, 5000]}, {description, "Listing offsets to be tested."}],
             [{name, listing_limit_list}, {value, [1, 100, 1000]}, {description, "Listing limits to be tested."}],
             [{name, proc_count_list}, {value, [1, 100, 10000]}, {description, "Processes to be used."}],
             [{name, listings_count}, {value, 10000}, {description, "Total listings count to be performed."}],
-            [{name, appends_count}, {value, 10000}, {description, "Total logs append count"}],
-            [{name, log_size}, {value, 50}, {description, "Size of each log"}]
+            [{name, appends_count}, {value, 100000}, {description, "Total log appends count"}],
+            [{name, log_size}, {value, 10}, {description, "Size of each log"}],
+            [{name, size_pruning_threshold}, {value, undefined}, {description, "Default size pruning threshold."}],
+            [{name, age_pruning_threshold}, {value, undefined}, {description, "Default age pruning threshold."}]
         ]},
         {config, [
-            {name, small_entries_per_node},
+            {name, small_entries_per_node_pruning_off},
             {parameters, [
-                [{name, max_entries_per_node}, {value, 10}],
-                [{name, size_pruning_threshold}, {value, undefined}],
-                [{name, age_pruning_threshold}, {value, undefined}]
+                [{name, max_entries_per_node}, {value, 50}]
             ]},
-            {description, "Small entries per node"}
+            {description, "Small entries per node, pruning off"}
         ]},
         {config, [
-            {name, medium_entries_per_node},
+            {name, medium_entries_per_node_pruning_off},
             {parameters, [
-                [{name, max_entries_per_node}, {value, 400}],
-                [{name, size_pruning_threshold}, {value, undefined}],
-                [{name, age_pruning_threshold}, {value, undefined}]
+                [{name, max_entries_per_node}, {value, 400}]
             ]},
-            {description, "Medium entries per node"}
+            {description, "Medium entries per node, pruning off"}
         ]},
         {config, [
-            {name, many_entries_per_node},
+            {name, many_entries_per_node_pruning_off},
             {parameters, [
-                [{name, max_entries_per_node}, {value, 1000}],
-                [{name, size_pruning_threshold}, {value, undefined}],
-                [{name, age_pruning_threshold}, {value, undefined}]
+                [{name, max_entries_per_node}, {value, 1000}]
             ]},
-            {description, "Many entries per node"}
+            {description, "Many entries per node, pruning off"}
         ]},
         {config, [
             {name, small_entries_per_node_size_pruning_on},
             {parameters, [
-                [{name, max_entries_per_node}, {value, 10}],
-                [{name, size_pruning_threshold}, {value, 1000}],
-                [{name, age_pruning_threshold}, {value, undefined}]
+                [{name, max_entries_per_node}, {value, 50}],
+                [{name, size_pruning_threshold}, {value, 1000}]
             ]},
             {description, "Small entries per node, size pruning on"}
         ]},
@@ -1501,8 +1499,7 @@ infinite_log_list_performance_test(Config) ->
             {name, medium_entries_per_node_size_pruning_on},
             {parameters, [
                 [{name, max_entries_per_node}, {value, 400}],
-                [{name, size_pruning_threshold}, {value, 1000}],
-                [{name, age_pruning_threshold}, {value, undefined}]
+                [{name, size_pruning_threshold}, {value, 1000}]
             ]},
             {description, "Medium entries per node, size pruning on"}
         ]},
@@ -1510,16 +1507,14 @@ infinite_log_list_performance_test(Config) ->
             {name, many_entries_per_node_size_pruning_on},
             {parameters, [
                 [{name, max_entries_per_node}, {value, 1000}],
-                [{name, size_pruning_threshold}, {value, 1000}],
-                [{name, age_pruning_threshold}, {value, undefined}]
+                [{name, size_pruning_threshold}, {value, 1000}]
             ]},
             {description, "Many entries per node, size pruning on"}
         ]},
         {config, [
             {name, small_entries_per_node_age_pruning_on},
             {parameters, [
-                [{name, max_entries_per_node}, {value, 10}],
-                [{name, size_pruning_threshold}, {value, undefined}],
+                [{name, max_entries_per_node}, {value, 50}],
                 [{name, age_pruning_threshold}, {value, 100}]
             ]},
             {description, "Small entries per node, age pruning on"}
@@ -1528,7 +1523,6 @@ infinite_log_list_performance_test(Config) ->
             {name, medium_entries_per_node_size_age_on},
             {parameters, [
                 [{name, max_entries_per_node}, {value, 400}],
-                [{name, size_pruning_threshold}, {value, undefined}],
                 [{name, age_pruning_threshold}, {value, 100}]
             ]},
             {description, "Medium entries per node, age pruning on"}
@@ -1537,7 +1531,6 @@ infinite_log_list_performance_test(Config) ->
             {name, many_entries_per_node_age_pruning_on},
             {parameters, [
                 [{name, max_entries_per_node}, {value, 1000}],
-                [{name, size_pruning_threshold}, {value, undefined}],
                 [{name, age_pruning_threshold}, {value, 100}]
             ]},
             {description, "Many entries per node, age pruning on"}
@@ -1545,7 +1538,7 @@ infinite_log_list_performance_test(Config) ->
         {config, [
             {name, small_entries_per_node_both_pruning_on},
             {parameters, [
-                [{name, max_entries_per_node}, {value, 10}],
+                [{name, max_entries_per_node}, {value, 50}],
                 [{name, size_pruning_threshold}, {value, 1000}],
                 [{name, age_pruning_threshold}, {value, 100}]
             ]},
@@ -1573,6 +1566,7 @@ infinite_log_list_performance_test(Config) ->
 
 
 infinite_log_list_performance_test_base(Config) ->
+    Repeats = ?config(repeats, Config),
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Model = ets_only_model,
 
@@ -1620,11 +1614,10 @@ infinite_log_list_performance_test_base(Config) ->
                             offset => ListingOffset,
                             limit => ListingLimit
                         },
-                        ListingTimes = perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess),
-                        AvgTime = lists:sum(ListingTimes) / ProcCount,
+                        AvgTime = repeat_infinite_log_listings(Repeats, Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess),
 
                         ct:pal("Results for infinite log list tests:\n"
-                        "process num:            ~p~n"
+                        "process count:          ~p~n"
                         "process repeats:        ~p~n"
                         "append size:            ~p~n"
                         "max entries per node:   ~p~n"
@@ -1726,9 +1719,7 @@ init_per_testcase(Case, Config) when Case =:= infinite_log_append_performance_te
     application:load(cluster_worker),
     application:set_env(cluster_worker, tp_subtrees_number, 10),
     test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 10),
-    clock_freezer_mock:setup_locally([
-        infinite_log_sentinel, node_cache, couchbase_driver
-    ]),
+    clock_freezer_mock:setup_on_nodes([Worker], [ets_only_model]),
     Config;
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -1769,7 +1760,8 @@ end_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_lis
     test_utils:mock_unload(Workers, [datastore_model, datastore]);
 end_per_testcase(Case, Config) when Case =:= infinite_log_append_performance_test orelse
     Case =:= infinite_log_list_performance_test ->
-    clock_freezer_mock:teardown_locally();
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    clock_freezer_mock:teardown_on_nodes(Worker);
 end_per_testcase(_Case, _Config) ->
     ok.
 
@@ -2020,19 +2012,40 @@ perform_infinite_log_appends(Worker, Model, LogId, AppendSize, ProcCount, Append
         Times = perform_infinite_log_appends(Worker, Model, LogId, AppendSize, ProcCount, 1),
         clock_freezer_mock:simulate_seconds_passing(1),
         lists:zipwith(fun(Time, TimeAcc) -> Time + TimeAcc end, Times, TimesListAcc)
-    end, [0 || _ <- lists:seq(1, ProcCount)], lists:seq(1, AppendsPerProcess)).
+    end, lists:duplicate(ProcCount, 0), lists:seq(1, AppendsPerProcess)).
+
+
+%% @private
+-spec repeat_infinite_log_appends(integer(), node(), atom(), binary(), integer(), integer(), integer()) -> [integer()].
+repeat_infinite_log_appends(Repeats, Worker, Model, LogId, LogSize, ProcCount, AppendsPerProcess) ->
+    Results = lists:map(fun(_) ->
+        AppendTimes = perform_infinite_log_appends(Worker, Model, LogId, LogSize, ProcCount, AppendsPerProcess),
+        lists:sum(AppendTimes) / ProcCount
+    end, lists:seq(1, Repeats)),
+    lists:sum(Results) / Repeats.
 
 
 %% @private
 -spec perform_infinite_log_listings(node(), atom(), binary(), map(), integer(), integer()) -> [integer()].
 perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess) ->
     ListingFun = fun(_) ->
+        ListingsPerProcessSeq = lists:seq(1, ListingsPerProcess),
         Stopwatch = stopwatch:start(),
         Start = stopwatch:read_millis(Stopwatch),
         lists:foreach(fun(_) ->
             ?assertMatch({ok, _}, rpc:call(Worker, Model, infinite_log_list, [LogId, ListOpts]))
-        end, lists:seq(1, ListingsPerProcess)),
+        end, ListingsPerProcessSeq),
         Stop = stopwatch:read_millis(Stopwatch),
         Stop - Start
     end,
     lists_utils:pmap(ListingFun, lists:seq(1, ProcCount)).
+
+
+%% @private
+-spec repeat_infinite_log_listings(integer(), node(), atom(), binary(), map(), integer(), integer()) -> [integer()].
+repeat_infinite_log_listings(Repeats, Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess) ->
+    Results = lists:map(fun(_) ->
+        AppendTimes = perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess),
+        lists:sum(AppendTimes) / ProcCount
+    end, lists:seq(1, Repeats)),
+    lists:sum(Results) / Repeats.
