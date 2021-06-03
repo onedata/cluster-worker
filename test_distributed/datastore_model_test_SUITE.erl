@@ -133,11 +133,11 @@ all() ->
         infinite_log_set_ttl_test,
         infinite_log_age_pruning_test
     ], [
-%%        links_performance,
-%%        create_get_performance,
-%%        memory_only_stress_performance_test,
-%%        stress_performance_test,
-%%        infinite_log_append_performance_test
+        links_performance,
+        create_get_performance,
+        memory_only_stress_performance_test,
+        stress_performance_test,
+        infinite_log_append_performance_test,
         infinite_log_list_performance_test
     ]).
 
@@ -1409,6 +1409,7 @@ infinite_log_append_performance_test(Config) ->
 
 
 infinite_log_append_performance_test_base(Config) ->
+    ct:timetrap({hours, 2}),
     Repeats = ?config(repeats, Config),
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Model = ets_only_model,
@@ -1433,6 +1434,7 @@ infinite_log_append_performance_test_base(Config) ->
             },
             ?assertMatch(ok, rpc:call(Worker, Model, infinite_log_create, [LogId, LogOpts])),
             AvgTime = repeat_infinite_log_appends(Repeats, Worker, Model, LogId, LogSize, ProcCount, AppendsPerProcess),
+            ?assertMatch(ok, rpc:call(Worker, Model, infinite_log_destroy, [LogId])),
             ct:pal("Results for infinite log append tests:\n"
             "process count:            ~p~n"
             "process repeats:        ~p~n"
@@ -1566,6 +1568,7 @@ infinite_log_list_performance_test(Config) ->
 
 
 infinite_log_list_performance_test_base(Config) ->
+    ct:timetrap({hours, 2}),
     Repeats = ?config(repeats, Config),
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Model = ets_only_model,
@@ -1592,7 +1595,7 @@ infinite_log_list_performance_test_base(Config) ->
     ListingOffsetList = ?config(listing_offset_list, Config),
     ListingLimitList = ?config(listing_limit_list, Config),
 
-    AppendProcessesCount = 100,
+    AppendProcessesCount = 500,
     ?assertMatch(ok, rpc:call(Worker, Model, infinite_log_create, [LogId, LogOpts])),
     perform_infinite_log_appends(Worker, Model, LogId, LogSize, AppendProcessesCount, AppendsCount div AppendProcessesCount),
 
@@ -1636,7 +1639,8 @@ infinite_log_list_performance_test_base(Config) ->
                 end, ListingOffsetList)
             end, ListingStartFromList)
         end, ListingDirectionList)
-    end, ProcCountList).
+    end, ProcCountList),
+    ?assertMatch(ok, rpc:call(Worker, Model, infinite_log_destroy, [LogId])).
 
 
 %%%===================================================================
