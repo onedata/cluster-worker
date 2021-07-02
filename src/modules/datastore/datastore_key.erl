@@ -209,22 +209,13 @@ get_chash_seed(Key) ->
 %%--------------------------------------------------------------------
 -spec gen_legacy_key(binary(), key()) -> key().
 gen_legacy_key(Seed, Key) ->
-    Ctx = crypto:hash_init(md5),
-    Ctx2 = crypto:hash_update(Ctx, Seed),
-    Ctx3 = crypto:hash_update(Ctx2, Key),
-    hex_utils:hex(crypto:hash_final(Ctx3)).
+    digest([Seed, Key]).
 
 
 %% @private
 -spec digest(digest_components()) -> binary().
-digest(Term) when not is_list(Term) ->
-    digest([Term]);
-digest(DigestComponents) when length(DigestComponents) > 0 ->
-    FinalCtx = lists:foldl(fun
-        (Bin, Ctx) when is_binary(Bin) -> crypto:hash_update(Ctx, Bin);
-        (Term, Ctx) -> crypto:hash_update(Ctx, term_to_binary(Term))
-    end, crypto:hash_init(md5), DigestComponents),
-    hex_utils:hex(crypto:hash_final(FinalCtx)).
+digest(DigestComponents) ->
+    str_utils:md5_digest(DigestComponents).
 
 
 %% @private
