@@ -34,7 +34,7 @@
 %% in the second argument and can be used to adjust the encoder/decoder behaviour
 -type custom_coder() :: {custom, json | string, {module(), encoder(), decoder()} | {module(), encoder(), decoder(), State :: term()}}.
 -type record_struct() :: {record, [{record_field(), record_value()}]}.
--type ejson() :: jiffy:json_value().
+-type ejson() :: json_utils:json_term().
 
 -export_type([record_struct/0, ejson/0]).
 
@@ -237,7 +237,7 @@ decode_term(Term, float) when is_integer(Term) orelse is_float(Term) ->
 decode_term(Term, integer) when is_integer(Term) ->
     Term;
 decode_term(Term, json) ->
-    jiffy:encode(Term);
+    json_utils:encode(Term);
 decode_term(Term, string) when is_binary(Term) ->
     Term;
 decode_term(Term, string_or_integer) when is_binary(Term) ->

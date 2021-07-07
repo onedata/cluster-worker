@@ -51,7 +51,7 @@ init(#{table := Table}, Opts) ->
         ets:new(Table, Opts2),
         ok
     catch
-        _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
+        _:Reason:Stacktrace -> {error, {Reason, Stacktrace}}
     end.
 
 %%--------------------------------------------------------------------

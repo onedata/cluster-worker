@@ -152,10 +152,12 @@ rollback_asynch(Context, Level) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec run_rollback_funs(Funs :: [rollback_fun()], Context :: term()) ->
-    ok | {rollback_fun_error, term()}.
+    {ok, NewContext :: term(), RepeatsList :: [rollback_fun()]} | {rollback_fun_error, term()}.
 run_rollback_funs(Funs, Context) ->
     run_rollback_funs(Funs, Context, []).
 
+-spec run_rollback_funs(Funs :: [rollback_fun()], Context :: term(), RepeatsList :: [rollback_fun()]) ->
+    {ok, NewContext :: term(), RepeatsList :: [rollback_fun()]} | {rollback_fun_error, term()}.
 run_rollback_funs([], Context, RepeatsList) ->
     {ok, Context, lists:reverse(RepeatsList)};
 
@@ -166,10 +168,10 @@ run_rollback_funs([Fun | Funs], Context, RepeatsList) ->
         {ok, NewContext} ->
             run_rollback_funs(Funs, NewContext, RepeatsList);
         {retry, NewContext, Reason} ->
-            ?warning_stacktrace("Rollback function to be retried: ~p", [Reason]),
+            ?warning("Rollback function to be retried: ~p", [Reason]),
             run_rollback_funs(Funs, NewContext, [Fun | RepeatsList]);
         Other ->
-            ?error_stacktrace("Rollback function failed: ~p", [Other]),
+            ?error("Rollback function failed: ~p", [Other]),
             {rollback_fun_error, Other}
     end.
 
@@ -191,5 +193,5 @@ start_rollback_task(Funs, Context, Level) ->
                 Error
         end
     end,
-    ?warning_stacktrace("Starting rollback task"),
+    ?warning("Starting rollback task"),
     task_manager:start_task(Task, Level, batch).
