@@ -59,7 +59,9 @@
 
 -define(CALL_PLUGIN(Fun, Args), plugins:apply(node_manager_plugin, Fun, Args)).
 
--define(PORT_CHECK_RETRIES, 40).
+% make sure the retries take more than 4 minutes, which is the time required
+% for a hanging socket to exit the TIME_WAIT state and terminate
+-define(PORT_CHECK_RETRIES, 41).
 -define(PORT_CHECK_INTERVAL, timer:seconds(6)).
 
 -define(DEFAULT_TERMINATE_TIMEOUT, 5000).

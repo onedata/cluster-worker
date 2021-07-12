@@ -14,7 +14,6 @@
 -author("Krzysztof Trzepla").
 
 -include_lib("bp_tree/include/bp_tree.hrl").
--include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([encode/1, decode/1]).
