@@ -35,6 +35,7 @@
     node_internal_services,
     infinite_log_sentinel,
     infinite_log_node,
+    histogram_persistence,
     % Model used for performance testing (mocked models cannot be used as they affect performance)
     performance_test_record
 ]).

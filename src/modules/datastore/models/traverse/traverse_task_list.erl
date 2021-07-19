@@ -102,6 +102,51 @@ list(Pool, Type) ->
 -spec list(traverse:pool(), forest_type(), list_opts()) ->
     {ok, [traverse:id()], restart_info()} | {error, term()}.
 list(Pool, Type, Opts) ->
+%%    BasicKey = forest_key(Pool, scheduled),
+%%
+%%    {ok, L} = datastore_model:fold_links(
+%%        traverse_task:get_ctx(),
+%%        <<"SCHEDULED_qos_traverse###main_group###", (oneprovider:get_id_or_undefined())/binary>>,
+%%        all,
+%%        fun({_, Tree, Name, _, _}, Acc) -> {ok, [{Tree, Name} | Acc]} end,
+%%        [],
+%%        #{}
+%%    ).
+%%length(L).
+%%    lists:foreach(fun({T, K}) ->
+%%        datastore_model:delete_links(traverse_task:get_ctx(), <<"SCHEDULED_qos_traverse###main_group###", (oneprovider:get_id_or_undefined())/binary>>, T, [K])
+%%    end, L).
+%%
+%%
+%%
+%%tracer:start().
+%%tracer:trace_calls(traverse_task_list).
+%%
+%%    Ctx = (traverse_task:get_ctx())#{local_links_tree_id => <<"JOB_TREE">>, routing => local},
+%%    {ok, L} = datastore_model:fold_links(
+%%        Ctx,
+%%        <<"qos_traverse###qos_traverse###", (atom_to_binary(node(), utf8))/binary, "###JOBS">>,
+%%        <<"JOB_TREE">>,
+%%        fun({_, Tree, Name, _, _}, Acc) -> {ok, [{Tree, Name} | Acc]} end,
+%%        [],
+%%        #{}
+%%    ).
+%%
+%%Ctx = traverse_task:get_ctx(),
+%%    {ok, L} = datastore_model:fold_links(Ctx, <<"SCHEDULED_qos_traverse">>, all, fun
+%%        ({_, Tree, Name, _, _}, Acc) -> {ok, [{Tree, Name} | Acc]}
+%%    end, [], #{}).
+%%lists:foreach(fun({T, K}) ->
+%%datastore_model:delete_links(Ctx, <<"SCHEDULED_qos_traverse">>, T, [K])
+%%end, L).
+%%
+%%datastore_model:get_links(Ctx, <<"SCHEDULED_qos_traverse">>, H1, [H2]).
+%%Executor = oneprovider:get_id_or_undefined().
+%%lists:foreach(fun({T, K}) ->
+%%datastore_model:delete_links(Ctx, <<"ONGOING_qos_traverse">>, T, [K])
+%%end, L).
+%%
+
     Forest = forest_key(Pool, Type),
     list_internal(Forest, Opts).
 
