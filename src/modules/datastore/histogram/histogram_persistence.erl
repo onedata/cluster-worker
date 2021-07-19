@@ -1,38 +1,49 @@
 %%%-------------------------------------------------------------------
-%%% @author michal
-%%% @copyright (C) 2021, <COMPANY>
-%%% @doc
-%%%
+%%% @author Michal Wrzeszcz
+%%% @copyright (C) 2021 ACK CYFRONET AGH
+%%% This software is released under the MIT license
+%%% cited in 'LICENSE.txt'.
 %%% @end
-%%% Created : 19. Jul 2021 12:23 AM
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Module responsible for management of histogram documents
+%%% (getting from and saving to datastore internal structures).
+%%% @end
 %%%-------------------------------------------------------------------
 -module(histogram_persistence).
--author("michal").
+-author("Michal Wrzeszcz").
 
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([new/4, init/3, finalize/1,
+-export([new/4, init/3, finalize/1, set_active_time_series/2, set_active_metrics/2,
     get_head_key/1, is_head/2, get/2,
     create/2, update/3]).
 %% datastore_model callbacks
 -export([get_ctx/0]).
 
 -record(ctx, {
-    datastore_ctx,
-    batch,
-    head,
-    head_updated = false,
-    active_time_series,
-    active_metrics
+    datastore_ctx :: datastore_ctx(),
+    batch :: batch(),
+    head :: key(),
+    head_updated = false :: boolean(),
+    % Fields used to determine metrics to update
+    active_time_series :: histogram_api:time_series_id() | undefined,
+    active_metrics :: histogram_api:metrics_id() | undefined
 }).
 
 -type ctx() :: #ctx{}.
+-export_type([ctx/0]).
+
+-type key() :: datastore:key().
+-type datastore_ctx() :: datastore:ctx().
+-type batch() :: datastore_doc:batch().
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
+-spec new(datastore_ctx(), histogram_api:id(), histogram_api:histogram(), batch()) -> ctx().
 new(DatastoreCtx, Id, Histogram, Batch) ->
     HistogramDoc = #document{key = Id, value = Histogram},
     {{ok, _}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, Id, HistogramDoc, Batch),
@@ -42,7 +53,8 @@ new(DatastoreCtx, Id, Histogram, Batch) ->
     }.
 
 
-init(Id, DatastoreCtx, Batch) ->
+-spec init(datastore_ctx(), histogram_api:id(), batch()) -> ctx().
+init(DatastoreCtx, Id, Batch) ->
     {{ok, HistogramDoc}, UpdatedBatch} = datastore_doc:fetch(DatastoreCtx, Id, Batch),
     #ctx{
         datastore_ctx = DatastoreCtx,
@@ -51,6 +63,7 @@ init(Id, DatastoreCtx, Batch) ->
     }.
 
 
+-spec finalize(ctx()) ->  batch().
 finalize(#ctx{head_updated = false, batch = Batch}) ->
     Batch;
 
@@ -64,27 +77,33 @@ finalize(#ctx{
     UpdatedBatch.
 
 
+-spec set_active_time_series(histogram_api:time_series_id(), ctx()) -> ctx().
+set_active_time_series(TimeSeriesId, Ctx) ->
+    Ctx#ctx{active_time_series = TimeSeriesId}.
+
+
+-spec set_active_metrics(histogram_api:metrics_id(), ctx()) -> ctx().
+set_active_metrics(MetricsId, Ctx) ->
+    Ctx#ctx{active_metrics = MetricsId}.
+
+
+-spec get_head_key(ctx()) -> key().
 get_head_key(#ctx{head = #document{key = HeadKey}}) ->
     HeadKey.
 
 
+-spec is_head(key(), ctx()) -> boolean().
 is_head(Key, #ctx{head = #document{key = HeadKey}}) ->
     Key =:= HeadKey.
 
 
-get(HeadKey, #ctx{
-    head = #document{key = HeadKey, value = HistogramRecord},
-    active_time_series = TimeSeriesId,
-    active_metrics = MetricsId
-} = Ctx) ->
-    Data = maps:get(MetricsId, maps:get(TimeSeriesId, HistogramRecord)),
-    {Data, Ctx};
-
+-spec get(key(), ctx()) -> {histogram_api:data(), ctx()}.
 get(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     {{ok, #document{value = Data}}, UpdatedBatch} = datastore_doc:fetch(DatastoreCtx, Key, Batch),
     {Data, Ctx#ctx{batch = UpdatedBatch}}.
 
 
+-spec create(histogram_api:data(), ctx()) -> {key(), ctx()}.
 create(DataToCreate, #ctx{head = #document{key = HeadKey}, datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     NewDocKey = datastore_key:new_adjacent_to(HeadKey),
     Doc = #document{key = NewDocKey, value = DataToCreate},
@@ -92,6 +111,7 @@ create(DataToCreate, #ctx{head = #document{key = HeadKey}, datastore_ctx = Datas
     {NewDocKey, Ctx#ctx{batch = UpdatedBatch}}.
 
 
+-spec update(key(), histogram_api:data(), ctx()) -> ctx().
 update(HeadKey, Data, #ctx{
     head = #document{key = HeadKey, value = HistogramRecord} = HeadDoc,
     active_time_series = TimeSeriesId,

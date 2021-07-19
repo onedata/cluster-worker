@@ -6,6 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
+%%% Helper module operating on histogram windows' set.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(histogram_windows).
@@ -16,9 +17,11 @@
     split_windows/2, should_reorganize_windows/2, reorganize_windows/3]).
 
 -type timestamp() :: time:seconds().
+-type value() :: number().
 -type window_value() :: value() | {ValuesCount :: non_neg_integer(), ValuesSum :: value()}.
 -type window() :: {timestamp(), window_value()}.
 -type windows() :: gb_trees:tree(timestamp(), window_value()).
+-type apply_function() :: sum | max | min | last | first. % | {gather, Max}.
 
 -type options() :: #{
     start => timestamp(),
@@ -26,7 +29,7 @@
     limit => non_neg_integer()
 }.
 
--export_type([window_value/0, window/0, windows/0, options]).
+-export_type([window_value/0, window/0, windows/0, options/0]).
 
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
 
@@ -39,7 +42,7 @@ init() ->
     init_windows_set().
 
 
--spec get(windows(), timestamp(), options()) -> {ok, [value()]} | {continue, [value()], options()}.
+-spec get(windows(), timestamp(), options()) -> {ok | {continue, options()}, [window_value()]}.
 get(Windows, Timestamp, Options) ->
     list_values(Timestamp, Windows, Options).
 
@@ -99,7 +102,7 @@ reorganize_windows(WindowsInPrevRecord, WindowsInCurrentRecord, MaxWindowsInPrev
 %% Internal functions
 %%=====================================================================
 
--spec apply_value(window_value() | undefined, window_value, apply_function()) -> window_value().
+-spec apply_value(window_value() | undefined, value(), apply_function()) -> window_value().
 apply_value(undefined, NewValue, sum) ->
     {1, NewValue};
 apply_value({CurrentCount, CurrentSum}, NewValue, sum) ->
@@ -126,42 +129,49 @@ apply_value(CurrentValue, _NewValue, first) ->
 %% to allow easy change of structure if needed
 %%=====================================================================
 
-% TODO - zmieniamy kolejnosc zeby bylo od najwiekszego do najmniejszego
-
-key_timestamp_swap(Timestamp) ->
+-spec reverse_timestamp(timestamp()) -> timestamp().
+reverse_timestamp(Timestamp) ->
     ?EPOCH_INFINITY - Timestamp. % Reversed order of timestamps is required for listing
 
 
+-spec init_windows_set() -> windows().
 init_windows_set() ->
     gb_trees:empty().
 
 
+-spec get_value(timestamp(), windows()) -> window_value().
 get_value(Timestamp, Windows) ->
-    case gb_trees:lookup(key_timestamp_swap(Timestamp), Windows) of
+    case gb_trees:lookup(reverse_timestamp(Timestamp), Windows) of
         {value, Value} -> Value;
         none -> undefined
     end.
 
 
+-spec set_value(timestamp(), window_value(), windows()) -> windows().
 set_value(Timestamp, Value, Windows) ->
-    gb_trees:enter(key_timestamp_swap(Timestamp), Value, Windows).
+    gb_trees:enter(reverse_timestamp(Timestamp), Value, Windows).
 
 
+-spec delete_last(windows()) -> windows().
 delete_last(Windows) ->
     {_, _, UpdatedWindows} = gb_trees:take_largest(Windows),
     UpdatedWindows.
 
 
+-spec get_size(windows()) -> non_neg_integer().
 get_size(Windows) ->
     gb_trees:size(Windows).
 
 
+-spec list_values(windows(), timestamp() | undefined, options()) -> {ok | {continue, options()}, [window_value()]}.
 list_values(Windows, undefined, Options) ->
     list_values(gb_sets:iterator(Windows), Options);
 list_values(Windows, Timestamp, Options) ->
-    list_values(gb_sets:iterator_from(key_timestamp_swap(Timestamp), Windows), Options).
+    list_values(gb_sets:iterator_from(reverse_timestamp(Timestamp), Windows), Options).
 
 
+-spec list_values(gb_trees:iter(timestamp(), window_value()), options()) ->
+    {ok | {continue, options()}, [window_value()]}.
 list_values(_Iterator, #{limit := 0}) ->
     {ok, []};
 list_values(Iterator, Options) ->
@@ -169,7 +179,7 @@ list_values(Iterator, Options) ->
         none ->
             {{continue, Options}, []};
         {Key, Value, NextIterator} ->
-            Timestamp = key_timestamp_swap(Key),
+            Timestamp = reverse_timestamp(Key),
             case Options of
                 #{stop := Stop} when Timestamp < Stop ->
                     {ok, []};
@@ -183,12 +193,14 @@ list_values(Iterator, Options) ->
     end.
 
 
+-spec split(windows(), non_neg_integer()) -> {windows(), windows(), timestamp()}.
 split(Windows, SplitPosition) ->
     WindowsList = gb_sets:to_list(Windows),
     Windows1 = lists:sublist(WindowsList, SplitPosition),
     [{SplitKey, _} | _] = Windows2 = lists:sublist(WindowsList, SplitPosition + 1, length(Windows) - SplitPosition),
-    {gb_sets:from_list(Windows1), gb_sets:from_list(Windows2), key_timestamp_swap(SplitKey)}.
+    {gb_sets:from_list(Windows1), gb_sets:from_list(Windows2), reverse_timestamp(SplitKey)}.
 
 
+-spec merge(windows(), windows()) -> windows().
 merge(Windows1, Windows2) ->
     gb_sets:from_list(gb_sets:to_list(Windows1) ++ gb_sets:to_list(Windows2)).
