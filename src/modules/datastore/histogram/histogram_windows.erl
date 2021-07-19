@@ -29,7 +29,7 @@
     limit => non_neg_integer()
 }.
 
--export_type([window_value/0, window/0, windows/0, options/0]).
+-export_type([timestamp/0, value/0, window_value/0, window/0, windows/0, apply_function/0, options/0]).
 
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
 
@@ -42,7 +42,7 @@ init() ->
     init_windows_set().
 
 
--spec get(windows(), timestamp(), options()) -> {ok | {continue, options()}, [window_value()]}.
+-spec get(windows(), timestamp() | undefined, options()) -> {ok | {continue, options()}, [window_value()]}.
 get(Windows, Timestamp, Options) ->
     list_values(Timestamp, Windows, Options).
 
@@ -75,7 +75,7 @@ should_reorganize_windows(Windows, MaxWindowsCount) ->
 
 
 -spec reorganize_windows(windows(), windows(), non_neg_integer()) ->
-    ActionsToApplyOnRecords :: [{update_current_record | update_previos_record, windows()} |
+    ActionsToApplyOnRecords :: [{update_previos_record, windows()} | {update_current_record, timestamp(), windows()} |
         {split_current_record, {windows(), windows(), timestamp()}}].
 reorganize_windows(WindowsInPrevRecord, WindowsInCurrentRecord, MaxWindowsInPrevRecord) ->
     WindowsInPrevRecordSize = get_size(WindowsInPrevRecord),
@@ -87,13 +87,16 @@ reorganize_windows(WindowsInPrevRecord, WindowsInCurrentRecord, MaxWindowsInPrev
         _ ->
             case WindowsInPrevRecordSize + WindowsInCurrentRecordSize > MaxWindowsInPrevRecord of
                 true ->
-                    {WindowsInCurrentRecordPart1, WindowsInCurrentRecordPart2} = split(WindowsInCurrentRecord,
-                        WindowsInCurrentRecordSize - (MaxWindowsInPrevRecord - WindowsInPrevRecordSize)),
+                    {WindowsInCurrentRecordPart1, WindowsInCurrentRecordPart2, SplitTimestamp} =
+                        split(WindowsInCurrentRecord,
+                            WindowsInCurrentRecordSize - (MaxWindowsInPrevRecord - WindowsInPrevRecordSize)),
                     UpdatedWindowsInPrevRecord = merge(WindowsInCurrentRecordPart2, WindowsInPrevRecord),
                     [{update_previos_record, UpdatedWindowsInPrevRecord},
-                        {update_current_record, WindowsInCurrentRecordPart1}];
+                        {update_current_record, SplitTimestamp, WindowsInCurrentRecordPart1}];
                 false ->
-                    [{update_previos_record, merge(WindowsInCurrentRecord, WindowsInPrevRecord)}]
+                    TimestampToUpdate = get_first_timestamp(WindowsInCurrentRecord),
+                    [{update_previos_record, merge(WindowsInCurrentRecord, WindowsInPrevRecord)},
+                        {update_current_record, TimestampToUpdate, init_windows_set()}]
             end
     end.
 
@@ -139,7 +142,7 @@ init_windows_set() ->
     gb_trees:empty().
 
 
--spec get_value(timestamp(), windows()) -> window_value().
+-spec get_value(timestamp(), windows()) -> window_value() | undefined.
 get_value(Timestamp, Windows) ->
     case gb_trees:lookup(reverse_timestamp(Timestamp), Windows) of
         {value, Value} -> Value;
@@ -150,6 +153,12 @@ get_value(Timestamp, Windows) ->
 -spec set_value(timestamp(), window_value(), windows()) -> windows().
 set_value(Timestamp, Value, Windows) ->
     gb_trees:enter(reverse_timestamp(Timestamp), Value, Windows).
+
+
+-spec get_first_timestamp(windows()) -> timestamp().
+get_first_timestamp(Windows) ->
+    {Timestamp, _} = gb_trees:smallest(Windows),
+    Timestamp.
 
 
 -spec delete_last(windows()) -> windows().
@@ -163,11 +172,11 @@ get_size(Windows) ->
     gb_trees:size(Windows).
 
 
--spec list_values(windows(), timestamp() | undefined, options()) -> {ok | {continue, options()}, [window_value()]}.
-list_values(Windows, undefined, Options) ->
-    list_values(gb_sets:iterator(Windows), Options);
-list_values(Windows, Timestamp, Options) ->
-    list_values(gb_sets:iterator_from(reverse_timestamp(Timestamp), Windows), Options).
+-spec list_values(timestamp() | undefined, windows(), options()) -> {ok | {continue, options()}, [window_value()]}.
+list_values(undefined, Windows, Options) ->
+    list_values(gb_trees:iterator(Windows), Options);
+list_values(Timestamp, Windows, Options) ->
+    list_values(gb_trees:iterator_from(reverse_timestamp(Timestamp), Windows), Options).
 
 
 -spec list_values(gb_trees:iter(timestamp(), window_value()), options()) ->
@@ -175,7 +184,7 @@ list_values(Windows, Timestamp, Options) ->
 list_values(_Iterator, #{limit := 0}) ->
     {ok, []};
 list_values(Iterator, Options) ->
-    case gb_sets:next(Iterator) of
+    case gb_trees:next(Iterator) of
         none ->
             {{continue, Options}, []};
         {Key, Value, NextIterator} ->
@@ -195,12 +204,12 @@ list_values(Iterator, Options) ->
 
 -spec split(windows(), non_neg_integer()) -> {windows(), windows(), timestamp()}.
 split(Windows, SplitPosition) ->
-    WindowsList = gb_sets:to_list(Windows),
+    WindowsList = gb_trees:to_list(Windows),
     Windows1 = lists:sublist(WindowsList, SplitPosition),
-    [{SplitKey, _} | _] = Windows2 = lists:sublist(WindowsList, SplitPosition + 1, length(Windows) - SplitPosition),
-    {gb_sets:from_list(Windows1), gb_sets:from_list(Windows2), reverse_timestamp(SplitKey)}.
+    [{SplitKey, _} | _] = Windows2 = lists:sublist(WindowsList, SplitPosition + 1, length(WindowsList) - SplitPosition),
+    {gb_trees:from_orddict(Windows1), gb_trees:from_orddict(Windows2), reverse_timestamp(SplitKey)}.
 
 
 -spec merge(windows(), windows()) -> windows().
 merge(Windows1, Windows2) ->
-    gb_sets:from_list(gb_sets:to_list(Windows1) ++ gb_sets:to_list(Windows2)).
+    gb_trees:from_orddict(gb_trees:to_list(Windows1) ++ gb_trees:to_list(Windows2)).

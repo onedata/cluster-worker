@@ -20,9 +20,9 @@
 
 -record(data, {
     windows = histogram_windows:init() :: histogram_windows:windows(),
-    prev_record :: key(),
+    prev_record :: key() | undefined,
     % Timestamp of newest point in previous record
-    prev_record_timestamp :: histogram_windows:timestamp()
+    prev_record_timestamp :: histogram_windows:timestamp() | undefined
 }).
 
 -record(doc_splitting_strategy, {
@@ -59,7 +59,7 @@
 -type doc_splitting_strategy() :: #doc_splitting_strategy{}.
 -type data() :: #data{}.
 
--export_type([id/0, histogram/0, time_series_id/0, metrics_id/0, data/0, legend/0]).
+-export_type([id/0, time_series_map/0, histogram/0, time_series_id/0, metrics_id/0, data/0, legend/0]).
 
 -type requested_metrics() :: {time_series_id() | [time_series_id()], metrics_id() | [metrics_id()]}.
 -type metrics_values_map() :: #{{time_series_id(), metrics_id()} => [histogram_windows:window()]}.
@@ -279,8 +279,9 @@ update_metrics(
             Actions = histogram_windows:reorganize_windows(WindowsInPrevRecord, WindowsWithAppliedPoint, MaxWindowsInTail),
 
             lists:foldl(fun
-                ({update_current_record, UpdatedWindows}, TmpPersistenceCtx) ->
-                    histogram_persistence:update(DataDocKey, Data#data{windows = UpdatedWindows}, TmpPersistenceCtx);
+                ({update_current_record, UpdatedPrevRecordTimestamp, UpdatedWindows}, TmpPersistenceCtx) ->
+                    histogram_persistence:update(DataDocKey, Data#data{windows = UpdatedWindows,
+                        prev_record_timestamp = UpdatedPrevRecordTimestamp}, TmpPersistenceCtx);
                 ({split_current_record, {Windows1, Windows2, SplitTimestamp}}, TmpPersistenceCtx) ->
                     {_CreatedRecordKey, _CreatedRecord, UpdatedTmpPersistenceCtx} = split_record(
                         DataDocKey, Data, Windows1, Windows2, SplitTimestamp, TmpPersistenceCtx),

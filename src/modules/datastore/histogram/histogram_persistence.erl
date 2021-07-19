@@ -18,14 +18,14 @@
 %% API
 -export([new/4, init/3, finalize/1, set_active_time_series/2, set_active_metrics/2,
     get_head_key/1, is_head/2, get/2,
-    create/2, update/3]).
+    create/2, update/3, delete/2]).
 %% datastore_model callbacks
 -export([get_ctx/0]).
 
 -record(ctx, {
     datastore_ctx :: datastore_ctx(),
     batch :: batch(),
-    head :: key(),
+    head :: doc(),
     head_updated = false :: boolean(),
     % Fields used to determine metrics to update
     active_time_series :: histogram_api:time_series_id() | undefined,
@@ -36,6 +36,7 @@
 -export_type([ctx/0]).
 
 -type key() :: datastore:key().
+-type doc() :: datastore:doc().
 -type datastore_ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
 
@@ -46,20 +47,25 @@
 -spec new(datastore_ctx(), histogram_api:id(), histogram_api:histogram(), batch()) -> ctx().
 new(DatastoreCtx, Id, Histogram, Batch) ->
     HistogramDoc = #document{key = Id, value = Histogram},
-    {{ok, _}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, Id, HistogramDoc, Batch),
-    #ctx{
-        datastore_ctx = DatastoreCtx,
-        batch = UpdatedBatch
-    }.
-
-
--spec init(datastore_ctx(), histogram_api:id(), batch()) -> ctx().
-init(DatastoreCtx, Id, Batch) ->
-    {{ok, HistogramDoc}, UpdatedBatch} = datastore_doc:fetch(DatastoreCtx, Id, Batch),
+    {{ok, SavedHistogramDoc}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, Id, HistogramDoc, Batch),
     #ctx{
         datastore_ctx = DatastoreCtx,
         batch = UpdatedBatch,
-        head = HistogramDoc
+        head = SavedHistogramDoc
+    }.
+
+
+-spec init(datastore_ctx(), histogram_api:id(), batch()) -> {histogram_api:time_series_map(), ctx()}.
+init(DatastoreCtx, Id, Batch) ->
+    {{ok, #document{value = HistogramRecord} = HistogramDoc}, UpdatedBatch} =
+        datastore_doc:fetch(DatastoreCtx, Id, Batch),
+    {
+        HistogramRecord,
+        #ctx{
+            datastore_ctx = DatastoreCtx,
+            batch = UpdatedBatch,
+            head = HistogramDoc
+        }
     }.
 
 
@@ -127,6 +133,12 @@ update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx
     {{ok, _}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, DataDocKey, Doc, Batch),
     Ctx#ctx{batch = UpdatedBatch}.
 
+
+-spec delete(key(), ctx()) -> ctx().
+delete(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
+    {ok, UpdatedBatch} = datastore_doc:delete(DatastoreCtx, Key, Batch),
+    Ctx#ctx{batch = UpdatedBatch}.
+
 %%%===================================================================
 %%% datastore_model callbacks
 %%%===================================================================
@@ -136,7 +148,7 @@ update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx
 %% Returns model's context.
 %% @end
 %%--------------------------------------------------------------------
--spec get_ctx() -> ctx().
+-spec get_ctx() -> datastore_ctx().
 get_ctx() ->
     #{
         model => ?MODULE,
