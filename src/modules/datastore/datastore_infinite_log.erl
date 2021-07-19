@@ -24,11 +24,11 @@
 %%% API
 %%%===================================================================
 
--spec create(ctx(), key()) -> ok | {error, term}.
+-spec create(ctx(), key()) -> ok | {error, term()}.
 create(Ctx, Key) ->
     create(Ctx, Key, #{}).
 
--spec create(ctx(), key(), infinite_log:log_opts()) -> ok | {error, term}.
+-spec create(ctx(), key(), infinite_log:log_opts()) -> ok | {error, term()}.
 create(Ctx, Key, Opts) ->
     datastore_model:datastore_apply(Ctx, Key,
         fun datastore:infinite_log_operation/4, [?FUNCTION_NAME, [Opts]]).
@@ -40,7 +40,7 @@ destroy(Ctx, Key) ->
         fun datastore:infinite_log_operation/4, [?FUNCTION_NAME, []]).
 
 
--spec append(ctx(), key(), infinite_log:content()) -> ok | {error, term}.
+-spec append(ctx(), key(), infinite_log:content()) -> ok | {error, term()}.
 append(Ctx, Key, Content) ->
     datastore_model:datastore_apply(Ctx, Key,
         fun datastore:infinite_log_operation/4, [?FUNCTION_NAME, [Content]]).
