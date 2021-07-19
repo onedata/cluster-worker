@@ -24,9 +24,7 @@
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
 -include_lib("ctool/include/test/performance.hrl").
-
--define(SSL_OPTS(__Config), [{secure, only_verify_peercert}, {cacerts, get_cacerts(__Config)}]).
--define(DUMMY_IP, {13, 190, 241, 56}).
+-include_lib("gui/include/gui.hrl").
 
 %% API
 -export([all/0]).
@@ -68,6 +66,14 @@
     gs_server_session_clearing_test_api_level,
     gs_server_session_clearing_test_connection_level
 ]).
+
+-define(KEY_FILE, ?TEST_RELEASE_ETC_DIR("certs/web_key.pem")).
+-define(CERT_FILE, ?TEST_RELEASE_ETC_DIR("certs/web_cert.pem")).
+-define(CHAIN_FILE, ?TEST_RELEASE_ETC_DIR("certs/web_chain.pem")).
+-define(TRUSTED_CACERTS_FILE, ?TEST_RELEASE_ETC_DIR("cacerts/OneDataTestWebServerCa.pem")).
+
+-define(SSL_OPTS(Config), [{secure, only_verify_peercert}, {cacerts, get_trusted_cacerts(Config)}]).
+-define(DUMMY_IP, {13, 190, 241, 56}).
 
 -define(wait_until_true(Term), ?assertEqual(true, Term, 50)).
 
@@ -1254,35 +1260,27 @@ disconnect_client(Client) ->
     disconnect_client([Client]).
 
 
-get_cacerts(Config) ->
-    cert_utils:load_ders(?TEST_FILE(Config, "web_cacert.pem")).
-
-
-start_gs_listener(Config, Node) ->
+start_gs_listener(Node) ->
     ok = rpc:call(Node, application, ensure_started, [cowboy]),
-    {ok, _} = rpc:call(Node, cowboy, start_tls, [
-        ?GS_LISTENER_ID,
-        [
-            {port, ?GS_PORT},
-            {num_acceptors, ?GS_HTTPS_ACCEPTORS},
-            {keyfile, ?TEST_FILE(Config, "web_key.pem")},
-            {certfile, ?TEST_FILE(Config, "web_cert.pem")},
-            {cacerts, get_cacerts(Config)},
-            {verify, verify_peer},
-            {ciphers, ssl_utils:safe_ciphers()}
-        ],
-        #{
-            env => #{dispatch => cowboy_router:compile([
-                {'_', [
-                    {"/[...]", gs_ws_handler, [?GS_EXAMPLE_TRANSLATOR]}
-                ]}
-            ])}
-        }
-    ]).
+    ?assertMatch(ok, rpc:call(Node, gui, start, [#gui_config{
+        port = ?GS_PORT,
+        key_file = ?KEY_FILE,
+        cert_file = ?CERT_FILE,
+        chain_file = ?CHAIN_FILE,
+        number_of_acceptors = ?GS_HTTPS_ACCEPTORS,
+        custom_cowboy_routes = [
+            {"/[...]", gs_ws_handler, [?GS_EXAMPLE_TRANSLATOR]}
+        ]
+    }])).
+
 
 stop_gs_listener(Node) ->
-    rpc:call(Node, cowboy, stop_listener, [?GS_LISTENER_ID]).
+    rpc:call(Node, gui, stop, []).
 
+
+get_trusted_cacerts(Config) ->
+    [Node | _] = ?config(cluster_worker_nodes, Config),
+    rpc:call(Node, cert_utils, load_ders, [?TRUSTED_CACERTS_FILE]).
 
 %%%===================================================================
 %%% Setup/teardown functions
@@ -1295,7 +1293,7 @@ init_per_suite(Config) ->
 
 init_per_testcase(_, Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
-    [start_gs_listener(Config, N) || N <- Nodes],
+    [start_gs_listener(N) || N <- Nodes],
     graph_sync_mocks:mock_callbacks(Config),
     Config.
 

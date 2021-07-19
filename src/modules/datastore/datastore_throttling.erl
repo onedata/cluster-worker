@@ -186,11 +186,11 @@ configure_throttling(SendTo) ->
                 plan_next_throttling_check(true)
         end
     catch
-        E1:E2 ->
+        E1:E2:Stacktrace ->
             % Debug log only, possible during start of the system when connection to
             % database is not ready
             log_monitoring_stats("Error during throttling configuration: "
-            "~p:~p, ~p", [E1, E2, erlang:get_stacktrace()]),
+            "~p:~p, ~p", [E1, E2, Stacktrace]),
             plan_next_throttling_check()
     end,
     ?MODULE:send_after(CheckInterval, SendTo, {timer, configure_throttling}),
@@ -444,4 +444,4 @@ log_monitoring_stats(Format, Args) ->
         "/tmp/throttling_monitoring.log"),
     MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
         throttling_log_file_max_size, 524288000), % 500 MB
-    logger:log_with_rotation(LogFile, Format, Args, MaxSize).
+    onedata_logger:log_with_rotation(LogFile, Format, Args, MaxSize).

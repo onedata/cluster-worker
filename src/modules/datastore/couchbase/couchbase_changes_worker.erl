@@ -24,7 +24,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/2, start_link/4]).
+-export([start_link/2, start_link/4, start/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -70,6 +70,17 @@ start_link(Bucket, Scope) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_link(Bucket, Scope, Callback, PropagationSince) ->
     gen_server2:start_link(?MODULE, [Bucket, Scope, Callback, PropagationSince], []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts CouchBase changes worker. Does not link worker with calling process.
+%% @end
+%%--------------------------------------------------------------------
+-spec start(couchbase_config:bucket(), datastore_doc:scope(),
+    couchbase_changes:callback() | undefined, couchbase_changes:since() | undefined) ->
+    {ok, pid()} | {error, Reason :: term()}.
+start(Bucket, Scope, Callback, PropagationSince) ->
+    gen_server2:start(?MODULE, [Bucket, Scope, Callback, PropagationSince], []).
 
 %%%===================================================================
 %%% gen_server callbacks

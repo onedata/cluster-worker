@@ -192,9 +192,9 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
                 ok
         end
     catch
-        E1:E2 ->
+        E1:E2:Stacktrace ->
             ?error_stacktrace("Error during reconfiguration of couchbase "
-            "batch size: ~p:~p", [E1, E2]),
+            "batch size: ~p:~p", [E1, E2], Stacktrace),
             ok
     end.
 
@@ -219,9 +219,9 @@ decrease_batch_size(BatchSize) ->
         ?info("Timeout for batch with ~p elements, reset counters,"
         " decrease batch size to: ~p", [BatchSize, MinBatchSize])
     catch
-        E1:E2 ->
+        E1:E2:Stacktrace ->
             ?error_stacktrace("Error during decrease of couchbase"
-            "batch size: ~p:~p", [E1, E2])
+            "batch size: ~p:~p", [E1, E2], Stacktrace)
     end.
 
 %%--------------------------------------------------------------------

@@ -221,8 +221,8 @@ delete(Ctx, Key, Pred, Batch) ->
                 false ->
                     {{error, {not_satisfied, Value}}, Batch2}
             catch
-                _:Reason ->
-                    {{error, {Reason, erlang:get_stacktrace()}}, Batch2}
+                _:Reason:Stacktrace ->
+                    {{error, {Reason, Stacktrace}}, Batch2}
             end;
         {{error, not_found}, Batch2} ->
             {ok, Batch2};
@@ -361,8 +361,8 @@ apply_diff(Diff, Doc = #document{value = Value}) ->
         {ok, Value2} -> {ok, Doc#document{value = Value2}};
         {error, Reason} -> {error, Reason}
     catch
-        _:Reason ->
-            {error, {Reason, erlang:get_stacktrace()}}
+        _:Reason:Stacktrace ->
+            {error, {Reason, Stacktrace}}
     end.
 
 %%--------------------------------------------------------------------

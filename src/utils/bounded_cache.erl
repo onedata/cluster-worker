@@ -244,7 +244,7 @@ init_group_manager() ->
         ets:new(?CACHE_MANAGER, [set, public, named_table]),
         ok
     catch
-        _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
+        _:Reason:Stacktrace -> {error, {Reason, Stacktrace}}
     end.
 
 %%--------------------------------------------------------------------
@@ -264,7 +264,7 @@ init_cache(Cache, #{group := Group}) ->
         end),
         ok
     catch
-        _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
+        _:Reason:Stacktrace -> {error, {Reason, Stacktrace}}
     end;
 init_cache(Cache, Options) ->
     try
@@ -272,7 +272,7 @@ init_cache(Cache, Options) ->
         send_check_message(Options#{name => Cache}),
         ok
     catch
-        _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
+        _:Reason:Stacktrace -> {error, {Reason, Stacktrace}}
     end.
 
 %%--------------------------------------------------------------------
@@ -287,7 +287,7 @@ init_group(Group, Options) ->
         send_check_message(Options#{group => true, name => Group}),
         ok
     catch
-        _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
+        _:Reason:Stacktrace -> {error, {Reason, Stacktrace}}
     end.
 
 %%--------------------------------------------------------------------
