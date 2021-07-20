@@ -314,10 +314,18 @@ maybe_delete_last_doc(_Key, #data{prev_record = PrevRecordKey}, DocSplittingStra
     histogram_persistence:ctx()) -> {[histogram_windows:window()], histogram_persistence:ctx()}.
 get_metrics_values(
     #data{
+        windows = Windows,
+        prev_record = undefined
+    }, Window, Options, PersistenceCtx) ->
+    {_, Points} = histogram_windows:get(Windows, Window, Options),
+    {Points, PersistenceCtx};
+
+get_metrics_values(
+    #data{
         prev_record = PrevRecordKey,
         prev_record_timestamp = PrevRecordTimestamp
     }, Window, Options, PersistenceCtx)
-    when Window =/= undefined andalso PrevRecordTimestamp >= Window ->
+    when PrevRecordTimestamp >= Window ->
     {PrevRecordData, UpdatedPersistenceCtx} = histogram_persistence:get(PrevRecordKey, PersistenceCtx),
     get_metrics_values(PrevRecordData, Window, Options, UpdatedPersistenceCtx);
 

@@ -15,6 +15,8 @@
 %% API
 -export([init/0, get/3, apply_value/4, maybe_delete_last/2,
     split_windows/2, should_reorganize_windows/2, reorganize_windows/3]).
+%% Exported for unit tests
+-export([get_value/2]).
 
 -type timestamp() :: time:seconds().
 -type value() :: number().
@@ -158,7 +160,7 @@ set_value(Timestamp, Value, Windows) ->
 -spec get_first_timestamp(windows()) -> timestamp().
 get_first_timestamp(Windows) ->
     {Timestamp, _} = gb_trees:smallest(Windows),
-    Timestamp.
+    reverse_timestamp(Timestamp).
 
 
 -spec delete_last(windows()) -> windows().
@@ -192,6 +194,8 @@ list_values(Iterator, Options) ->
             case Options of
                 #{stop := Stop} when Timestamp < Stop ->
                     {ok, []};
+                #{stop := Stop} when Timestamp =:= Stop ->
+                    {ok, [{Timestamp, Value}]};
                 #{limit := Limit} ->
                     {Ans, Points} = list_values(NextIterator, Options#{limit := Limit - 1}),
                     {Ans, [{Timestamp, Value} | Points]};
