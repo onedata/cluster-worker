@@ -188,9 +188,7 @@ init_per_testcase(_Case, Config) ->
     FlushDelay = timer:seconds(1),
     IdleTimeout = timer:seconds(3),
     lists:foreach(fun({Env, Value}) ->
-        {_, []} = rpc:multicall(Workers, application, set_env, [
-            cluster_worker, Env, Value
-        ])
+        {_, []} = utils:rpc_multicall(Workers, application, set_env, [cluster_worker, Env, Value])
     end, [
         {tp_subtrees_number, 1},
         {throttling_idle_time, IdleTimeout},
