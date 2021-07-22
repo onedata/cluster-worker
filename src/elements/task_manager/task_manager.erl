@@ -102,7 +102,7 @@ start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
                 end
         after
             ?TASK_SAVE_TIMEOUT ->
-                ?error_stacktrace("Timeout for task ~p", [Task]),
+                ?error("Timeout for task ~p", [Task]),
                 timeout
         end
     end),
@@ -231,7 +231,7 @@ update_pid(Task, Pid, Level) ->
 delete_task(Uuid, Task, Level) ->
     case task_pool:delete(Level, Uuid) of
         ok -> ok;
-        E -> ?error_stacktrace("Error ~p while deleting task ~p", [E, Task])
+        E -> ?error("Error ~p while deleting task ~p", [E, Task])
     end.
 
 %%--------------------------------------------------------------------
@@ -254,7 +254,7 @@ do_task({M, F, Args}) ->
     apply(M, F, Args);
 
 do_task(Task) ->
-    ?error_stacktrace("Not a task ~p", [Task]),
+    ?error("Not a task ~p", [Task]),
     ok.
 
 %%--------------------------------------------------------------------
@@ -282,16 +282,16 @@ do_task(Task, 1, _MaxNum) ->
     try
         ok = do_task(Task)
     catch
-        E1:E2 ->
-            ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2]),
+        E1:E2:Stacktrace ->
+            ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2], Stacktrace),
             task_failed
     end;
 do_task(Task, CurrentNum, MaxNum) ->
     try
         ok = do_task(Task)
     catch
-        E1:E2 ->
-            ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2]),
+        E1:E2:Stacktrace ->
+            ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2], Stacktrace),
             sleep_random_interval(MaxNum - CurrentNum + 1),
             do_task(Task, CurrentNum - 1, MaxNum)
     end.

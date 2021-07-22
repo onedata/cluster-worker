@@ -149,10 +149,10 @@ websocket_handle({text, Data}, _, #state{protocol_version = ProtoVer} = State) -
         {ok, DecodedRecord} = gs_protocol:decode(ProtoVer, JSONMap),
         handle_message(DecodedRecord, State)
     catch
-        Type:Message ->
+        Type:Message:Stacktrace ->
             ?error_stacktrace("Unexpected error in GS client - ~p:~p", [
                 Type, Message
-            ]),
+            ], Stacktrace),
             {ok, State}
     end;
 

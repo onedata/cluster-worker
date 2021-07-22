@@ -66,7 +66,7 @@ save(#{table := Table}, Key, Doc = #document{}) ->
         mnesia:dirty_write(Table, #entry{key = Key, value = Doc}),
         {ok, Doc}
     catch
-        _:{aborted, Reason} -> {error, {Reason, erlang:get_stacktrace()}}
+        _:{aborted, Reason}:Stacktrace -> {error, {Reason, Stacktrace}}
     end.
 
 %%--------------------------------------------------------------------
@@ -80,7 +80,7 @@ get(#{table := Table}, Key) ->
         [#entry{value = Doc}] -> {ok, Doc};
         [] -> {error, not_found}
     catch
-        _:{aborted, Reason} -> {error, {Reason, erlang:get_stacktrace()}}
+        _:{aborted, Reason}:Stacktrace -> {error, {Reason, Stacktrace}}
     end.
 
 %%--------------------------------------------------------------------
@@ -94,7 +94,7 @@ delete(#{table := Table}, Key) ->
         mnesia:dirty_delete(Table, Key),
         ok
     catch
-        _:{aborted, Reason} -> {error, {Reason, erlang:get_stacktrace()}}
+        _:{aborted, Reason}:Stacktrace -> {error, {Reason, Stacktrace}}
     end.
 
 -spec fold(ctx(), datastore_model:driver_fold_fun(), term()) -> {ok | stop, term()}.
@@ -107,5 +107,5 @@ fold(#{table := Table}, Fun, Acc0) ->
             end, {ok, Acc0}, Table)
         end)
     catch
-        _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
+        _:Reason:Stacktrace -> {error, {Reason, Stacktrace}}
     end.

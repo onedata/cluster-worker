@@ -293,8 +293,8 @@ cberl_test_base(Config) ->
 
                 Self ! {self(), {ok, Response2}}
             catch
-                E1:E2 ->
-                    Self ! {self(), {error, {E1, E2, erlang:get_stacktrace()}}}
+                E1:E2:Stacktrace ->
+                    Self ! {self(), {error, {E1, E2, Stacktrace}}}
             end
         end)
     end,

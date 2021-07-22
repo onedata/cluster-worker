@@ -35,7 +35,8 @@
 -export([single_error_log/2, single_error_log/3, single_error_log/4,
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
--export([get_cluster_status/0, get_cluster_status/1, get_cluster_ips/0]).
+-export([are_db_and_workers_ready/0, get_cluster_status/0, get_cluster_status/1]).
+-export([get_cluster_ips/0]).
 -export([reschedule_service_healthcheck/4]).
 
 %% gen_server callbacks
@@ -57,6 +58,11 @@
 -define(EXOMETER_DEFAULT_DATA_POINTS_NUMBER, 10000).
 
 -define(CALL_PLUGIN(Fun, Args), plugins:apply(node_manager_plugin, Fun, Args)).
+
+% make sure the retries take more than 4 minutes, which is the time required
+% for a hanging socket to exit the TIME_WAIT state and terminate
+-define(PORT_CHECK_RETRIES, 41).
+-define(PORT_CHECK_INTERVAL, timer:seconds(6)).
 
 -define(DEFAULT_TERMINATE_TIMEOUT, 5000).
 
@@ -213,7 +219,7 @@ single_error_log(LogKey, Log, Args, FreezeTime) ->
 log_monitoring_stats(LogFile, Format, Args) ->
     MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
         monitoring_log_file_max_size, 524288000), % 500 MB
-    logger:log_with_rotation(LogFile, Format, Args, MaxSize).
+    onedata_logger:log_with_rotation(LogFile, Format, Args, MaxSize).
 
 
 %%--------------------------------------------------------------------
@@ -237,7 +243,7 @@ start_worker(Module, Args, Options) ->
     try
         {ok, LoadMemorySize} = application:get_env(?CLUSTER_WORKER_APP_NAME, worker_load_memory_size),
         WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
-
+        
         case lists:member(worker_first, Options) of
             true ->
                 case supervisor:start_child(
@@ -291,8 +297,8 @@ start_worker(Module, Args, Options) ->
         ?info("Worker: ~s started", [Module]),
         ok
     catch
-        _:Error ->
-            ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module]),
+        _:Error:Stacktrace ->
+            ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module], Stacktrace),
             {error, Error}
     end.
 
@@ -339,28 +345,28 @@ init([]) ->
         ?init_exometer_reporters(false),
         exometer_utils:init_exometer_counters(),
         catch ets:new(?HELPER_ETS, [named_table, public, set]),
-
+        
         ?info("Running 'before_init' procedures."),
         ok = ?CALL_PLUGIN(before_init, []),
-
+        
         ?info("node manager plugin initialized"),
-
+        
         ?info("Checking if all ports are free..."),
         lists:foreach(
             fun(Module) ->
                 Port = erlang:apply(Module, port, []),
-                case check_port(Port) of
+                case ensure_port_free(Port) of
                     ok ->
                         ok;
                     {error, Reason} ->
                         ?error("The port ~B for ~p is not free: ~p. Terminating.",
                             [Port, Module, Reason]),
-                        throw(ports_are_not_free)
+                        throw({port_in_use, Port})
                 end
             end, node_manager:listeners()),
-
+        
         ?info("Ports OK"),
-
+        
         next_task_check(),
         erlang:send_after(datastore_throttling:plan_next_throttling_check(), self(), {timer, configure_throttling}),
         {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
@@ -368,17 +374,17 @@ init([]) ->
         erlang:send_after(ExometerInterval, self(), {timer, check_exometer}),
         erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
         ?info("All checks performed"),
-
+        
         gen_server2:cast(self(), connect_to_cm),
         MonitoringState = monitoring:start(),
-
+        
         {ok, #state{
             cm_con_status = not_connected,
             monitoring_state = MonitoringState
         }}
     catch
-        _:Error ->
-            ?error_stacktrace("Cannot start node_manager: ~p", [Error]),
+        _:Error:Stacktrace ->
+            ?error_stacktrace("Cannot start node_manager: ~p", [Error], Stacktrace),
             {stop, cannot_start_node_manager}
     end.
 
@@ -407,6 +413,9 @@ handle_call(healthcheck, _From, State) ->
 
 handle_call({healthcheck, Component}, _From, State) ->
     {reply, perform_healthcheck(Component, State), State};
+
+handle_call(are_db_and_workers_ready, _From, State) ->
+    {reply, State#state.db_and_workers_ready, State};
 
 handle_call(disable_task_control, _From, State) ->
     {reply, ok, State#state{task_control = false}};
@@ -455,22 +464,25 @@ handle_cast(?INIT_STEP_MSG(Step), State) ->
             {_, async} -> ok
         end
     catch
-        Error:Reason ->
+        Error:Reason:Stacktrace ->
             ?error_stacktrace("Error during cluster initialization in step ~p: ~p:~p",
-                [Step, Error, Reason]),
+                [Step, Error, Reason], Stacktrace),
             report_step_result(Step, failure)
     end,
     {noreply, State};
 
-handle_cast(node_initialized, State) ->
-    {noreply, State#state{initialized = true}};
+handle_cast(report_db_and_workers_ready, State) ->
+    {noreply, State#state{db_and_workers_ready = true}};
+
+handle_cast(report_cluster_ready, State) ->
+    {noreply, State#state{cluster_ready = true}};
 
 handle_cast(configure_throttling, #state{throttling = true} = State) ->
     try
         ok = datastore_throttling:configure_throttling()
     catch
-        Error:Reason ->
-            ?warning_stacktrace("configure_throttling failed due to ~p:~p", [Error, Reason])
+        Error:Reason:Stacktrace ->
+            ?warning_stacktrace("configure_throttling failed due to ~p:~p", [Error, Reason], Stacktrace)
     end,
     {noreply, State};
 
@@ -663,18 +675,18 @@ handle_info(Request, State) ->
 terminate(Reason, State) ->
     % TODO VFS-6339 - Unregister node during normal stop not to start HA procedures
     ?info("Shutting down ~p due to ~p", [?MODULE, Reason]),
-
+    
     lists:foreach(fun(Module) ->
         try
             erlang:apply(Module, stop, [])
         catch
-            E1:E2 ->
+            E1:E2:Stacktrace ->
                 ?warning_stacktrace("Stop failed on module ~p: ~p:~p",
-                    [Module, E1, E2])
+                    [Module, E1, E2], Stacktrace)
         end
     end, node_manager:listeners()),
     ?info("All listeners stopped"),
-
+    
     ?CALL_PLUGIN(terminate, [Reason, State]).
 
 %%--------------------------------------------------------------------
@@ -757,10 +769,10 @@ cluster_init_step(?UPGRADE_CLUSTER) ->
                 Result = try
                     upgrade_cluster(),
                     success
-                catch Type:Reason ->
+                catch Type:Reason:Stacktrace ->
                     ?error_stacktrace("Failed to upgrade cluster - ~p:~p", [
                         Type, Reason
-                    ]),
+                    ], Stacktrace),
                     failure
                 end,
                 report_step_result(?UPGRADE_CLUSTER, Result)
@@ -776,6 +788,7 @@ cluster_init_step(?START_CUSTOM_WORKERS) ->
     ?info("Custom workers started successfully"),
     ok;
 cluster_init_step(?DB_AND_WORKERS_READY) ->
+    gen_server2:cast(?NODE_MANAGER_NAME, report_db_and_workers_ready),
     ?info("Database and workers ready - executing 'on_db_and_workers_ready' procedures..."),
     % the procedures require calls to node manager, hence they are processed asynchronously
     spawn(fun() ->
@@ -783,10 +796,10 @@ cluster_init_step(?DB_AND_WORKERS_READY) ->
             ok = ?CALL_PLUGIN(on_db_and_workers_ready, []),
             ?info("Successfully executed 'on_db_and_workers_ready' procedures"),
             success
-        catch Type:Reason ->
+        catch Type:Reason:Stacktrace ->
             ?error_stacktrace("Failed to execute 'on_db_and_workers_ready' procedures - ~p:~p", [
                 Type, Reason
-            ]),
+            ], Stacktrace),
             failure
         end,
         report_step_result(?DB_AND_WORKERS_READY, Result)
@@ -798,7 +811,7 @@ cluster_init_step(?START_LISTENERS) ->
     end, node_manager:listeners());
 cluster_init_step(?CLUSTER_READY) ->
     ?info("Cluster initialized successfully"),
-    gen_server2:cast(?NODE_MANAGER_NAME, node_initialized),
+    gen_server2:cast(?NODE_MANAGER_NAME, report_cluster_ready),
     ok.
 
 %%--------------------------------------------------------------------
@@ -862,7 +875,7 @@ upgrade_cluster(CurrentGen, _InstalledGen, _OldestKnownGen) ->
     cluster_status:status() | [{module(), cluster_status:status()}].
 perform_healthcheck(cluster_manager_connection, #state{cm_con_status = connected}) -> ok;
 perform_healthcheck(cluster_manager_connection, _State) -> out_of_sync;
-perform_healthcheck(node_manager, #state{cm_con_status = connected, initialized = true}) -> ok;
+perform_healthcheck(node_manager, #state{cm_con_status = connected, cluster_ready = true}) -> ok;
 perform_healthcheck(node_manager, _State) -> out_of_sync;
 perform_healthcheck(dispatcher, _) -> gen_server2:call(?DISPATCHER_NAME, healthcheck);
 perform_healthcheck(workers, _) ->
@@ -996,16 +1009,34 @@ next_task_check() ->
 %% @private
 %% @doc
 %% Checks whether port is free on localhost.
+%% @TODO VFS-7847 Currently the listener ports are not freed correctly and after
+%% a restart, they may still be not available for some time. This appears to be
+%% triggered by listener healthcheck connections made by hackney, which causes
+%% the listener to go into TIME_WAIT state for some duration.
 %% @end
 %%--------------------------------------------------------------------
--spec check_port(Port :: integer()) -> ok | {error, Reason :: term()}.
-check_port(Port) ->
-    case gen_tcp:listen(Port, [{reuseaddr, true}]) of
+-spec ensure_port_free(integer()) -> ok | {error, term()}.
+ensure_port_free(Port) ->
+    ensure_port_free(Port, ?PORT_CHECK_RETRIES).
+
+%% @private
+-spec ensure_port_free(integer(), integer()) -> ok | {error, term()}.
+ensure_port_free(Port, AttemptsLeft) ->
+    case gen_tcp:listen(Port, [{reuseaddr, true}, {ip, any}]) of
         {ok, Socket} ->
             gen_tcp:close(Socket);
         {error, Reason} ->
-            {error, Reason}
+            case AttemptsLeft of
+                1 ->
+                    {error, Reason};
+                _ ->
+                    ?warning("Port ~B required by the application is not free, attempts left: ~B",
+                        [Port, AttemptsLeft - 1]),
+                    timer:sleep(?PORT_CHECK_INTERVAL),
+                    ensure_port_free(Port, AttemptsLeft - 1)
+            end
     end.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -1018,23 +1049,23 @@ check_port(Port) ->
 analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalysisPid}) ->
     {CPU, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
     MemInt = proplists:get_value(total, Mem, 0),
-
+    
     {ok, MinInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, min_analysis_interval_sek),
     {ok, MaxInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, max_analysis_interval_min),
     {ok, MemThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_analysis_treshold),
     {ok, ProcThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, procs_num_analysis_treshold),
     {ok, MemToStartCleaning} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
-
+    
     {ok, SchedulersMonitoring} = application:get_env(?CLUSTER_WORKER_APP_NAME, schedulers_monitoring),
     erlang:system_flag(scheduler_wall_time, SchedulersMonitoring),
-
+    
     MemUsage = monitoring:mem_usage(MonState),
-
+    
     ?update_counter(?EXOMETER_NAME(processes_num), PNum),
     ?update_counter(?EXOMETER_NAME(memory_erlang), MemInt),
     ?update_counter(?EXOMETER_NAME(memory_node), MemUsage),
     ?update_counter(?EXOMETER_NAME(cpu_node), CPU * 100),
-
+    
     TimeDiff = stopwatch:read_millis(LastAnalysisTimer),
     MaxTimeExceeded = TimeDiff >= timer:minutes(MaxInterval),
     MinTimeExceeded = TimeDiff >= timer:seconds(MinInterval),
@@ -1051,29 +1082,29 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                     lists:reverse(lists:sort(lists:map(fun(N) ->
                         {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
                 ]),
-
+                
                 % Gather processes info
                 {ProcNum, {Top5M, Top5B, CS_Map, CS_Bin_Map}} =
                     get_procs_stats(),
-
+                
                 % Merge processes with similar stacktrace and find groups
                 % that use a lot of memory
                 MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(CS_Map))), 5),
-
+                
                 MergedStacksMap2 = maps:map(fun(K, {M, N, K}) ->
                     {N, M, K} end, CS_Map),
                 MergedStacks2 = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap2))), 5),
-
+                
                 % Merge processes with similar stacktrace and find groups
                 % that use a lot of memory to store binaries
                 MergedStacksBin = lists:sublist(lists:reverse(lists:sort(maps:values(CS_Bin_Map))), 5),
-
+                
                 MergedStacksBinMap2 = maps:map(fun(K, {M, N, K}) ->
                     {N, M, K} end, CS_Bin_Map),
                 MergedStacksBin2 = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksBinMap2))), 5),
-
+                
                 All = erlang:registered(),
-
+                
                 TopProcesses = lists:map(
                     fun({M, {P, CS}}) ->
                         {M, CS, P, get_process_name(P, All),
@@ -1081,7 +1112,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                             erlang:process_info(P, initial_call),
                             erlang:process_info(P, message_queue_len)}
                     end, lists:reverse(Top5M)),
-
+                
                 AddBL = application:get_env(?CLUSTER_WORKER_APP_NAME,
                     include_binary_list_in_monitoring_reoport, false),
                 TopProcessesBin = case AddBL of
@@ -1102,7 +1133,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                                     erlang:process_info(P, message_queue_len)}
                             end, lists:reverse(Top5B))
                 end,
-
+                
                 log_monitoring_stats("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n"
                 "single proc memory cosumption (binary): ~p~n"
                 "aggregated memory consumption: ~p~n"
@@ -1112,7 +1143,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                     ProcNum, TopProcesses, TopProcessesBin, MergedStacks,
                     MergedStacks2, MergedStacksBin, MergedStacksBin2
                 ]),
-
+                
                 % Log schedulers info
                 log_monitoring_stats("Schedulers basic info: all: ~p, online: ~p",
                     [erlang:system_info(schedulers), erlang:system_info(schedulers_online)]),
@@ -1121,7 +1152,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                     true ->
                         NewSchedulerInfo = lists:sort(NewSchedulerInfo0),
                         gen_server2:cast(?NODE_MANAGER_NAME, {update_scheduler_info, NewSchedulerInfo}),
-
+                        
                         log_monitoring_stats("Schedulers advanced info: ~p", [NewSchedulerInfo]),
                         case is_list(SchedulerInfo) of
                             true ->
@@ -1157,7 +1188,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
 get_procs_stats() ->
     Procs = erlang:processes(),
     PNum = length(Procs),
-
+    
     {PNum, get_procs_stats(Procs, {[], [], #{}, #{}}, 0)}.
 
 %%--------------------------------------------------------------------
@@ -1177,26 +1208,26 @@ get_procs_stats([], Ans, _Count) ->
     Ans;
 get_procs_stats([P | Procs], {Top5Mem, Top5Bin, CS_Map, CS_Bin_Map}, Count) ->
     CS = erlang:process_info(P, current_stacktrace),
-
+    
     ProcMem = case erlang:process_info(P, memory) of
         {memory, M} ->
             M;
         _ ->
             0
     end,
-
+    
     {Bin, BinList} = case erlang:process_info(P, binary) of
         {binary, BL} ->
             {get_binary_size(BL), BL};
         _ ->
             {0, []}
     end,
-
+    
     Top5Mem2 = top_five(ProcMem, {P, CS}, Top5Mem),
     Top5Bin2 = top_five(Bin, {P, CS, BinList}, Top5Bin),
     CS_Map2 = merge_stacks(CS, ProcMem, CS_Map),
     CS_Bin_Map2 = merge_stacks(CS, Bin, CS_Bin_Map),
-
+    
     GC_Interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
         proc_stats_analysis_gc_interval, 25000),
     case Count rem GC_Interval of
@@ -1205,7 +1236,7 @@ get_procs_stats([P | Procs], {Top5Mem, Top5Bin, CS_Map, CS_Bin_Map}, Count) ->
         _ ->
             ok
     end,
-
+    
     get_procs_stats(Procs, {Top5Mem2, Top5Bin2, CS_Map2, CS_Bin_Map2},
         Count + 1).
 
@@ -1288,7 +1319,7 @@ get_binary_size(BinList) ->
 log_monitoring_stats(Format, Args) ->
     LogFile = application:get_env(?CLUSTER_WORKER_APP_NAME, monitoring_log_file,
         "/tmp/node_manager_monitoring.log"),
-
+    
     log_monitoring_stats(LogFile, Format, Args).
 
 
@@ -1307,6 +1338,19 @@ get_ip_address() ->
         undefined -> {127, 0, 0, 1}; % should be overriden by onepanel during deployment
         _ -> {127, 0, 0, 1}
     end.
+
+
+-spec are_db_and_workers_ready() -> boolean().
+are_db_and_workers_ready() ->
+    % cache only the positive result as after the first initialization
+    % this does not change anymore
+    {ok, Result} = node_cache:acquire({?MODULE, ?FUNCTION_NAME}, fun() ->
+        case gen_server2:call(?NODE_MANAGER_NAME, are_db_and_workers_ready) of
+            true -> {ok, true, infinity};
+            false -> {ok, false, 0}
+        end
+    end),
+    Result.
 
 
 %%--------------------------------------------------------------------
@@ -1345,7 +1389,7 @@ get_cluster_ips() ->
 %% Defaults to newest known cluster generation.
 %% @end
 %%--------------------------------------------------------------------
--spec get_current_cluster_generation() -> cluster_generation() | {error, term()}.
+-spec get_current_cluster_generation() -> {ok, cluster_generation()} | {error, term()}.
 get_current_cluster_generation() ->
     case cluster_generation:get() of
         {ok, Generation} -> {ok, Generation};
@@ -1400,9 +1444,9 @@ handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
             HandlingFun(),
             ?info("Finished processing transition of node ~p to status ~p", [Node, NewStatus])
         catch
-            Error:Reason ->
+            Error:Reason:Stacktrace ->
                 ?error_stacktrace("Error while processing transition of node ~p to status ~p: ~p:~p",
-                    [Node, NewStatus, Error, Reason])
+                    [Node, NewStatus, Error, Reason], Stacktrace)
         end
     end),
     ok.

@@ -93,9 +93,9 @@ spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback, OnSucce
         process_flag(trap_exit, true),
         Result = try
             {ok, do_spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback, OnSuccessFun)}
-        catch Type:Reason ->
+        catch Type:Reason:Stacktrace ->
             ct:pal("Cannot start supervisor due to ~p:~p~nStacktrace: ~p", [
-                Type, Reason, erlang:get_stacktrace()
+                Type, Reason, Stacktrace
             ]),
             error
         end,

@@ -132,7 +132,7 @@ create(Ctx, LogId, Opts, InitialBatch) ->
 destroy(Ctx, LogId, InitialBatch) ->
     case infinite_log_sentinel:acquire(Ctx, LogId, skip_pruning, allow_updates, InitialBatch) of
         {{ok, Sentinel}, AcquireBatch} ->
-            Callback = fun(LogId, NodeNumber, AccBatch) -> 
+            Callback = fun(_LogId, NodeNumber, AccBatch) -> 
                 infinite_log_node:delete(Ctx, LogId, NodeNumber, AccBatch) 
             end,
             case apply_for_archival_log_nodes(Sentinel, Callback, AcquireBatch) of
@@ -179,10 +179,10 @@ list(Ctx, LogId, Opts, AccessMode, InitialBatch) ->
             try
                 {Res, FinalDatastoreBatch} = infinite_log_browser:list(Ctx, Sentinel, Opts, AcquireBatch),
                 {{ok, Res}, FinalDatastoreBatch}
-            catch Class:Reason ->
+            catch Class:Reason:Stacktrace ->
                 ?error_stacktrace("Unexpected error during infinite log listing (id: ~s) - ~w:~p", [
                     LogId, Class, Reason
-                ]),
+                ], Stacktrace),
                 {{error, internal_server_error}, AcquireBatch}
             end
     end.
@@ -200,7 +200,7 @@ set_ttl(Ctx, LogId, Ttl, InitialBatch) ->
         {{error, _}, _} = AcquireError ->
             AcquireError;
         {{ok, Sentinel}, AcquireBatch} ->
-            SetNodeTtl = fun(LogId, NodeNumber, InternalBatch) ->
+            SetNodeTtl = fun(_LogId, NodeNumber, InternalBatch) ->
                 infinite_log_node:set_ttl(Ctx, LogId, NodeNumber, Ttl, InternalBatch)
             end,
             case apply_for_archival_log_nodes(Sentinel, SetNodeTtl, AcquireBatch) of
