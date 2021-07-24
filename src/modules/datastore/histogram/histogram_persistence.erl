@@ -13,6 +13,7 @@
 -module(histogram_persistence).
 -author("Michal Wrzeszcz").
 
+-include("modules/datastore/histogram.hrl").
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
@@ -21,6 +22,10 @@
     create/2, update/3, delete/2]).
 %% datastore_model callbacks
 -export([get_ctx/0]).
+
+-record(histogram, {
+    time_series :: histogram_api:time_series_map()
+}).
 
 -record(ctx, {
     datastore_ctx :: datastore_ctx(),
@@ -44,9 +49,9 @@
 %%% API
 %%%===================================================================
 
--spec new(datastore_ctx(), histogram_api:id(), histogram_api:histogram(), batch()) -> ctx().
-new(DatastoreCtx, Id, Histogram, Batch) ->
-    HistogramDoc = #document{key = Id, value = Histogram},
+-spec new(datastore_ctx(), histogram_api:id(), histogram_api:time_series_map(), batch()) -> ctx().
+new(DatastoreCtx, Id, TimeSeries, Batch) ->
+    HistogramDoc = #document{key = Id, value = #histogram{time_series = TimeSeries}},
     {{ok, SavedHistogramDoc}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, Id, HistogramDoc, Batch),
     #ctx{
         datastore_ctx = DatastoreCtx,
@@ -57,10 +62,10 @@ new(DatastoreCtx, Id, Histogram, Batch) ->
 
 -spec init(datastore_ctx(), histogram_api:id(), batch()) -> {histogram_api:time_series_map(), ctx()}.
 init(DatastoreCtx, Id, Batch) ->
-    {{ok, #document{value = HistogramRecord} = HistogramDoc}, UpdatedBatch} =
+    {{ok, #document{value = #histogram{time_series = TimeSeriesMap}} = HistogramDoc}, UpdatedBatch} =
         datastore_doc:fetch(DatastoreCtx, Id, Batch),
     {
-        HistogramRecord,
+        TimeSeriesMap,
         #ctx{
             datastore_ctx = DatastoreCtx,
             batch = UpdatedBatch,
@@ -119,14 +124,15 @@ create(DataToCreate, #ctx{head = #document{key = HeadKey}, datastore_ctx = Datas
 
 -spec update(key(), histogram_api:data(), ctx()) -> ctx().
 update(HeadKey, Data, #ctx{
-    head = #document{key = HeadKey, value = HistogramRecord} = HeadDoc,
+    head = #document{key = HeadKey, value = #histogram{time_series = TimeSeriesMap} = HistogramRecord} = HeadDoc,
     active_time_series = TimeSeriesId,
     active_metrics = MetricsId
 } = Ctx) ->
-    TimeSeries = maps:get(TimeSeriesId, HistogramRecord),
-    UpdatedRecord = HistogramRecord#{TimeSeriesId => TimeSeries#{MetricsId => Data}},
-    UpdatedDoc = HeadDoc#document{value = UpdatedRecord},
-    Ctx#ctx{head = UpdatedDoc};
+    TimeSeries = maps:get(TimeSeriesId, TimeSeriesMap),
+    Metrics = maps:get(MetricsId, TimeSeries),
+    UpdatedTimeSeriesMap = TimeSeriesMap#{TimeSeriesId => TimeSeries#{MetricsId => Metrics#metrics{data = Data}}},
+    UpdatedDoc = HeadDoc#document{value = HistogramRecord#histogram{time_series = UpdatedTimeSeriesMap}},
+    Ctx#ctx{head = UpdatedDoc, head_updated = true};
 
 update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     Doc = #document{key = DataDocKey, value = Data},

@@ -16,7 +16,7 @@
 -export([init/0, get/3, apply_value/4, maybe_delete_last/2,
     split_windows/2, should_reorganize_windows/2, reorganize_windows/3]).
 %% Exported for unit tests
--export([get_value/2]).
+-export([get_value/2, get_size/1]).
 
 -type timestamp() :: time:seconds().
 -type value() :: number().
@@ -208,6 +208,7 @@ list_values(Iterator, Options) ->
 
 -spec split(windows(), non_neg_integer()) -> {windows(), windows(), timestamp()}.
 split(Windows, SplitPosition) ->
+    % TOOD - powonno byc na odwrot bo teraz wiekszosc zostaje w headzie
     WindowsList = gb_trees:to_list(Windows),
     Windows1 = lists:sublist(WindowsList, SplitPosition),
     [{SplitKey, _} | _] = Windows2 = lists:sublist(WindowsList, SplitPosition + 1, length(WindowsList) - SplitPosition),
