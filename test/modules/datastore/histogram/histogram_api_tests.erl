@@ -37,6 +37,7 @@ histogram_api_test_() ->
     }.
 
 setup() ->
+%%    ok.
     meck:new([datastore_doc_batch, datastore_doc], [passthrough, no_history]),
     meck:expect(datastore_doc_batch, init, fun() -> #{} end),
     meck:expect(datastore_doc, save, fun(_Ctx, Key, Doc, Batch) -> {{ok, Doc}, Batch#{Key => Doc}} end),
@@ -46,6 +47,7 @@ setup() ->
     meck:expect(datastore_doc, delete, fun(_Ctx, Key, Batch) -> {ok, maps:remove(Key, Batch)} end).
 
 teardown(_) ->
+%%    ok.
     meck:unload([datastore_doc_batch, datastore_doc]).
 
 %%%===================================================================
@@ -121,10 +123,10 @@ single_metrics_multiple_nodes() ->
 
     ?assertEqual(4, maps:size(Batch2)),
     DocsNums = lists:foldl(fun
-        (#document{value = {data, Windows, _, _}}, {HeadsCountAcc, TailsCountAcc}) ->
+        (#document{value = {histogram_tail_node, {data, Windows, _, _}}}, {HeadsCountAcc, TailsCountAcc}) ->
             ?assertEqual(50000, histogram_windows:get_size(Windows)),
             {HeadsCountAcc, TailsCountAcc + 1};
-        (#document{value = {histogram, TimeSeries}}, {HeadsCountAcc, TailsCountAcc}) ->
+        (#document{value = {histogram_hub, TimeSeries}}, {HeadsCountAcc, TailsCountAcc}) ->
             [Metrics] = maps:values(TimeSeries),
             [#metrics{data = {data, Windows, _, _}}] = maps:values(Metrics),
             ?assertEqual(50000, histogram_windows:get_size(Windows)),
@@ -222,10 +224,10 @@ single_time_series_multiple_nodes() ->
 
     ?assertEqual(7, maps:size(Batch2)),
     DocsNums = lists:foldl(fun
-        (#document{value = {data, Windows, _, _}}, {HeadsCountAcc, TailsCountAcc}) ->
+        (#document{value = {histogram_tail_node, {data, Windows, _, _}}}, {HeadsCountAcc, TailsCountAcc}) ->
             ?assertEqual(50000, histogram_windows:get_size(Windows)),
             {HeadsCountAcc, TailsCountAcc + 1};
-        (#document{value = {histogram, TimeSeries}}, {HeadsCountAcc, TailsCountAcc}) ->
+        (#document{value = {histogram_hub, TimeSeries}}, {HeadsCountAcc, TailsCountAcc}) ->
             [MetricsMap] = maps:values(TimeSeries),
             ?assertEqual(4, maps:size(MetricsMap)),
             lists:foreach(fun(#metrics{data = {data, Windows, _, _}}) ->
@@ -335,10 +337,10 @@ multiple_time_series_multiple_nodes() ->
 
     ?assertEqual(11, maps:size(Batch2)),
     DocsNums = lists:foldl(fun
-        (#document{value = {data, Windows, _, _}}, {HeadsCountAcc, TailsCountAcc}) ->
+        (#document{value = {histogram_tail_node, {data, Windows, _, _}}}, {HeadsCountAcc, TailsCountAcc}) ->
             ?assertEqual(50000, histogram_windows:get_size(Windows)),
             {HeadsCountAcc, TailsCountAcc + 1};
-        (#document{value = {histogram, TimeSeries}}, {HeadsCountAcc, TailsCountAcc}) ->
+        (#document{value = {histogram_hub, TimeSeries}}, {HeadsCountAcc, TailsCountAcc}) ->
             ?assertEqual(2, maps:size(TimeSeries)),
             MetricsMap0 = maps:get(<<"TS", 0>>, TimeSeries),
             MetricsMap1 = maps:get(<<"TS", 1>>, TimeSeries),
