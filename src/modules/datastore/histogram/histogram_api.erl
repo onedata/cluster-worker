@@ -18,6 +18,7 @@
 %% API
 -export([init/4, update/5, get/5]).
 
+% TODO - moze przeniesc do naglowka? gdzie najlepiej ten rekord pasuje?
 -record(data, {
     windows = histogram_windows:init() :: histogram_windows:windows(),
     prev_record :: key() | undefined,
@@ -69,7 +70,7 @@ init(Ctx, Id, ConfigMap, Batch) ->
                  InternalAcc#{MetricsId => #metrics{
                      config = Config,
                      doc_splitting_strategy = create_doc_splitting_strategy(Config),
-                     data = #data{}
+                     data = #data{} % TODO - czy init jest potrzebny po przeniesieniu?
                  }}
             end, #{}, MetricsConfigs),
             Acc#{TimeSeriesId => MetricsMap}

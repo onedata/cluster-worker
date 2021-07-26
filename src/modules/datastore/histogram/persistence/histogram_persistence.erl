@@ -13,19 +13,12 @@
 -module(histogram_persistence).
 -author("Michal Wrzeszcz").
 
--include("modules/datastore/histogram.hrl").
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
 -export([new/4, init/3, finalize/1, set_active_time_series/2, set_active_metrics/2,
     get_head_key/1, is_head/2, get/2,
     create/2, update/3, delete/2]).
-%% datastore_model callbacks
--export([get_ctx/0]).
-
--record(histogram, {
-    time_series :: histogram_api:time_series_map()
-}).
 
 -record(ctx, {
     datastore_ctx :: datastore_ctx(),
@@ -51,7 +44,7 @@
 
 -spec new(datastore_ctx(), histogram_api:id(), histogram_api:time_series_map(), batch()) -> ctx().
 new(DatastoreCtx, Id, TimeSeries, Batch) ->
-    HistogramDoc = #document{key = Id, value = #histogram{time_series = TimeSeries}},
+    HistogramDoc = #document{key = Id, value = histogram_hub:init(TimeSeries)},
     {{ok, SavedHistogramDoc}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, Id, HistogramDoc, Batch),
     #ctx{
         datastore_ctx = DatastoreCtx,
@@ -63,10 +56,10 @@ new(DatastoreCtx, Id, TimeSeries, Batch) ->
 -spec init(datastore_ctx(), histogram_api:id(), batch() | undefined) ->
     {histogram_api:time_series_map(), ctx()}.
 init(DatastoreCtx, Id, Batch) ->
-    {{ok, #document{value = #histogram{time_series = TimeSeriesMap}} = HistogramDoc}, UpdatedBatch} =
+    {{ok, #document{value = HistogramRecord} = HistogramDoc}, UpdatedBatch} =
         datastore_doc:fetch(DatastoreCtx, Id, Batch),
     {
-        TimeSeriesMap,
+        histogram_hub:get_time_series(HistogramRecord),
         #ctx{
             datastore_ctx = DatastoreCtx,
             batch = UpdatedBatch,
@@ -111,32 +104,29 @@ is_head(Key, #ctx{head = #document{key = HeadKey}}) ->
 
 -spec get(key(), ctx()) -> {histogram_api:data(), ctx()}.
 get(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
-    {{ok, #document{value = Data}}, UpdatedBatch} = datastore_doc:fetch(DatastoreCtx, Key, Batch),
-    {Data, Ctx#ctx{batch = UpdatedBatch}}.
+    {{ok, #document{value = HistogramRecord}}, UpdatedBatch} = datastore_doc:fetch(DatastoreCtx, Key, Batch),
+    {histogram_tail_node:get_data(HistogramRecord), Ctx#ctx{batch = UpdatedBatch}}.
 
 
 -spec create(histogram_api:data(), ctx()) -> {key(), ctx()}.
 create(DataToCreate, #ctx{head = #document{key = HeadKey}, datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     NewDocKey = datastore_key:new_adjacent_to(HeadKey),
-    Doc = #document{key = NewDocKey, value = DataToCreate},
+    Doc = #document{key = NewDocKey, value = histogram_tail_node:set_data(DataToCreate)},
     {{ok, _}, UpdatedBatch} = datastore_doc:save(DatastoreCtx#{generated_key => true}, NewDocKey, Doc, Batch),
     {NewDocKey, Ctx#ctx{batch = UpdatedBatch}}.
 
 
 -spec update(key(), histogram_api:data(), ctx()) -> ctx().
 update(HeadKey, Data, #ctx{
-    head = #document{key = HeadKey, value = #histogram{time_series = TimeSeriesMap} = HistogramRecord} = HeadDoc,
+    head = #document{key = HeadKey, value = HistogramRecord} = HeadDoc,
     active_time_series = TimeSeriesId,
     active_metrics = MetricsId
 } = Ctx) ->
-    TimeSeries = maps:get(TimeSeriesId, TimeSeriesMap),
-    Metrics = maps:get(MetricsId, TimeSeries),
-    UpdatedTimeSeriesMap = TimeSeriesMap#{TimeSeriesId => TimeSeries#{MetricsId => Metrics#metrics{data = Data}}},
-    UpdatedDoc = HeadDoc#document{value = HistogramRecord#histogram{time_series = UpdatedTimeSeriesMap}},
+    UpdatedDoc = HeadDoc#document{value = histogram_hub:update_data(HistogramRecord, TimeSeriesId, MetricsId, Data)},
     Ctx#ctx{head = UpdatedDoc, head_updated = true};
 
 update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
-    Doc = #document{key = DataDocKey, value = Data},
+    Doc = #document{key = DataDocKey, value = histogram_tail_node:set_data(Data)},
     {{ok, _}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, DataDocKey, Doc, Batch),
     Ctx#ctx{batch = UpdatedBatch}.
 
@@ -145,22 +135,3 @@ update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx
 delete(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     {ok, UpdatedBatch} = datastore_doc:delete(DatastoreCtx, Key, Batch),
     Ctx#ctx{batch = UpdatedBatch}.
-
-%%%===================================================================
-%%% datastore_model callbacks
-%%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns model's context.
-%% @end
-%%--------------------------------------------------------------------
--spec get_ctx() -> datastore_ctx().
-get_ctx() ->
-    #{
-        model => ?MODULE,
-        memory_driver => undefined,
-        disc_driver => undefined
-    }.
-
-% TODO - dodac struukture, enkodowanie i dekodowanie

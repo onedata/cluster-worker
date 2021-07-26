@@ -1079,11 +1079,13 @@ histogram_test(Config) ->
         end, Points),
 
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
-            maps:fold(fun(MetricsId, #histogram_config{max_windows_count = MaxWindowsCount}, InternalAcc) ->
-                InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(lists:reverse(Points), MaxWindowsCount)}
+            maps:fold(fun(MetricsId, #histogram_config{window_size = WindowSize, max_windows_count = MaxWindowsCount}, InternalAcc) ->
+                InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(lists:reverse(lists:map(fun(N) ->
+                    {N, {WindowSize, (N + N + WindowSize - 1) * WindowSize}}
+                end, lists:seq(0, PointsCount, WindowSize))), MaxWindowsCount)}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
-        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, Id, maps:keys(ExpectedMap), #{}]))
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, maps:keys(ExpectedMap), #{}]))
     end, ?TEST_MODELS).
 
 

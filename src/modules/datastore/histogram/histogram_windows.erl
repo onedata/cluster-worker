@@ -15,6 +15,8 @@
 %% API
 -export([init/0, get/3, apply_value/4, maybe_delete_last/2,
     split_windows/2, should_reorganize_windows/2, reorganize_windows/3]).
+%% Encoding/decoding  API
+-export([encode/1, decode/1]).
 %% Exported for unit tests
 -export([get_value/2, get_size/1]).
 
@@ -101,6 +103,27 @@ reorganize_windows(WindowsInPrevRecord, WindowsInCurrentRecord, MaxWindowsInPrev
                         {update_current_record, TimestampToUpdate, init_windows_set()}]
             end
     end.
+
+
+%%%===================================================================
+%%% Encoding/decoding  API
+%%%===================================================================
+
+-spec encode(windows()) -> binary().
+encode(Windows) ->
+    jiffy:encode(lists:map(fun
+        ({Timestamp, {ValuesCount, ValuesSum}}) -> [Timestamp, ValuesCount, ValuesSum];
+        ({Timestamp, Value}) -> [Timestamp, Value]
+    end, to_list(Windows))).
+
+
+-spec decode(binary()) -> windows().
+decode(Term) ->
+    InputList = jiffy:decode(Term),
+    from_list(lists:map(fun
+        ([Timestamp, ValuesCount, ValuesSum]) -> {Timestamp, {ValuesCount, ValuesSum}};
+        ([Timestamp, Value]) -> {Timestamp, Value}
+    end, InputList)).
 
 
 %%=====================================================================
@@ -218,3 +241,13 @@ split(Windows, SplitPosition) ->
 -spec merge(windows(), windows()) -> windows().
 merge(Windows1, Windows2) ->
     gb_trees:from_orddict(gb_trees:to_list(Windows1) ++ gb_trees:to_list(Windows2)).
+
+
+-spec to_list(windows()) -> [window()].
+to_list(Windows) ->
+    gb_trees:to_list(Windows).
+
+
+-spec from_list([window()]) -> windows().
+from_list(WindowsList) ->
+    gb_trees:from_orddict(WindowsList).
