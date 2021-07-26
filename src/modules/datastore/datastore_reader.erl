@@ -16,7 +16,7 @@
 
 -export([get/3, exists/3]).
 -export([get_links/5, get_links_trees/3]).
--export([infinite_log_operation/4]).
+-export([histogram_get/3, infinite_log_operation/4]).
 
 -type tree_id() :: datastore_links:tree_id().
 -type link() :: datastore_links:link().
@@ -99,6 +99,25 @@ get_links_trees(FetchNode, Ctx, Key) ->
     catch
         throw:{fetch_error, not_found} ->
             datastore_router:execute_on_node(FetchNode, datastore_writer, fetch_links_trees, [Ctx, Key])
+    end.
+
+
+-spec histogram_get(node(), datastore_doc:ctx(), list()) ->
+    ok | {ok, [histogram_windows:window()] | histogram_api:metrics_values_map()} | {error, term()}.
+histogram_get(FetchNode, Ctx, [Id, RequestedMetrics, Options] = Args) ->
+    Fallback = fun() ->
+        datastore_router:execute_on_node(FetchNode, datastore_writer, histogram_operation, [Ctx, get, Args])
+    end,
+    try
+        case histogram_api:get(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined) of
+            {{ok, Result}, _} ->
+                {ok, Result};
+            {{error, Reason}, _} ->
+                {error, Reason}
+        end
+    catch
+        throw:{fetch_error, not_found} ->
+            Fallback()
     end.
 
 

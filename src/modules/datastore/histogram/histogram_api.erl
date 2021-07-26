@@ -45,11 +45,11 @@
 -type doc_splitting_strategy() :: #doc_splitting_strategy{}.
 -type data() :: #data{}.
 
--export_type([id/0, time_series_map/0, time_series_id/0, metrics_id/0,
-    data/0, config/0, doc_splitting_strategy/0, legend/0]).
-
 -type requested_metrics() :: {time_series_id() | [time_series_id()], metrics_id() | [metrics_id()]}.
 -type metrics_values_map() :: #{{time_series_id(), metrics_id()} => [histogram_windows:window()]}.
+
+-export_type([id/0, time_series_map/0, time_series_config/0, time_series_id/0, metrics_id/0,
+    data/0, config/0, doc_splitting_strategy/0, legend/0, requested_metrics/0, metrics_values_map/0]).
 
 -type key() :: datastore:key().
 -type ctx() :: datastore:ctx().
@@ -106,15 +106,15 @@ update(Ctx, Id, NewTimestamp, NewValue, Batch) ->
 %% Otherwise, map containing list of points for each requested metrics is returned.
 %% @end
 %%--------------------------------------------------------------------
--spec get(ctx(), id(), requested_metrics() | [requested_metrics()], histogram_windows:options(), batch()) ->
-    {{ok, [histogram_windows:window()] | metrics_values_map()} | {error, term()}, batch()}.
+-spec get(ctx(), id(), requested_metrics() | [requested_metrics()], histogram_windows:options(), batch() | undefined) ->
+    {{ok, [histogram_windows:window()] | metrics_values_map()} | {error, term()}, batch() | undefined}.
 get(Ctx, Id, RequestedMetrics, Options, Batch) ->
     try
         {TimeSeriesMap, PersistenceCtx} = histogram_persistence:init(Ctx, Id, Batch),
         {Ans, FinalPersistenceCtx} = get_time_series_values(TimeSeriesMap, RequestedMetrics, Options, PersistenceCtx),
         {{ok, Ans}, histogram_persistence:finalize(FinalPersistenceCtx)}
     catch
-        Error:Reason ->
+        Error:Reason when Reason =/= {fetch_error, not_found} ->
             ?error_stacktrace("Histogram ~p get error: ~p:~p~nRequested metrics: ~p~nOptions: ~p",
                 [Id, Error, Reason, RequestedMetrics, Options]),
             {{error, historgam_get_failed}, Batch}

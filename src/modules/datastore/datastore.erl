@@ -20,7 +20,7 @@
 -export([delete/3, delete_all/2]).
 -export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, get_links_trees/2]).
--export([infinite_log_operation/4]).
+-export([histogram_operation/4, infinite_log_operation/4]).
 
 -type ctx() :: #{model := datastore_model:model(),
                  mutator => datastore_doc:mutator(),
@@ -307,6 +307,14 @@ fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
 get_links_trees(Ctx, Key) ->
     datastore_hooks:wrap(Ctx, Key, get_links_trees, [], fun
         (Function, Args) -> datastore_router:route(Function, Args)
+    end).
+
+
+-spec histogram_operation(ctx(), key(), atom(), [term()]) ->
+    ok | {ok, [histogram_windows:window()] | histogram_api:metrics_values_map()} | {error, term()}.
+histogram_operation(Ctx, Key, Function, Args) ->
+    datastore_hooks:wrap(Ctx, Key, Function, Args, fun
+        (Function, Args) -> datastore_router:route_histogram_operation(Function, Args)
     end).
 
 

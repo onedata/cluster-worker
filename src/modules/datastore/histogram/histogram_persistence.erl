@@ -29,7 +29,7 @@
 
 -record(ctx, {
     datastore_ctx :: datastore_ctx(),
-    batch :: batch(),
+    batch :: batch() | undefined,
     head :: doc(),
     head_updated = false :: boolean(),
     % Fields used to determine metrics to update
@@ -60,7 +60,8 @@ new(DatastoreCtx, Id, TimeSeries, Batch) ->
     }.
 
 
--spec init(datastore_ctx(), histogram_api:id(), batch()) -> {histogram_api:time_series_map(), ctx()}.
+-spec init(datastore_ctx(), histogram_api:id(), batch() | undefined) ->
+    {histogram_api:time_series_map(), ctx()}.
 init(DatastoreCtx, Id, Batch) ->
     {{ok, #document{value = #histogram{time_series = TimeSeriesMap}} = HistogramDoc}, UpdatedBatch} =
         datastore_doc:fetch(DatastoreCtx, Id, Batch),
@@ -74,7 +75,7 @@ init(DatastoreCtx, Id, Batch) ->
     }.
 
 
--spec finalize(ctx()) ->  batch().
+-spec finalize(ctx()) ->  batch() | undefined.
 finalize(#ctx{head_updated = false, batch = Batch}) ->
     Batch;
 

@@ -26,7 +26,7 @@
 -export([create/3, save/3, update/3, update/4, create_backup/2, fetch/2, delete/3]).
 -export([add_links/4, check_and_add_links/5, fetch_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, fetch_links_trees/2]).
--export([infinite_log_operation/3]).
+-export([histogram_operation/3, infinite_log_operation/3]).
 -export([generic_call/2, call_if_alive/2]).
 %% For ct tests
 -export([call/4, call_async/5, wait/2]).
@@ -227,10 +227,16 @@ fetch_links_trees(Ctx, Key) ->
     call(Ctx, get_key(Ctx, Key, links), fetch_links_trees, [Key]).
 
 
+-spec histogram_operation(ctx(), atom(), list()) ->
+    ok | {ok, [histogram_windows:window()] | histogram_api:metrics_values_map()} | {error, term()}.
+histogram_operation(Ctx, Function, [Key | ArgsTail]) ->
+    call(Ctx, get_key(Ctx, Key, histogram), histogram_api, Function, [Key | ArgsTail]).
+
+
 -spec infinite_log_operation(ctx(), atom(), list()) ->
     ok | {ok, infinite_log_browser:listing_result()} | {error, term()}.
 infinite_log_operation(Ctx, Function, [Key | ArgsTail]) ->
-    call(Ctx, get_key(Ctx, Key, links), infinite_log, Function, [Key | ArgsTail]).
+    call(Ctx, get_key(Ctx, Key, infinite_log), infinite_log, Function, [Key | ArgsTail]).
 
 
 %%--------------------------------------------------------------------
