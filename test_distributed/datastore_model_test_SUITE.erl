@@ -15,6 +15,7 @@
 -include("datastore_test_utils.hrl").
 -include("global_definitions.hrl").
 -include("datastore_performance_tests_base.hrl").
+-include("modules/datastore/histogram.hrl").
 -include_lib("ctool/include/aai/aai.hrl").
 
 %% export for ct
@@ -73,7 +74,8 @@
     infinite_log_operations_test/1,
     infinite_log_operations_direct_access_test/1,
     infinite_log_set_ttl_test/1,
-    infinite_log_age_pruning_test/1
+    infinite_log_age_pruning_test/1,
+    histogram_test/1
 ]).
 
 % for rpc
@@ -127,7 +129,8 @@ all() ->
         infinite_log_operations_test,
         infinite_log_operations_direct_access_test,
         infinite_log_set_ttl_test,
-        infinite_log_age_pruning_test
+        infinite_log_age_pruning_test,
+        histogram_test
     ], [
         links_performance,
         create_get_performance,
@@ -1053,6 +1056,35 @@ infinite_log_age_pruning_test(Config) ->
         
         ok = rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
     end, ?TEST_PERSISTENT_MODELS).
+
+
+histogram_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        ct:print("aaaa ~p", [Model]),
+        Id = datastore_key:new(),
+        ConfigMap = lists:foldl(fun(N, Acc) ->
+            TimeSeries = <<"TS", (N rem 2)>>,
+            MetricsMap = maps:get(TimeSeries, Acc, #{}),
+            MetricsConfig = #histogram_config{window_size = N, max_windows_count = 600 div N + 10, apply_function = sum},
+            Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
+        end, #{}, lists:seq(1, 5)),
+        ?assertEqual(ok, rpc:call(Worker, Model, histogram_init, [Id, ConfigMap])),
+
+        PointsCount = 1199,
+        Points = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, PointsCount)),
+
+        lists:foreach(fun({NewTimestamp, NewValue}) ->
+            ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, NewTimestamp, NewValue]))
+        end, Points),
+
+        ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
+            maps:fold(fun(MetricsId, #histogram_config{max_windows_count = MaxWindowsCount}, InternalAcc) ->
+                InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(lists:reverse(Points), MaxWindowsCount)}
+            end, Acc, MetricsConfigs)
+        end, #{}, ConfigMap),
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, Id, maps:keys(ExpectedMap), #{}]))
+    end, ?TEST_MODELS).
 
 
 %%%===================================================================

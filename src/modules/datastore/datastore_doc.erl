@@ -79,6 +79,7 @@ save(Ctx = #{generated_key := true}, Key, Doc, Batch) ->
     Doc2 = fill(Ctx, Doc),
     datastore_doc_batch:create(Ctx, Key, Doc2, Batch);
 save(Ctx, Key, Doc, Batch) ->
+%%    {{ok, Doc}, Batch#{Key => Doc}}.
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
         {{ok, PrevDoc}, Batch2} ->
             case resolve_conflict(Ctx, Doc, PrevDoc) of
@@ -156,6 +157,7 @@ update(Ctx, Key, Diff, Default, Batch) ->
 -spec fetch(ctx(), key(), undefined | batch()) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
 fetch(Ctx, Key, Batch) ->
+%%    {{ok, maps:get(Key, Batch, {error, not_found})}, Batch}.
     fetch(Ctx, Key, Batch, false).
 
 %%--------------------------------------------------------------------
@@ -197,6 +199,7 @@ fetch_deleted(Ctx, Key, Batch) ->
 %%--------------------------------------------------------------------
 -spec delete(ctx(), key(), batch()) -> {ok | {error, term()}, batch()}.
 delete(Ctx, Key, Batch) ->
+%%    {ok, maps:remove(Key, Batch)}.
     delete(Ctx, Key, fun(_) -> true end, Batch).
 
 %%--------------------------------------------------------------------
