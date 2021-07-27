@@ -1372,8 +1372,8 @@ infinite_log_append_performance_test(Config) ->
         {parameters, [
             [{name, repeats}, {value, 3}, {description, "Repeats of each append test."}],
             [{name, proc_count_list}, {value, [1, 100, 1000]}, {description, "Processes to be used."}],
-            [{name, log_size}, {value, 50}, {description, "Number of bytes for single log entry."}],
-            [{name, appends_count}, {value, 100000}, {description, "Total logs append count."}],
+            [{name, log_size}, {value, 20}, {description, "Number of bytes for single log entry."}],
+            [{name, appends_count}, {value, 50000}, {description, "Total logs append count."}],
             [{name, max_entries_per_node_list},
                 {value, [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]},
                 {description, "Max entries per node values to be tested."}],
@@ -1473,8 +1473,8 @@ infinite_log_list_performance_test(Config) ->
             [{name, listing_limit_list}, {value, [1, 100, 1000]}, {description, "Listing limits to be tested."}],
             [{name, proc_count_list}, {value, [1, 100, 10000]}, {description, "Processes to be used."}],
             [{name, listings_count}, {value, 10000}, {description, "Total listings count to be performed."}],
-            [{name, appends_count}, {value, 100000}, {description, "Total log appends count"}],
-            [{name, log_size}, {value, 50}, {description, "Size of each log"}],
+            [{name, appends_count}, {value, 50000}, {description, "Total log appends count"}],
+            [{name, log_size}, {value, 20}, {description, "Size of each log"}],
             [{name, size_pruning_threshold}, {value, undefined}, {description, "Default size pruning threshold."}],
             [{name, age_pruning_threshold}, {value, undefined}, {description, "Default age pruning threshold."}],
             [{name, max_entries_per_node_list}, {value, [100, 500, 1000, 1500, 2000]}, {description, "Max entries per node to be tested."}]
@@ -1664,7 +1664,7 @@ init_per_testcase(Case, Config) when Case =:= infinite_log_append_performance_te
     application:load(cluster_worker),
     application:set_env(cluster_worker, tp_subtrees_number, 10),
     test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 10),
-    clock_freezer_mock:setup_locally([?MODULE]),
+    clock_freezer_mock:setup_on_nodes(Worker, [global_clock]),
     Config;
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -1702,9 +1702,10 @@ end_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_lis
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{}),
     test_utils:mock_unload(Workers, [datastore_model, datastore]);
-end_per_testcase(Case, _Config) when Case =:= infinite_log_append_performance_test orelse
+end_per_testcase(Case, Config) when Case =:= infinite_log_append_performance_test orelse
     Case =:= infinite_log_list_performance_test ->
-    clock_freezer_mock:teardown_locally();
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    clock_freezer_mock:teardown_on_nodes(Worker);
 end_per_testcase(_Case, _Config) ->
     ok.
 
