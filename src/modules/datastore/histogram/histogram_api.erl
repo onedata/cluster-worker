@@ -13,6 +13,7 @@
 -author("Michal Wrzeszcz").
 
 -include("modules/datastore/histogram.hrl").
+-include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -56,8 +57,8 @@
 -type ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
 
-% TODO - zmienna zeby mozna bylo zmniejszyc w eunit
--define(MAX_VALUES_IN_DOC, 50000).
+% Warning - do not use this env in app.config. Use of env limited to tests.
+-define(MAX_VALUES_IN_DOC, application:get_env(?CLUSTER_WORKER_APP_NAME, histogram_max_doc_size, 50000)).
 
 %%%===================================================================
 %%% API
