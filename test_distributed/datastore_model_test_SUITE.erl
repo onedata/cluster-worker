@@ -75,7 +75,9 @@
     infinite_log_operations_direct_access_test/1,
     infinite_log_set_ttl_test/1,
     infinite_log_age_pruning_test/1,
-    histogram_test/1
+    histogram_test/1,
+    multinode_histogram_test/1,
+    histogram_document_fetch_test/1
 ]).
 
 % for rpc
@@ -130,7 +132,9 @@ all() ->
         infinite_log_operations_direct_access_test,
         infinite_log_set_ttl_test,
         infinite_log_age_pruning_test,
-        histogram_test
+        histogram_test,
+        multinode_histogram_test,
+        histogram_document_fetch_test
     ], [
         links_performance,
         create_get_performance,
@@ -1061,7 +1065,6 @@ infinite_log_age_pruning_test(Config) ->
 histogram_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
-        ct:print("aaaa ~p", [Model]),
         Id = datastore_key:new(),
         ConfigMap = lists:foldl(fun(N, Acc) ->
             TimeSeries = <<"TS", (N rem 2)>>,
@@ -1087,6 +1090,67 @@ histogram_test(Config) ->
         end, #{}, ConfigMap),
         ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, maps:keys(ExpectedMap), #{}]))
     end, ?TEST_MODELS).
+
+
+multinode_histogram_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        Id = datastore_key:new(),
+        ConfigMap = lists:foldl(fun(N, Acc) ->
+            TimeSeries = <<"TS", (N rem 2)>>,
+            MetricsMap = maps:get(TimeSeries, Acc, #{}),
+            MetricsConfig = #histogram_config{window_size = 1, max_windows_count = 50000 * N, apply_function = last},
+            Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
+        end, #{}, lists:seq(1, 5)),
+        ?assertEqual(ok, rpc:call(Worker, Model, histogram_init, [Id, ConfigMap])),
+
+        PointsCount = 300000,
+        Points = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, PointsCount)),
+
+        ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, Points])),
+
+        ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
+            maps:fold(fun(MetricsId, #histogram_config{max_windows_count = MaxWindowsCount}, InternalAcc) ->
+                InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(lists:reverse(Points), MaxWindowsCount)}
+            end, Acc, MetricsConfigs)
+        end, #{}, ConfigMap),
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, maps:keys(ExpectedMap), #{}]))
+    end, ?TEST_MODELS).
+
+
+histogram_document_fetch_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        InitialKeys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)),
+        Id = datastore_key:new(),
+        ConfigMap = lists:foldl(fun(N, Acc) ->
+            TimeSeries = <<"TS", (N rem 2)>>,
+            MetricsMap = maps:get(TimeSeries, Acc, #{}),
+            MetricsConfig = #histogram_config{window_size = 1, max_windows_count = 50000 * N, apply_function = last},
+            Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
+        end, #{}, lists:seq(1, 3)),
+        ?assertEqual(ok, rpc:call(Worker, Model, histogram_init, [Id, ConfigMap])),
+
+        PointsCount = 300000,
+        Points = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, PointsCount)),
+        ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
+            maps:fold(fun(MetricsId, #histogram_config{max_windows_count = MaxWindowsCount}, InternalAcc) ->
+                InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(lists:reverse(Points), MaxWindowsCount)}
+            end, Acc, MetricsConfigs)
+        end, #{}, ConfigMap),
+
+        ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, Points])),
+        Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
+
+        lists:foreach(fun(Key) ->
+            assert_key_on_disc(Worker, Model, Key, false),
+            MemCtx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
+            ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
+            assert_key_not_in_memory(Worker, Model, Key),
+
+            ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, maps:keys(ExpectedMap), #{}]))
+        end, Keys)
+    end, ?TEST_CACHED_MODELS).
 
 
 %%%===================================================================
@@ -1536,11 +1600,14 @@ assert_in_memory(Worker, Model, Key, Deleted) ->
     end.
 
 assert_not_in_memory(Worker, Model, Key) ->
+    assert_not_in_memory(Worker, Model, ?UNIQUE_KEY(Model, Key)).
+
+assert_key_not_in_memory(Worker, Model, Key) ->
     case ?MEM_DRV(Model) of
         undefined ->
             ok;
         Driver ->
-            Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, Key),
+            Ctx = datastore_multiplier:extend_name(Key,
                 ?MEM_CTX(Model)),
             ?assertMatch({error, not_found},
                 rpc:call(Worker, Driver, get, [
@@ -1584,6 +1651,23 @@ assert_key_not_on_disc(Worker, Model, Key) ->
                 ]), ?ATTEMPTS
             )
     end.
+
+get_all_keys(Worker, ets_driver, MemoryDriverCtx) ->
+    lists:foldl(fun(#{table := Table}, AccOut) ->
+        AccOut ++ lists:filtermap(fun
+            ({_Key, #document{deleted = true}}) -> false;
+            ({Key, #document{deleted = false}}) -> {true, Key}
+        end, rpc:call(Worker, ets, tab2list, [Table]))
+    end, [], rpc:call(Worker, datastore_multiplier, get_names, [MemoryDriverCtx]));
+get_all_keys(Worker, mnesia_driver, MemoryDriverCtx) ->
+    lists:foldl(fun(#{table := Table}, AccOut) ->
+        AccOut ++ rpc:call(Worker, mnesia, async_dirty, [fun() ->
+            mnesia:foldl(fun
+                ({entry, _Key, #document{deleted = true}}, Acc) -> Acc;
+                ({entry, Key, #document{deleted = false}}, Acc) -> [Key | Acc]
+            end, [], Table)
+        end])
+    end, [], rpc:call(Worker, datastore_multiplier, get_names, [MemoryDriverCtx])).
 
 fold_links_token(Key, Worker, Model, Opts) ->
     {{ok, Links}, Token} = ?assertMatch({{ok, _}, _}, rpc:call(Worker, Model, fold_links,

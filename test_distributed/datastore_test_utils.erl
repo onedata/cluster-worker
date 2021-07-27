@@ -166,6 +166,10 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_histogram:update(Ctx, Id, NewTimestamp, NewValue)
         end},
+        {histogram_update, fun(Id, Points) ->
+            Ctx = get_ctx(Model),
+            datastore_histogram:update(Ctx, Id, Points)
+        end},
         {histogram_get, fun(Id, RequestedMetrics, Options) ->
             Ctx = get_ctx(Model),
             datastore_histogram:get(Ctx, Id, RequestedMetrics, Options)

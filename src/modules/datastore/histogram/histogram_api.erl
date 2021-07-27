@@ -16,7 +16,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([init/4, update/5, get/5]).
+-export([init/4, update/5, update/4, get/5]).
 
 % TODO - moze przeniesc do naglowka? gdzie najlepiej ten rekord pasuje?
 -record(data, {
@@ -56,6 +56,7 @@
 -type ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
 
+% TODO - zmienna zeby mozna bylo zmniejszyc w eunit
 -define(MAX_VALUES_IN_DOC, 50000).
 
 %%%===================================================================
@@ -98,6 +99,17 @@ update(Ctx, Id, NewTimestamp, NewValue, Batch) ->
             ?error_stacktrace("Histogram ~p update error: ~p:~p~nFailed to update point {~p, ~p}",
                 [Id, Error, Reason, NewTimestamp, NewValue]),
             {{error, historgam_update_failed}, Batch}
+    end.
+
+
+-spec update(ctx(), id(), [{histogram_windows:timestamp(), histogram_windows:value()}], batch()) ->
+    {ok | {error, term()}, batch()}.
+update(_Ctx, _Id, [], Batch) ->
+    {ok, Batch};
+update(Ctx, Id, [{NewTimestamp, NewValue} | Points], Batch) ->
+    case update(Ctx, Id, NewTimestamp, NewValue, Batch) of
+        {ok, UpdatedBatch} -> update(Ctx, Id, Points, UpdatedBatch);
+        Other -> Other
     end.
 
 
