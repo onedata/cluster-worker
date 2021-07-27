@@ -40,7 +40,7 @@ init(#{method := <<"GET">>} = Req, State) ->
         {ok, {AppStatus, NodeStatuses}} ->
             Reply = format_reply(AppStatus, NodeStatuses),
             cowboy_req:reply(200,
-                #{?HDR_CACHE_CONTROL => <<"application/xml">>}, Reply, Req
+                #{?HDR_CONTENT_TYPE => <<"application/xml">>}, Reply, Req
             )
     end,
     {ok, NewReq, State};
