@@ -70,14 +70,14 @@
 inf_log_test_() ->
     {foreach,
         fun() ->
-            clock_freezer_mock:setup_locally([
+            clock_freezer_mock:setup_for_eunit([
                 infinite_log_sentinel, node_cache, couchbase_driver, ?MODULE
             ]),
             node_cache:init(),
             mock_datastore_doc()
         end,
         fun(_) ->
-            clock_freezer_mock:teardown_locally(),
+            clock_freezer_mock:teardown_for_eunit(),
             node_cache:destroy(),
             meck:unload(datastore_doc)
         end,
