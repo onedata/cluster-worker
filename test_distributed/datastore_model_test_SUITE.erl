@@ -1393,7 +1393,7 @@ infinite_log_append_performance_test(Config) ->
             {name, age_pruning_on},
             {parameters, [
                 [{name, size_pruning}, {value, undefined}],
-                [{name, age_pruning}, {value, 500}]
+                [{name, age_pruning}, {value, 2}]
             ]},
             {description, "Append with age pruning."}
         ]},
@@ -1409,7 +1409,7 @@ infinite_log_append_performance_test(Config) ->
             {name, size_and_age_pruning_on},
             {parameters, [
                 [{name, size_pruning}, {value, 2000}],
-                [{name, age_pruning}, {value, 500}]
+                [{name, age_pruning}, {value, 2}]
             ]},
             {description, "Append with size and age pruning."}
         ]}
@@ -1465,14 +1465,14 @@ infinite_log_list_performance_test(Config) ->
         {success_rate, ?SUCCESS_RATE},
         {description, "List from infinite-log testcase"},
         {parameters, [
-            [{name, repeats}, {value, 5}, {description, "Repeats of each listing test."}],
+            [{name, repeats}, {value, 3}, {description, "Repeats of each listing test."}],
             [{name, models}, {value, [ets_only_model, ets_cached_model]}, {description, "Model used for tests"}],
             [{name, listing_direction_list}, {value, [backward_from_newest, forward_from_oldest]}, {description, "Listing directions to be tested."}],
             [{name, listing_start_from_list}, {value, [undefined, #{index => 3000}, #{timestamp => 100}]}, {description, "Starting from options to be tested."}],
             [{name, listing_offset_list}, {value, [0, 5000]}, {description, "Listing offsets to be tested."}],
             [{name, listing_limit_list}, {value, [1, 100, 1000]}, {description, "Listing limits to be tested."}],
             [{name, proc_count_list}, {value, [1, 100, 10000]}, {description, "Processes to be used."}],
-            [{name, listings_count}, {value, 10000}, {description, "Total listings count to be performed."}],
+            [{name, listings_count}, {value, 50000}, {description, "Total listings count to be performed."}],
             [{name, appends_count}, {value, 50000}, {description, "Total log appends count"}],
             [{name, log_size}, {value, 20}, {description, "Size of each log"}],
             [{name, size_pruning_threshold}, {value, undefined}, {description, "Default size pruning threshold."}],
@@ -1489,7 +1489,7 @@ infinite_log_list_performance_test(Config) ->
         {config, [
             {name, age_pruning_on},
             {parameters, [
-                [{name, age_pruning_threshold}, {value, 1000}]
+                [{name, age_pruning_threshold}, {value, 2}]
             ]},
             {description, "Age pruning on"}
         ]},
@@ -1497,7 +1497,7 @@ infinite_log_list_performance_test(Config) ->
             {name, both_pruning_on},
             {parameters, [
                 [{name, size_pruning_threshold}, {value, 10000}],
-                [{name, age_pruning_threshold}, {value, 1000}]
+                [{name, age_pruning_threshold}, {value, 2}]
             ]},
             {description, "Both pruning on"}
         ]}
@@ -1658,14 +1658,6 @@ init_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_li
     ok = test_utils:mock_new(Workers, datastore_model),
     ok = test_utils:mock_new(Workers, datastore),
     init_per_testcase(?DEFAULT_CASE(Case), Config);
-init_per_testcase(Case, Config) when Case =:= infinite_log_append_performance_test orelse
-    Case =:= infinite_log_list_performance_test ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    application:load(cluster_worker),
-    application:set_env(cluster_worker, tp_subtrees_number, 10),
-    test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 10),
-    clock_freezer_mock:setup_on_nodes(Worker, [global_clock]),
-    Config;
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     application:load(cluster_worker),
@@ -1702,10 +1694,6 @@ end_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_lis
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{}),
     test_utils:mock_unload(Workers, [datastore_model, datastore]);
-end_per_testcase(Case, Config) when Case =:= infinite_log_append_performance_test orelse
-    Case =:= infinite_log_list_performance_test ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    clock_freezer_mock:teardown_on_nodes(Worker);
 end_per_testcase(_Case, _Config) ->
     ok.
 
@@ -1951,7 +1939,6 @@ perform_infinite_log_appends(Worker, Model, LogId, LogSize, ProcCount, 1) ->
 perform_infinite_log_appends(Worker, Model, LogSize, AppendSize, ProcCount, AppendsPerProcess) ->
     lists:foldl(fun(_, TimesListAcc) ->
         Times = perform_infinite_log_appends(Worker, Model, LogSize, AppendSize, ProcCount, 1),
-        clock_freezer_mock:simulate_seconds_passing(1),
         lists:zipwith(fun(Time, TimeAcc) -> Time + TimeAcc end, Times, TimesListAcc)
     end, lists:duplicate(ProcCount, 0), lists:seq(1, AppendsPerProcess)).
 
