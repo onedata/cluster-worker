@@ -64,6 +64,8 @@ single_doc_splitting_strategies_create() ->
     Batch = datastore_doc_batch:init(),
     ConfigMap = #{<<"TS1">> => #{<<"M1">> => #histogram_config{max_windows_count = 0}}},
     ?assertEqual({error, empty_metrics}, histogram_api:init(Ctx, Id, ConfigMap, Batch)),
+    ConfigMap2 = #{<<"TS1">> => #{<<"M1">> => #histogram_config{max_windows_count = 10, window_size = 0}}},
+    ?assertEqual({error, wrong_window_size}, histogram_api:init(Ctx, Id, ConfigMap2, Batch)),
 
     single_doc_splitting_strategies_create_testcase(10, 10, 0, 1),
     single_doc_splitting_strategies_create_testcase(2000, 2000, 0, 1),
@@ -173,7 +175,9 @@ single_metrics_single_node() ->
     Batch6 = update(Ctx, Id, 53, 5, Batch5),
     ExpectedGetAns5 = [{100, {1, 5}}] ++ lists:sublist(ExpectedGetAns, 1) ++
         [{50, {1, 5}}] ++ lists:sublist(ExpectedGetAns, 2, 2),
-    ?assertMatch({{ok, ExpectedGetAns5}, _}, histogram_api:get(Ctx, Id, {TimeSeriesId, MetricsId}, #{}, Batch6)).
+    ?assertMatch({{ok, ExpectedGetAns5}, _}, histogram_api:get(Ctx, Id, {TimeSeriesId, MetricsId}, #{}, Batch6)),
+
+    ?assertMatch({{error, historgam_get_failed}, _}, histogram_api:get(Ctx, Id, very_bad_arg, #{}, Batch6)).
 
 
 single_metrics_multiple_nodes() ->
@@ -385,9 +389,9 @@ multiple_time_series_single_node() ->
         end, MetricsConfigs)
     end, ConfigMap),
 
-    AllMetricsIds = lists:foldl(fun({TimeSeriesId, Metrics}, Acc) ->
+    lists:foreach(fun({TimeSeriesId, Metrics}) ->
         TimeSeriesExpectedMap = maps:get(TimeSeriesId, ExpectedMap),
-        Acc ++ lists:foldl(fun({MetricsId, Expected}, GetMetricsAcc) ->
+        lists:foldl(fun({MetricsId, Expected}, GetMetricsAcc) ->
             ?assertMatch({{ok, Expected}, _}, histogram_api:get(Ctx, Id, {TimeSeriesId, MetricsId}, #{}, Batch2)),
 
             UpdatedGetMetrics = [MetricsId | GetMetricsAcc],
@@ -404,21 +408,30 @@ multiple_time_series_single_node() ->
 
             UpdatedGetMetrics
         end, [], maps:to_list(Metrics))
-    end, [], maps:to_list(ExpectedMap)),
+    end, maps:to_list(ExpectedMap)),
 
     GetAllArg = maps:to_list(maps:map(fun(_TimeSeriesId, MetricsConfigs) -> maps:keys(MetricsConfigs) end, ConfigMap)),
     GetAllArg2 = lists:flatten(lists:map(fun({TimeSeriesId, MetricsIds}) ->
         lists:map(fun(MetricsId) -> {TimeSeriesId, MetricsId} end, MetricsIds)
     end, GetAllArg)),
-    GetAllArgExpected = maps:from_list(lists:map(fun({TimeSeriesId, MetricsId} = Key) ->
+    GetAllExpected = maps:from_list(lists:map(fun({TimeSeriesId, MetricsId} = Key) ->
         {Key, maps:get(MetricsId, maps:get(TimeSeriesId, ExpectedMap))}
     end, GetAllArg2)),
-    ?assertMatch({{ok, GetAllArgExpected}, _}, histogram_api:get(Ctx, Id, GetAllArg, #{}, Batch2)),
-    ?assertMatch({{ok, GetAllArgExpected}, _}, histogram_api:get(Ctx, Id, GetAllArg2, #{}, Batch2)),
+    ?assertMatch({{ok, GetAllExpected}, _}, histogram_api:get(Ctx, Id, GetAllArg, #{}, Batch2)),
+    ?assertMatch({{ok, GetAllExpected}, _}, histogram_api:get(Ctx, Id, GetAllArg2, #{}, Batch2)),
 
-    % TODO - sprawdzic na bazie AllMetricsIds gdzie niie wszystkie sie powtarzaja, dodac niiestniejaca time series
-
-    ok.
+    MetricsWithNotExisting = [<<"M", 0>>, <<"M", 1>>, <<"M", 2>>, <<"M", 3>>],
+    GetWithNotExistingArg = [{[<<"TS", 0>>, <<"TS", 1>>, <<"TS", 2>>], MetricsWithNotExisting}],
+    NotExistingTimeSeriesExpectedMap = maps:from_list(lists:map(fun(MId) ->
+        {{<<"TS", 2>>, MId}, undefined}
+    end, MetricsWithNotExisting)),
+    GetAllWithNotExistingExpected = maps:merge(GetAllExpected#{
+        {<<"TS", 0>>, <<"M", 0>>} => undefined,
+        {<<"TS", 0>>, <<"M", 3>>} => undefined,
+        {<<"TS", 1>>, <<"M", 3>>} => undefined
+    }, NotExistingTimeSeriesExpectedMap),
+    ?assertMatch({{ok, GetAllWithNotExistingExpected}, _},
+        histogram_api:get(Ctx, Id, GetWithNotExistingArg, #{}, Batch2)).
 
 
 multiple_time_series_multiple_nodes() ->
@@ -467,14 +480,12 @@ multiple_time_series_multiple_nodes() ->
     GetAllArg2 = lists:flatten(lists:map(fun({TimeSeriesId, MetricsIds}) ->
         lists:map(fun(MetricsId) -> {TimeSeriesId, MetricsId} end, MetricsIds)
     end, GetAllArg)),
-    GetAllArgExpected = maps:from_list(lists:map(fun({TimeSeriesId, MetricsId} = Key) ->
+    GetAllExpected = maps:from_list(lists:map(fun({TimeSeriesId, MetricsId} = Key) ->
         {Key, maps:get(MetricsId, maps:get(TimeSeriesId, ExpectedMap))}
     end, GetAllArg2)),
-    ?assertMatch({{ok, GetAllArgExpected}, _}, histogram_api:get(Ctx, Id, GetAllArg, #{}, Batch2)),
-    ?assertMatch({{ok, GetAllArgExpected}, _}, histogram_api:get(Ctx, Id, GetAllArg2, #{}, Batch2)).
+    ?assertMatch({{ok, GetAllExpected}, _}, histogram_api:get(Ctx, Id, GetAllArg, #{}, Batch2)),
+    ?assertMatch({{ok, GetAllExpected}, _}, histogram_api:get(Ctx, Id, GetAllArg2, #{}, Batch2)).
 
-not_existing_time_series_or_metrics_get() ->
-    ok.
 
 %%%===================================================================
 %%% Helper functions

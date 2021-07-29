@@ -92,6 +92,8 @@ init(Ctx, Id, ConfigMap, Batch) ->
             {error, to_many_metrics};
         _:{error, empty_metrics} ->
             {error, empty_metrics};
+        _:{error, wrong_window_size} ->
+            {error, wrong_window_size};
         Error:Reason ->
             ?error_stacktrace("Histogram ~p init error: ~p:~p~nConfig map: ~p",
                 [Id, Error, Reason, ConfigMap]),
@@ -375,6 +377,8 @@ create_doc_splitting_strategies(ConfigMap) ->
         maps:fold(fun
             (_, #histogram_config{max_windows_count = WindowsCount}, _) when WindowsCount =< 0 ->
                 throw({error, empty_metrics});
+            (_, #histogram_config{window_size = WindowSize}, _) when WindowSize =< 0 ->
+                throw({error, wrong_window_size});
             (MetricsId, Config, InternalAcc) ->
                 InternalAcc#{{TimeSeriesId, MetricsId} => Config}
         end, Acc, MetricsConfigs)
