@@ -179,7 +179,7 @@ single_metrics_single_node() ->
 
     ?assertMatch({{error, historgam_get_failed}, _}, histogram_api:get(Ctx, Id, very_bad_arg, #{}, Batch6)).
 
-
+% TODO - dac testy startu i limitu przechodzace przez wiele node'ow
 single_metrics_multiple_nodes() ->
     Ctx = #{},
     Id = datastore_key:new(),

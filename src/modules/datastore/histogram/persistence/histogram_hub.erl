@@ -80,6 +80,7 @@ get_record_struct(1) ->
                 {max_windows_in_head_doc, integer},
                 {max_windows_in_tail_doc, integer}
             ]}},
+            % TODO - definicja data powinna isc do jednego miejsca (api)?
             {data, {record, [
                 {windows, {custom, json, {histogram_windows, encode, decode}}},
                 {prev_record, string},

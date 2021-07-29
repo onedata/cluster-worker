@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Helper module to histogram_persistence operating on histogram
-%%% hub node that stores singe metrics values that exceeds
+%%% tail node that stores singe metrics values that exceeds
 %%% histogram hub capacity.
 %%% @end
 %%%-------------------------------------------------------------------

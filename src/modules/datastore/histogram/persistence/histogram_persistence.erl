@@ -8,6 +8,17 @@
 %%% @doc
 %%% Module responsible for management of histogram documents
 %%% (getting from and saving to datastore internal structures).
+%%%
+%%% The module base on #ctx{} record that stores all data needed to
+%%% hide interaction with internal datastore modules/structures.
+%%% #ctx{} has created with new/4 function when histogram does not exist
+%%% or initialized with init/3 function for existing histograms.
+%%% It has to finalized with finalize/1 function after last usage to return
+%%% structure used by datastore to save all changes.
+%%%
+%%% The module uses 2 helper records: histogram_hub that stores beginnings
+%%% of each metrics and histogram_tail_node that stores windows of single
+%%% metrics if there are to many of them to store then all in histogram_hub.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(histogram_persistence).
@@ -22,9 +33,10 @@
 
 -record(ctx, {
     datastore_ctx :: datastore_ctx(),
-    batch :: batch() | undefined,
+    batch :: batch() | undefined, % Undefined when histogram is used outside tp process
+                                  % (call via datastore_reader:histogram_get/3)
     head :: doc(),
-    head_updated = false :: boolean(),
+    head_updated = false :: boolean(), % Field used to determine if head should be saved by finalize/1 function
     % Fields used to determine metrics to update
     active_time_series :: histogram_api:time_series_id() | undefined,
     active_metrics :: histogram_api:metrics_id() | undefined

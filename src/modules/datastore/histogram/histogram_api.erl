@@ -7,6 +7,10 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Internal datastore API used to operate on histograms.
+%%% The module works on #data{} record that represents part of
+%%% metric's windows. #data{} record is encapsulated in document
+%%% and saved/get to/from datastore by histogram_persistence
+%%% helper module.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(histogram_api).
@@ -50,20 +54,22 @@
 -type data() :: #data{}.
 
 -type requested_metrics() :: {time_series_id() | [time_series_id()], metrics_id() | [metrics_id()]}.
--type flat_id() :: {time_series_id(), metrics_id()}.
--type metrics_values_map() :: #{flat_id() => [histogram_windows:window()]}.
+% Metrics are stored in hierarchical map when time_series_id is used to get map with #{metrics_id() => metrics()}.
+% Other way of presentation is in flattened map using key {time_series_id(), metrics_id()}. It is used
+% mainly to return requested data (get can return only chosen metrics so it does not return hierarchical map).
+-type full_metrics_id() :: {time_series_id(), metrics_id()}.
+-type metrics_values_map() :: #{full_metrics_id() => [histogram_windows:window()]}.
+-type flat_config_map() :: #{full_metrics_id() => config()}.
+-type windows_count_map() :: #{full_metrics_id() => non_neg_integer()}.
 
 -export_type([id/0, time_series_map/0, time_series_config/0, time_series_id/0, metrics_id/0,
     data/0, config/0, doc_splitting_strategy/0, legend/0, requested_metrics/0, metrics_values_map/0]).
-
--type flat_config_map() :: #{flat_id() => config()}.
--type windows_count_map() :: #{flat_id() => non_neg_integer()}.
 
 -type key() :: datastore:key().
 -type ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
 
-% Warning - do not use this env in app.config. Use of env limited to tests.
+% Warning: do not use this env in app.config. Use of env limited to tests.
 -define(MAX_VALUES_IN_DOC, application:get_env(?CLUSTER_WORKER_APP_NAME, histogram_max_doc_size, 50000)).
 
 %%%===================================================================
@@ -95,8 +101,7 @@ init(Ctx, Id, ConfigMap, Batch) ->
         _:{error, wrong_window_size} ->
             {error, wrong_window_size};
         Error:Reason ->
-            ?error_stacktrace("Histogram ~p init error: ~p:~p~nConfig map: ~p",
-                [Id, Error, Reason, ConfigMap]),
+            ?error_stacktrace("Histogram ~p init error: ~p:~p~nConfig map: ~p", [Id, Error, Reason, ConfigMap]),
             {{error, historgam_init_failed}, Batch}
     end.
 
@@ -255,7 +260,6 @@ update_metrics(
 
     case histogram_windows:should_reorganize_windows(UpdatedWindows, MaxWindowsCount) of
         true ->
-            % Adding of single window resulted in reorganization so split should be at first element
             {Windows1, Windows2, SplitTimestamp} = histogram_windows:split_windows(UpdatedWindows, SplitPoint),
             {_, _, UpdatedPersistenceCtx} = split_record(DataDocKey, Data,
                 Windows1, Windows2, SplitTimestamp, DataDocPosition, DocSplittingStrategy, PersistenceCtx),
@@ -310,7 +314,6 @@ update_metrics(
             histogram_persistence:update(DataDocKey, Data#data{windows = WindowsWithAppliedPoint}, PersistenceCtx)
     end.
 
-% TODO - trzeba update'owac prev record timestamp jesli nowy timestamp jest wiekszy od niego
 
 -spec maybe_delete_last_doc(key(), data(), key(), data() | undefined, doc_splitting_strategy(), non_neg_integer(),
     histogram_persistence:ctx()) -> histogram_persistence:ctx().
@@ -371,7 +374,7 @@ get_metrics_values(
 %% Helper functions
 %%=====================================================================
 
--spec create_doc_splitting_strategies(time_series_config()) -> #{flat_id() => doc_splitting_strategy()}.
+-spec create_doc_splitting_strategies(time_series_config()) -> #{full_metrics_id() => doc_splitting_strategy()}.
 create_doc_splitting_strategies(ConfigMap) ->
     FlattenedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
         maps:fold(fun
@@ -390,8 +393,12 @@ create_doc_splitting_strategies(ConfigMap) ->
         #histogram_config{max_windows_count = MaxWindowsCount} = maps:get(Key, FlattenedMap),
         {MaxWindowsInTailDoc, MaxDocsCount} = case MaxWindowsInHead of
             MaxWindowsCount ->
+                % All windows can be stored in head
                 {0, 1};
             _ ->
+                % It is guaranteed that each tail document used at least half of its capacity after split
+                % so windows count should be multiplied by 2 when calculating number of tail documents
+                % (head can be cleared to optimize upload so tail documents have to store required windows count).
                 case {MaxWindowsCount =< MaxValuesInDoc, MaxWindowsCount =< MaxValuesInDoc div 2} of
                     {true, true} ->
                         {2 * MaxWindowsCount, 2};
@@ -440,7 +447,7 @@ calculate_windows_in_head_doc_count(FullyStoredInHead, NotFullyStoredInHead, Rem
     end.
 
 
--spec update_windows_in_head_doc_count([flat_id()], windows_count_map(), windows_count_map(), flat_config_map(),
+-spec update_windows_in_head_doc_count([full_metrics_id()], windows_count_map(), windows_count_map(), flat_config_map(),
     non_neg_integer(), non_neg_integer()) -> {windows_count_map(), windows_count_map(), non_neg_integer()}.
 update_windows_in_head_doc_count(_MetricsKeys, FullyStoredInHead, NotFullyStoredInHead, _FlattenedMap, _LimitUpdate, 0) ->
     {FullyStoredInHead, NotFullyStoredInHead, 0};
@@ -455,7 +462,8 @@ update_windows_in_head_doc_count([Key | MetricsKeys], FullyStoredInHead, NotFull
     NewLimit = CurrentLimit + Update,
     {UpdatedFullyStoredInHead, UpdatedNotFullyStoredInHead, FinalUpdate} = case NewLimit >= MaxWindowsCount of
         true ->
-            {FullyStoredInHead#{Key => MaxWindowsCount}, maps:remove(Key, NotFullyStoredInHead), MaxWindowsCount - CurrentLimit};
+            {FullyStoredInHead#{Key => MaxWindowsCount},
+                maps:remove(Key, NotFullyStoredInHead), MaxWindowsCount - CurrentLimit};
         false ->
             {FullyStoredInHead, NotFullyStoredInHead#{Key => NewLimit}, Update}
     end,
@@ -480,8 +488,13 @@ get_max_windows_and_split_point(
     },
     PersistenceCtx) ->
     case histogram_persistence:is_head(DataDocKey, PersistenceCtx) of
-        true -> {MaxWindowsCountInHead, 1};
-        false -> {MaxWindowsCountInTail, ceil(MaxWindowsCountInTail / 2)}
+        true ->
+            % If adding of single window results in reorganization split should be at first element
+            % to move most of windows to tail doc
+            {MaxWindowsCountInHead, 1};
+        false ->
+            % Split of tail doc should result in two documents with at list of half of capacity used
+            {MaxWindowsCountInTail, ceil(MaxWindowsCountInTail / 2)}
     end.
 
 

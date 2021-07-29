@@ -105,9 +105,6 @@ get_links_trees(FetchNode, Ctx, Key) ->
 -spec histogram_get(node(), datastore_doc:ctx(), list()) ->
     ok | {ok, [histogram_windows:window()] | histogram_api:metrics_values_map()} | {error, term()}.
 histogram_get(FetchNode, Ctx, [Id, RequestedMetrics, Options] = Args) ->
-    Fallback = fun() ->
-        datastore_router:execute_on_node(FetchNode, datastore_writer, histogram_operation, [Ctx, get, Args])
-    end,
     try
         case histogram_api:get(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined) of
             {{ok, Result}, _} ->
@@ -117,7 +114,7 @@ histogram_get(FetchNode, Ctx, [Id, RequestedMetrics, Options] = Args) ->
         end
     catch
         throw:{fetch_error, not_found} ->
-            Fallback()
+            datastore_router:execute_on_node(FetchNode, datastore_writer, histogram_operation, [Ctx, get, Args])
     end.
 
 

@@ -20,6 +20,7 @@
     apply_function :: histogram_windows:apply_function()
 }).
 
+% TODO - moze przeniesc do naglowka histogram_internal gdzie bedziemy mieli rekordy uzywane w testach
 -record(metrics, {
     config :: histogram_api:config(),
     % NOTE: Doc splitting strategy may result in keeping more windows than required by config

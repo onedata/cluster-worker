@@ -1612,8 +1612,7 @@ assert_key_not_in_memory(Worker, Model, Key) ->
         undefined ->
             ok;
         Driver ->
-            Ctx = datastore_multiplier:extend_name(Key,
-                ?MEM_CTX(Model)),
+            Ctx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
             ?assertMatch({error, not_found},
                 rpc:call(Worker, Driver, get, [
                     Ctx, ?UNIQUE_KEY(Model, Key)

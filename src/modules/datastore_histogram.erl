@@ -6,7 +6,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides datastore model API for histograms.
+%%% This module provides datastore model API for histograms
+%%% (mapped to internal datastore API provided by histogram_api).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_histogram).

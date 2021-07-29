@@ -25,7 +25,7 @@
 -type window_value() :: value() | {ValuesCount :: non_neg_integer(), ValuesSum :: value()}.
 -type window() :: {timestamp(), window_value()}.
 -type windows() :: gb_trees:tree(timestamp(), window_value()).
--type apply_function() :: sum | max | min | last | first. % | {gather, Max}.
+-type apply_function() :: sum | max | min | last | first. % | {gather, Max}. % TODO VFS-8164 - extend functions list
 
 -type options() :: #{
     start => timestamp(),
@@ -232,6 +232,8 @@ list_values(Iterator, Options) ->
 -spec split(windows(), non_neg_integer()) -> {windows(), windows(), timestamp()}.
 split(Windows, SplitPosition) ->
     % TOOD - powonno byc na odwrot bo teraz wiekszosc zostaje w headzie
+    % TODO - sprawdzic czy split position jest prawidlowa (najweksza wartosc w starszym node)
+    % TODO - dodac do testow API test gdzie dodajemy najwiekszy/najmniejszy w danym node
     WindowsList = gb_trees:to_list(Windows),
     Windows1 = lists:sublist(WindowsList, SplitPosition),
     [{SplitKey, _} | _] = Windows2 = lists:sublist(WindowsList, SplitPosition + 1, length(WindowsList) - SplitPosition),
