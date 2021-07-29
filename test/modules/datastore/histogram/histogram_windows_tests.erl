@@ -168,19 +168,19 @@ reorganization_test() ->
     ?assertEqual(false, histogram_windows:should_reorganize_windows(Windows1, PointsCount)),
     ?assertEqual(false, histogram_windows:should_reorganize_windows(Windows1, PointsCount + 1)),
 
-    Test1 = histogram_windows:reorganize_windows(Windows1, Windows2, 10),
+    Test1 = histogram_windows:reorganize_windows(Windows1, Windows2, 10, 1),
     ?assertMatch([{split_current_record, {_, _, 29}}], Test1),
     [{_, {Test1Split1, Test1Split2, _}}] = Test1,
     ?assertEqual(?GET_ALL_RESULT(lists:sublist(Points2, 1)), ?GET_ALL(Test1Split1)),
     ?assertEqual(?GET_ALL_RESULT(lists:sublist(Points2, 2, PointsCount - 1)), ?GET_ALL(Test1Split2)),
 
-    Test2 = histogram_windows:reorganize_windows(Windows1, Windows2, 20),
+    Test2 = histogram_windows:reorganize_windows(Windows1, Windows2, 20, 1),
     ?assertMatch([{update_previos_record, _}, {update_current_record, 30, _}], Test2),
     [{_, Test2Windows1}, {_, _, Test2Windows2}] = Test2,
     ?assertEqual(?GET_ALL_RESULT(Points2 ++ Points1), ?GET_ALL(Test2Windows1)),
     ?assertEqual(histogram_windows:init(), Test2Windows2),
 
-    Test3 = histogram_windows:reorganize_windows(Windows1, Windows2, 13),
+    Test3 = histogram_windows:reorganize_windows(Windows1, Windows2, 13, 1),
     ?assertMatch([{update_previos_record, _}, {update_current_record, 23, _}], Test3),
     [{_, Test3Windows1}, {_, _, Test3Windows2}] = Test3,
     ?assertEqual(?GET_ALL_RESULT(lists:sublist(Points2, 8, 3) ++ Points1), ?GET_ALL(Test3Windows1)),

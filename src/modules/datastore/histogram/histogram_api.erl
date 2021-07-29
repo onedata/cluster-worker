@@ -18,6 +18,8 @@
 
 %% API
 -export([init/4, update/5, update/4, get/5]).
+%% Test API
+-export([create_doc_splitting_strategies/1]).
 
 % TODO - moze przeniesc do naglowka? gdzie najlepiej ten rekord pasuje?
 -record(data, {
@@ -48,10 +50,14 @@
 -type data() :: #data{}.
 
 -type requested_metrics() :: {time_series_id() | [time_series_id()], metrics_id() | [metrics_id()]}.
--type metrics_values_map() :: #{{time_series_id(), metrics_id()} => [histogram_windows:window()]}.
+-type flat_id() :: {time_series_id(), metrics_id()}.
+-type metrics_values_map() :: #{flat_id() => [histogram_windows:window()]}.
 
 -export_type([id/0, time_series_map/0, time_series_config/0, time_series_id/0, metrics_id/0,
     data/0, config/0, doc_splitting_strategy/0, legend/0, requested_metrics/0, metrics_values_map/0]).
+
+-type flat_config_map() :: #{flat_id() => config()}.
+-type windows_count_map() :: #{flat_id() => non_neg_integer()}.
 
 -type key() :: datastore:key().
 -type ctx() :: datastore:ctx().
@@ -67,20 +73,25 @@
 -spec init(ctx(), id(), time_series_config(), batch()) -> {ok | {error, term()}, batch()}.
 init(Ctx, Id, ConfigMap, Batch) ->
     try
-        TimeSeries = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
-            MetricsMap = maps:fold(fun(MetricsId, Config, InternalAcc) ->
-                 InternalAcc#{MetricsId => #metrics{
+        DocSplittingStrategies = create_doc_splitting_strategies(ConfigMap),
+
+        TimeSeries = maps:map(fun(TimeSeriesId, MetricsConfigs) ->
+            maps:map(fun(MetricsId, Config) ->
+                 #metrics{
                      config = Config,
-                     doc_splitting_strategy = create_doc_splitting_strategy(Config),
+                     doc_splitting_strategy = maps:get({TimeSeriesId, MetricsId}, DocSplittingStrategies),
                      data = #data{} % TODO - czy init jest potrzebny po przeniesieniu?
-                 }}
-            end, #{}, MetricsConfigs),
-            Acc#{TimeSeriesId => MetricsMap}
-        end, #{}, ConfigMap),
+                 }
+            end, MetricsConfigs)
+        end, ConfigMap),
 
         PersistenceCtx = histogram_persistence:new(Ctx, Id, TimeSeries, Batch),
         {ok, histogram_persistence:finalize(PersistenceCtx)}
     catch
+        _:{error, to_many_metrics} ->
+            {error, to_many_metrics};
+        _:{error, empty_metrics} ->
+            {error, empty_metrics};
         Error:Reason ->
             ?error_stacktrace("Histogram ~p init error: ~p:~p~nConfig map: ~p",
                 [Id, Error, Reason, ConfigMap]),
@@ -177,7 +188,7 @@ get_time_series_values(TimeSeriesMap, [{TimeSeriesIds, MetricsIds} | RequestedMe
     {Ans2, FinalPersistenceCtx} = get_time_series_values(TimeSeriesMap, RequestedMetrics, Options, UpdatedPersistenceCtx),
     {maps:merge(Ans, Ans2), FinalPersistenceCtx};
 
-get_time_series_values(TimeSeriesMap, Request, Options, PersistenceCtx) ->
+get_time_series_values(TimeSeriesMap, {_, _} = Request, Options, PersistenceCtx) ->
     {Ans, FinalPersistenceCtx} = get_time_series_values(TimeSeriesMap, [Request], Options, PersistenceCtx),
     case maps:get(Request, Ans, undefined) of
         undefined -> {Ans, FinalPersistenceCtx};
@@ -238,12 +249,12 @@ update_metrics(
     } = Data, DataDocKey, DataDocPosition,
     DocSplittingStrategy, ApplyFunction, WindowToBeUpdated, NewValue, PersistenceCtx) ->
     UpdatedWindows = histogram_windows:apply_value(Windows, WindowToBeUpdated, NewValue, ApplyFunction),
-    MaxWindowsCount = get_max_windows_in_doc(DataDocKey, DocSplittingStrategy, PersistenceCtx),
+    {MaxWindowsCount, SplitPoint} = get_max_windows_and_split_point(DataDocKey, DocSplittingStrategy, PersistenceCtx),
 
     case histogram_windows:should_reorganize_windows(UpdatedWindows, MaxWindowsCount) of
         true ->
             % Adding of single window resulted in reorganization so split should be at first element
-            {Windows1, Windows2, SplitTimestamp} = histogram_windows:split_windows(UpdatedWindows, 1),
+            {Windows1, Windows2, SplitTimestamp} = histogram_windows:split_windows(UpdatedWindows, SplitPoint),
             {_, _, UpdatedPersistenceCtx} = split_record(DataDocKey, Data,
                 Windows1, Windows2, SplitTimestamp, DataDocPosition, DocSplittingStrategy, PersistenceCtx),
             UpdatedPersistenceCtx;
@@ -271,13 +282,14 @@ update_metrics(
         max_windows_in_tail_doc = MaxWindowsInTail
     } = DocSplittingStrategy, ApplyFunction, WindowToBeUpdated, NewValue, PersistenceCtx) ->
     WindowsWithAppliedPoint = histogram_windows:apply_value(Windows, WindowToBeUpdated, NewValue, ApplyFunction),
-    MaxWindowsCount = get_max_windows_in_doc(DataDocKey, DocSplittingStrategy, PersistenceCtx),
+    {MaxWindowsCount, SplitPoint} = get_max_windows_and_split_point(DataDocKey, DocSplittingStrategy, PersistenceCtx),
 
     case histogram_windows:should_reorganize_windows(WindowsWithAppliedPoint, MaxWindowsCount) of
         true ->
             {#data{windows = WindowsInPrevRecord} = PrevRecordData, UpdatedPersistenceCtx} =
                 histogram_persistence:get(PrevRecordKey, PersistenceCtx),
-            Actions = histogram_windows:reorganize_windows(WindowsInPrevRecord, WindowsWithAppliedPoint, MaxWindowsInTail),
+            Actions = histogram_windows:reorganize_windows(
+                WindowsInPrevRecord, WindowsWithAppliedPoint, MaxWindowsInTail, SplitPoint),
 
             lists:foldl(fun
                 ({update_current_record, UpdatedPrevRecordTimestamp, UpdatedWindows}, TmpPersistenceCtx) ->
@@ -357,19 +369,94 @@ get_metrics_values(
 %% Helper functions
 %%=====================================================================
 
-% TODO - przy inicie sprawdzic ze liczba okien jest wieksza od zera
-% TODO - a co jesli dokument taila nie jest pelen (bo sie podzielil w wyniku dodawania starego elementu) - trzeba to uwzglednic wyznaczajac ilosc dokumentow i przy dzieleniu
-% do liczenia ilosci dokumentow wszystkie docki przyjmujemy jako polowa pojemnosci bo tyle moze miec najmniej po splicie
-% wyjatkiem jest drugi dokument puki sie nie wypelni po raz pierwszy ale wtedy nie bedziemy probowali kasowac
--spec create_doc_splitting_strategy(config()) -> doc_splitting_strategy().
-create_doc_splitting_strategy(#histogram_config{
-    max_windows_count = MaxWindowsCount
-}) ->
-    #doc_splitting_strategy{
-        max_docs_count = ceil(MaxWindowsCount / ?MAX_VALUES_IN_DOC),
-        max_windows_in_head_doc = min(MaxWindowsCount, ?MAX_VALUES_IN_DOC),
-        max_windows_in_tail_doc = ?MAX_VALUES_IN_DOC
-}.
+-spec create_doc_splitting_strategies(time_series_config()) -> #{flat_id() => doc_splitting_strategy()}.
+create_doc_splitting_strategies(ConfigMap) ->
+    FlattenedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
+        maps:fold(fun
+            (_, #histogram_config{max_windows_count = WindowsCount}, _) when WindowsCount =< 0 ->
+                throw({error, empty_metrics});
+            (MetricsId, Config, InternalAcc) ->
+                InternalAcc#{{TimeSeriesId, MetricsId} => Config}
+        end, Acc, MetricsConfigs)
+    end, #{}, ConfigMap),
+
+    MaxValuesInDoc = ?MAX_VALUES_IN_DOC,
+    MaxWindowsInHeadMap = calculate_windows_in_head_doc_count(FlattenedMap),
+    maps:map(fun(Key, MaxWindowsInHead) ->
+        #histogram_config{max_windows_count = MaxWindowsCount} = maps:get(Key, FlattenedMap),
+        {MaxWindowsInTailDoc, MaxDocsCount} = case MaxWindowsInHead of
+            MaxWindowsCount ->
+                {0, 1};
+            _ ->
+                case {MaxWindowsCount =< MaxValuesInDoc, MaxWindowsCount =< MaxValuesInDoc div 2} of
+                    {true, true} ->
+                        {2 * MaxWindowsCount, 2};
+                    {true, false} ->
+                        {MaxWindowsCount, 3};
+                    _ ->
+                        {MaxValuesInDoc, 1 + ceil(2 * MaxWindowsCount / MaxValuesInDoc)}
+                end
+        end,
+        #doc_splitting_strategy{
+            max_docs_count = MaxDocsCount,
+            max_windows_in_head_doc = MaxWindowsInHead,
+            max_windows_in_tail_doc = MaxWindowsInTailDoc
+        }
+    end, MaxWindowsInHeadMap).
+
+
+-spec calculate_windows_in_head_doc_count(flat_config_map()) -> windows_count_map().
+calculate_windows_in_head_doc_count(FlattenedMap) ->
+    MaxValuesInHead = ?MAX_VALUES_IN_DOC,
+    case maps:size(FlattenedMap) > MaxValuesInHead of
+        true ->
+            throw({error, to_many_metrics});
+        false ->
+            NotFullyStoredInHead = maps:map(fun(_, _) -> 0 end, FlattenedMap),
+            calculate_windows_in_head_doc_count(#{}, NotFullyStoredInHead, MaxValuesInHead, FlattenedMap)
+
+    end.
+
+
+-spec calculate_windows_in_head_doc_count(windows_count_map(), windows_count_map(), non_neg_integer(),
+    flat_config_map()) -> windows_count_map().
+calculate_windows_in_head_doc_count(FullyStoredInHead, NotFullyStoredInHead, 0, _FlattenedMap) ->
+    maps:merge(FullyStoredInHead, NotFullyStoredInHead);
+calculate_windows_in_head_doc_count(FullyStoredInHead, NotFullyStoredInHead, RemainingWindowsInHead, FlattenedMap) ->
+    LimitUpdate = max(1, RemainingWindowsInHead div maps:size(NotFullyStoredInHead)),
+    {UpdatedFullyStoredInHead, UpdatedNotFullyStoredInHead, UpdatedRemainingWindowsInHead} =
+        update_windows_in_head_doc_count(maps:keys(NotFullyStoredInHead), FullyStoredInHead, NotFullyStoredInHead,
+            FlattenedMap, LimitUpdate, RemainingWindowsInHead),
+    case maps:size(UpdatedNotFullyStoredInHead) of
+        0 ->
+            UpdatedFullyStoredInHead;
+        _ ->
+            calculate_windows_in_head_doc_count(UpdatedFullyStoredInHead, UpdatedNotFullyStoredInHead,
+                UpdatedRemainingWindowsInHead, FlattenedMap)
+    end.
+
+
+-spec update_windows_in_head_doc_count([flat_id()], windows_count_map(), windows_count_map(), flat_config_map(),
+    non_neg_integer(), non_neg_integer()) -> {windows_count_map(), windows_count_map(), non_neg_integer()}.
+update_windows_in_head_doc_count(_MetricsKeys, FullyStoredInHead, NotFullyStoredInHead, _FlattenedMap, _LimitUpdate, 0) ->
+    {FullyStoredInHead, NotFullyStoredInHead, 0};
+update_windows_in_head_doc_count([], FullyStoredInHead, NotFullyStoredInHead, _FlattenedMap,
+    _LimitUpdate, RemainingWindowsInHead) ->
+    {FullyStoredInHead, NotFullyStoredInHead, RemainingWindowsInHead};
+update_windows_in_head_doc_count([Key | MetricsKeys], FullyStoredInHead, NotFullyStoredInHead, FlattenedMap,
+    LimitUpdate, RemainingWindowsInHead) ->
+    Update = min(LimitUpdate, RemainingWindowsInHead),
+    #histogram_config{max_windows_count = MaxWindowsCount} = maps:get(Key, FlattenedMap),
+    CurrentLimit = maps:get(Key, NotFullyStoredInHead),
+    NewLimit = CurrentLimit + Update,
+    {UpdatedFullyStoredInHead, UpdatedNotFullyStoredInHead, FinalUpdate} = case NewLimit >= MaxWindowsCount of
+        true ->
+            {FullyStoredInHead#{Key => MaxWindowsCount}, maps:remove(Key, NotFullyStoredInHead), MaxWindowsCount - CurrentLimit};
+        false ->
+            {FullyStoredInHead, NotFullyStoredInHead#{Key => NewLimit}, Update}
+    end,
+    update_windows_in_head_doc_count(MetricsKeys, UpdatedFullyStoredInHead, UpdatedNotFullyStoredInHead, FlattenedMap,
+        LimitUpdate, RemainingWindowsInHead - FinalUpdate).
 
 
 -spec get_window(histogram_windows:timestamp() | undefined, config()) -> histogram_windows:timestamp() | undefined.
@@ -379,8 +466,9 @@ get_window(Time, #histogram_config{window_size = WindowSize}) ->
     Time - Time rem WindowSize.
 
 
--spec get_max_windows_in_doc(key(), doc_splitting_strategy(), histogram_persistence:ctx()) -> non_neg_integer().
-get_max_windows_in_doc(
+-spec get_max_windows_and_split_point(key(), doc_splitting_strategy(), histogram_persistence:ctx()) ->
+    {non_neg_integer(), non_neg_integer()}.
+get_max_windows_and_split_point(
     DataDocKey,
     #doc_splitting_strategy{
         max_windows_in_head_doc = MaxWindowsCountInHead,
@@ -388,8 +476,8 @@ get_max_windows_in_doc(
     },
     PersistenceCtx) ->
     case histogram_persistence:is_head(DataDocKey, PersistenceCtx) of
-        true -> MaxWindowsCountInHead;
-        false -> MaxWindowsCountInTail
+        true -> {MaxWindowsCountInHead, 1};
+        false -> {MaxWindowsCountInTail, ceil(MaxWindowsCountInTail / 2)}
     end.
 
 

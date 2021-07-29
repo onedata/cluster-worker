@@ -14,7 +14,7 @@
 
 %% API
 -export([init/0, get/3, apply_value/4, maybe_delete_last/2,
-    split_windows/2, should_reorganize_windows/2, reorganize_windows/3]).
+    split_windows/2, should_reorganize_windows/2, reorganize_windows/4]).
 %% Encoding/decoding  API
 -export([encode/1, decode/1]).
 %% Exported for unit tests
@@ -78,16 +78,16 @@ should_reorganize_windows(Windows, MaxWindowsCount) ->
     get_size(Windows) > MaxWindowsCount.
 
 
--spec reorganize_windows(windows(), windows(), non_neg_integer()) ->
+-spec reorganize_windows(windows(), windows(), non_neg_integer(), non_neg_integer()) ->
     ActionsToApplyOnRecords :: [{update_previos_record, windows()} | {update_current_record, timestamp(), windows()} |
         {split_current_record, {windows(), windows(), timestamp()}}].
-reorganize_windows(WindowsInPrevRecord, WindowsInCurrentRecord, MaxWindowsInPrevRecord) ->
+reorganize_windows(WindowsInPrevRecord, WindowsInCurrentRecord, MaxWindowsInPrevRecord, SplitPoint) ->
     WindowsInPrevRecordSize = get_size(WindowsInPrevRecord),
     WindowsInCurrentRecordSize = get_size(WindowsInCurrentRecord),
 
     case WindowsInPrevRecordSize of
         MaxWindowsInPrevRecord ->
-            [{split_current_record, split(WindowsInCurrentRecord, 1)}]; % One window has been added before reorganization
+            [{split_current_record, split(WindowsInCurrentRecord, SplitPoint)}]; % One window has been added before reorganization
         _ ->
             case WindowsInPrevRecordSize + WindowsInCurrentRecordSize > MaxWindowsInPrevRecord of
                 true ->
