@@ -254,10 +254,10 @@ encode(ProtocolVersion, Record) ->
                 encode_push(ProtocolVersion, Record)
         end,
         {ok, JSONMap}
-    catch Type:Reason ->
+    catch Type:Reason:Stacktrace ->
         ?error_stacktrace("Cannot encode gs message - ~p:~p~nMessage: ~p", [
             Type, Reason, Record
-        ]),
+        ], Stacktrace),
         ?ERROR_BAD_MESSAGE(Record)
     end.
 

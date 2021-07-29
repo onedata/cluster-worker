@@ -52,7 +52,7 @@ get_buckets() ->
         {ok, 200, _, Body} = http_client:get(Url),
         Ans = lists:map(fun(BucketMap) ->
             maps:get(<<"name">>, BucketMap)
-        end, jiffy:decode(Body, [return_maps])),
+        end, json_utils:decode(Body)),
         {ok, Ans, infinity}
     end),
     Buckets.
@@ -73,6 +73,6 @@ get_flush_queue_size() ->
         {ok, 200, _, Body} = http_client:get(Url),
         BucketSize = lists:last(maps:get(<<"disk_write_queue">>,
             maps:get(<<"samples">>,
-                maps:get(<<"op">>, jiffy:decode(Body, [return_maps]))))),
+                maps:get(<<"op">>, json_utils:decode(Body))))),
         max(BucketSize, Max)
     end, 0, Buckets).

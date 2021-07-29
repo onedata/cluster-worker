@@ -78,8 +78,8 @@ call(Module, Args, Key, Request, Timeout, Attempts) ->
                             call(Module, Args, Key, Request, Timeout);
                         _:{timeout, _} ->
                             call(Module, Args, Key, Request, Timeout, Attempts - 1);
-                        _:Reason ->
-                            {error, {Reason, erlang:get_stacktrace()}}
+                        _:Reason:Stacktrace ->
+                            {error, {Reason, Stacktrace}}
                     end;
                 {error, Reason} ->
                     {error, Reason}
@@ -111,8 +111,8 @@ call_if_alive(Key, Request, Timeout, Attempts) ->
                     {error, not_alive};
                 _:{timeout, _} ->
                     call_if_alive(Key, Request, Timeout, Attempts - 1);
-                _:Reason ->
-                    {error, {Reason, erlang:get_stacktrace()}}
+                _:Reason:Stacktrace ->
+                    {error, {Reason, Stacktrace}}
             end;
         {error, not_found} ->
             {error, not_alive}

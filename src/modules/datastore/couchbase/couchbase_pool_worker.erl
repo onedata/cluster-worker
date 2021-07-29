@@ -286,7 +286,7 @@ handle_requests(Requests, #state{} = State) ->
         Response = try
             handle_request(Connection, Request, ResponsesBatch)
         catch
-            _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
+            _:Reason:Stacktrace -> {error, {Reason, Stacktrace}}
         end,
         From ! {Ref, Response}
     end, Requests),

@@ -168,8 +168,8 @@
 %% Unfortunately, an exception is thrown and handled inside this function
 %% and because of that macro ?error_stacktrace prints wrong stacktrace.
 %% This macro is used to bypass the problem.
--define(log_error_with_stacktrace(Format, Args),
-    log_error_with_stacktrace(erlang:get_stacktrace(), Format, Args)
+-define(log_error_with_stacktrace(Format, Args, Stacktrace),
+    log_error_with_stacktrace(Stacktrace, Format, Args)
 ).
 
 %%%===================================================================
@@ -541,14 +541,14 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
         try
             maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskId, Executor, NewDescription, Canceled2)
         catch
-            E2:R2 ->
+            E2:R2:Stacktrace2 ->
                 ?log_error_with_stacktrace("Checking finish of job ~s of task ~p (module ~p) error ~p:~p",
-                    [to_string(CallbackModule, Job), TaskId, CallbackModule, E2, R2])
+                    [to_string(CallbackModule, Job), TaskId, CallbackModule, E2, R2], Stacktrace2)
         end
     catch
-        E1:R1 ->
+        E1:R1:Stacktrace1 ->
             ?log_error_with_stacktrace("Master job ~s of task ~s (module ~p) error ~p:~p",
-                [to_string(CallbackModule, Job), TaskId, CallbackModule, E1, R1]),
+                [to_string(CallbackModule, Job), TaskId, CallbackModule, E1, R1], Stacktrace1),
             ErrorDescription = #{
                 master_jobs_failed => 1
             },
@@ -561,9 +561,9 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
             try
                 maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskId, Executor, ErrorDescription2, Canceled3)
             catch
-                E3:R3 ->
+                E3:R3:Stacktrace3 ->
                     ?log_error_with_stacktrace("Checking finish of job ~s of task ~p (module ~p) error ~p:~p",
-                        [to_string(CallbackModule, Job), TaskId, CallbackModule, E3, R3])
+                        [to_string(CallbackModule, Job), TaskId, CallbackModule, E3, R3], Stacktrace3)
             end
     end,
     ok.
@@ -586,9 +586,9 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskId, Job) ->
                 error
         end
     catch
-        E:R ->
+        E:R:Stacktrace ->
             ?log_error_with_stacktrace("Slave job ~s of task ~p (module ~p) error ~p:~p",
-                [to_string(CallbackModule, Job), TaskId, CallbackModule, E, R]),
+                [to_string(CallbackModule, Job), TaskId, CallbackModule, E, R], Stacktrace),
             error
     end.
 

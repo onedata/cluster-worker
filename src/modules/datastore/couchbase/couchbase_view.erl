@@ -35,7 +35,7 @@
     datastore_json:ejson()) -> ok | {error, term()}.
 save_design_doc(Connection, DesignName, EJson) ->
     Path = <<"_design/", DesignName/binary>>,
-    Body = jiffy:encode(EJson),
+    Body = json_utils:encode(EJson),
     ContentType = <<"application/json">>,
     Ans = parse_design_doc_response(save,
         cberl:http(Connection, view, put, Path, ContentType, Body, ?TIMEOUT)

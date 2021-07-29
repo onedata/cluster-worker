@@ -62,8 +62,8 @@
                         % Specify the expiration time. For disc/cached models
                         % This is either an absolute Unix timestamp or
                         % a relative offset from now, in seconds.
-                        % If the value of this number is greater than 
-                        % the value of thirty days in seconds, 
+                        % If the value of this number is greater than
+                        % the value of thirty days in seconds,
                         % then it is a Unix timestamp. For memory models
                         % it is always a relative offset from now.
                  throw_not_found => boolean()
@@ -318,9 +318,7 @@ histogram_operation(Ctx, Key, Function, Args) ->
     end).
 
 
--spec infinite_log_operation(ctx(), key(), atom(), [term()]) -> 
+-spec infinite_log_operation(ctx(), key(), atom(), [term()]) ->
     ok | {ok, infinite_log_browser:listing_result()} | {error, term()}.
 infinite_log_operation(Ctx, Key, Function, Args) ->
-    datastore_hooks:wrap(Ctx, Key, Function, Args, fun
-        (Function, Args) -> datastore_router:route_infinite_log_operation(Function, Args)
-    end).
+    datastore_hooks:wrap(Ctx, Key, Function, Args, fun datastore_router:route_infinite_log_operation/2).

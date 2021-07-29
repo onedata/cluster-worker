@@ -384,8 +384,8 @@ stream_should_ignore_changes2(Config) ->
                                 Responses
                             }
                         catch
-                            _:Reason ->
-                                Reason2 = {Reason, erlang:get_stacktrace()},
+                            _:Reason:Stacktrace ->
+                                Reason2 = {Reason, Stacktrace},
                                 {
                                     StoreRequests,
                                     Requests2,
@@ -513,8 +513,8 @@ stream_should_ignore_changes4(Config) ->
                                 Responses
                             }
                         catch
-                            _:Reason ->
-                                Reason2 = {Reason, erlang:get_stacktrace()},
+                            _:Reason:Stacktrace ->
+                                Reason2 = {Reason, Stacktrace},
                                 {
                                     StoreRequests,
                                     Requests2,
@@ -634,7 +634,7 @@ worker_should_return_all_changes_one_by_one_base(Config, DocsBatchesSaved) ->
     ExistingDocsNum = DocsBatchesSaved * DocNum,
 
     Callback = fun(Any) -> Self ! Any end,
-    {ok, WorkerPid} = ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes_worker, start_link,
+    {ok, WorkerPid} = ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes_worker, start,
         [?BUCKET, ?SCOPE, Callback, 1]
     )),
 

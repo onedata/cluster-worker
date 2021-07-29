@@ -152,11 +152,11 @@ do_healthcheck(UniqueName, MasterNodeId, LastInterval) ->
                 do_healthcheck_insecure(UniqueName, Service, MasterNodeId, LastInterval)
         end
     catch
-        Class:Reason ->
+        Class:Reason:Stacktrace ->
             ?warning_stacktrace(
                 "Healthcheck function of service ~s crashed (this may happen during cluster reorganization)~n"
                 "Error was: ~w:~p",
-                [UniqueName, Class, Reason]
+                [UniqueName, Class, Reason], Stacktrace
             ),
             {ok, LastInterval}
     end.
@@ -236,9 +236,9 @@ init_service(Service, UniqueName, InitFun, MasterNodeId) ->
                 aborted
         end
     catch
-        Error:Reason ->
+        Error:Reason:Stacktrace ->
             ?error_stacktrace("Error while initializing service ~s - ~p:~p",
-                [UniqueName, Error, Reason]),
+                [UniqueName, Error, Reason], Stacktrace),
             remove_service_from_doc(MasterNodeId, UniqueName),
             error(service_init_failure)
     end.

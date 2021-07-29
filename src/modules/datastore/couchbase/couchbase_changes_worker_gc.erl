@@ -207,10 +207,10 @@ delete_internal_docs(State = #state{
             couchbase_driver:delete(Ctx, ChangeKeys),
             gen_server:cast(Pid, {processing_finished, End2, Cas2})
         catch
-            _:Reason ->
+            _:Reason:Stacktrace ->
                 ?error_stacktrace("Clearing changes intenal documents failed"
                 " due to: ~p (pid: ~p, scope: ~p, bucket: ~p)",
-                    [Reason, Pid, Scope, Bucket]),
+                    [Reason, Pid, Scope, Bucket], Stacktrace),
                 timer:sleep(?ERROR_SLEEP_TIME),
                 gen_server:cast(Pid, processing_finished)
         end

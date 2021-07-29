@@ -265,7 +265,7 @@ init_per_testcase(_Case, Config) ->
             tp_subtrees_number, 1)
     end, Workers),
 
-    rpc:multicall(Workers, tp, set_processes_limit, [200]),
+    utils:rpc_multicall(Workers, tp, set_processes_limit, [200]),
     test_utils:mock_new(Workers, ?TP_MODULE, [passthrough, non_strict]),
     test_utils:mock_expect(Workers, ?TP_MODULE, init,
         proplists:get_value(init_fun, Config, fun
