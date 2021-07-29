@@ -16,28 +16,17 @@
 -module(histogram_api).
 -author("Michal Wrzeszcz").
 
+-include("modules/datastore/histogram_api.hrl").
 -include("modules/datastore/histogram.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([init/4, update/5, update/4, get/5]).
+%% Time series map API
+-export([update_time_series_map_data/4]).
 %% Test API
 -export([create_doc_splitting_strategies/1]).
-
-% TODO - moze przeniesc do naglowka? gdzie najlepiej ten rekord pasuje?
--record(data, {
-    windows = histogram_windows:init() :: histogram_windows:windows(),
-    prev_record :: key() | undefined,
-    % Timestamp of newest point in previous record
-    prev_record_timestamp :: histogram_windows:timestamp() | undefined
-}).
-
--record(doc_splitting_strategy, {
-    max_docs_count :: non_neg_integer(),
-    max_windows_in_head_doc :: non_neg_integer(),
-    max_windows_in_tail_doc :: non_neg_integer()
-}).
 
 -type id() :: binary(). % Id of histogram
 -type time_series_id() :: binary().
@@ -69,6 +58,8 @@
 -type ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
 
+-export_type([key/0]).
+
 % Warning: do not use this env in app.config. Use of env limited to tests.
 -define(MAX_VALUES_IN_DOC, application:get_env(?CLUSTER_WORKER_APP_NAME, histogram_max_doc_size, 50000)).
 
@@ -85,8 +76,7 @@ init(Ctx, Id, ConfigMap, Batch) ->
             maps:map(fun(MetricsId, Config) ->
                  #metrics{
                      config = Config,
-                     doc_splitting_strategy = maps:get({TimeSeriesId, MetricsId}, DocSplittingStrategies),
-                     data = #data{} % TODO - czy init jest potrzebny po przeniesieniu?
+                     doc_splitting_strategy = maps:get({TimeSeriesId, MetricsId}, DocSplittingStrategies)
                  }
             end, MetricsConfigs)
         end, ConfigMap),
@@ -368,6 +358,18 @@ get_metrics_values(
                 get_metrics_values(PrevRecordData, undefined, NewOptions, UpdatedPersistenceCtx),
             {Points ++ NextPoints, FinalPersistenceCtx}
     end.
+
+
+%%=====================================================================
+%% Time series map API
+%%=====================================================================
+
+-spec update_time_series_map_data(time_series_map(), histogram_api:time_series_id(), histogram_api:metrics_id(),
+    histogram_api:data()) -> time_series_map().
+update_time_series_map_data(TimeSeriesMap, TimeSeriesId, MetricsId, UpdatedData) ->
+    TimeSeries = maps:get(TimeSeriesId, TimeSeriesMap),
+    Metrics = maps:get(MetricsId, TimeSeries),
+    TimeSeriesMap#{TimeSeriesId => TimeSeries#{MetricsId => Metrics#metrics{data = UpdatedData}}}.
 
 
 %%=====================================================================

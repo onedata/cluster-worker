@@ -56,7 +56,7 @@
 
 -spec new(datastore_ctx(), histogram_api:id(), histogram_api:time_series_map(), batch()) -> ctx().
 new(DatastoreCtx, Id, TimeSeries, Batch) ->
-    HistogramDoc = #document{key = Id, value = histogram_hub:init(TimeSeries)},
+    HistogramDoc = #document{key = Id, value = histogram_hub:set_time_series(TimeSeries)},
     {{ok, SavedHistogramDoc}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, Id, HistogramDoc, Batch),
     #ctx{
         datastore_ctx = DatastoreCtx,
@@ -134,7 +134,9 @@ update(HeadKey, Data, #ctx{
     active_time_series = TimeSeriesId,
     active_metrics = MetricsId
 } = Ctx) ->
-    UpdatedDoc = HeadDoc#document{value = histogram_hub:update_data(HistogramRecord, TimeSeriesId, MetricsId, Data)},
+    TimeSeries = histogram_hub:get_time_series(HistogramRecord),
+    UpdatedTimeSeries = histogram_api:update_time_series_map_data(TimeSeries, TimeSeriesId, MetricsId, Data),
+    UpdatedDoc = HeadDoc#document{value = histogram_hub:set_time_series(UpdatedTimeSeries)},
     Ctx#ctx{head = UpdatedDoc, head_updated = true};
 
 update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->

@@ -1128,7 +1128,11 @@ histogram_document_fetch_test(Config) ->
         ConfigMap = lists:foldl(fun(N, Acc) ->
             TimeSeries = <<"TS", (N rem 2)>>,
             MetricsMap = maps:get(TimeSeries, Acc, #{}),
-            MetricsConfig = #histogram_config{window_size = 1, max_windows_count = 10000 * N, apply_function = last},
+            ApplyFun = case N of
+                5 -> sum;
+                _ -> last
+            end,
+            MetricsConfig = #histogram_config{window_size = 1, max_windows_count = 10000 * N, apply_function = ApplyFun},
             Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
         end, #{}, lists:seq(1, 5)),
         ?assertEqual(ok, rpc:call(Worker, Model, histogram_init, [Id, ConfigMap])),
@@ -1138,9 +1142,14 @@ histogram_document_fetch_test(Config) ->
 
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
-            maps:fold(fun(MetricsId, #histogram_config{max_windows_count = MaxWindowsCount}, InternalAcc) ->
-                InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(
-                    lists:reverse(Points), maps:get(MaxWindowsCount, ExpectedWindowsCounts))}
+            maps:fold(fun
+                (MetricsId, #histogram_config{max_windows_count = MaxWindowsCount, apply_function = last}, InternalAcc) ->
+                    InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(
+                        lists:reverse(Points), maps:get(MaxWindowsCount, ExpectedWindowsCounts))};
+                (MetricsId, #histogram_config{max_windows_count = MaxWindowsCount, apply_function = sum}, InternalAcc) ->
+                    MappedPoints = lists:map(fun({Timestamp, Value}) -> {Timestamp, {1, Value}} end, Points),
+                    InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(
+                        lists:reverse(MappedPoints), maps:get(MaxWindowsCount, ExpectedWindowsCounts))}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
 

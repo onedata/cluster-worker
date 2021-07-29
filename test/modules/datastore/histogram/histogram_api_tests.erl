@@ -16,6 +16,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include("modules/datastore/histogram.hrl").
+-include("modules/datastore/histogram_api.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include("global_definitions.hrl").
 
@@ -76,19 +77,29 @@ single_doc_splitting_strategies_create() ->
 
 multiple_metrics_splitting_strategies_create() ->
     multiple_metrics_splitting_strategies_create_testcase(10, 20, 30,
-        {doc_splitting_strategy, 1, 10, 0}, {doc_splitting_strategy, 1, 20, 0}, {doc_splitting_strategy, 1, 30, 0}),
+        #doc_splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 10, max_windows_in_tail_doc = 0},
+        #doc_splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 20, max_windows_in_tail_doc = 0},
+        #doc_splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 30, max_windows_in_tail_doc = 0}),
 
     multiple_metrics_splitting_strategies_create_testcase(10, 2000, 30,
-        {doc_splitting_strategy, 1, 10, 0}, {doc_splitting_strategy, 3, 1960, 2000}, {doc_splitting_strategy, 1, 30, 0}),
+        #doc_splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 10, max_windows_in_tail_doc = 0},
+        #doc_splitting_strategy{max_docs_count = 3, max_windows_in_head_doc = 1960, max_windows_in_tail_doc = 2000},
+        #doc_splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 30, max_windows_in_tail_doc = 0}),
 
     multiple_metrics_splitting_strategies_create_testcase(10, 6000, 30,
-        {doc_splitting_strategy, 1, 10, 0}, {doc_splitting_strategy, 7, 1960, 2000}, {doc_splitting_strategy, 1, 30, 0}),
+        #doc_splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 10, max_windows_in_tail_doc = 0},
+        #doc_splitting_strategy{max_docs_count = 7, max_windows_in_head_doc = 1960, max_windows_in_tail_doc = 2000},
+        #doc_splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 30, max_windows_in_tail_doc = 0}),
 
     multiple_metrics_splitting_strategies_create_testcase(1000, 1000, 30,
-        {doc_splitting_strategy, 2, 985, 2000}, {doc_splitting_strategy, 2, 985, 2000}, {doc_splitting_strategy, 1, 30, 0}),
+        #doc_splitting_strategy{max_docs_count = 2, max_windows_in_head_doc = 985, max_windows_in_tail_doc = 2000},
+        #doc_splitting_strategy{max_docs_count = 2, max_windows_in_head_doc = 985, max_windows_in_tail_doc = 2000},
+        #doc_splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 30, max_windows_in_tail_doc = 0}),
 
     multiple_metrics_splitting_strategies_create_testcase(900, 1500, 300,
-        {doc_splitting_strategy, 2, 850, 1800}, {doc_splitting_strategy, 3, 850, 1500}, {doc_splitting_strategy, 1, 300, 0}),
+        #doc_splitting_strategy{max_docs_count = 2, max_windows_in_head_doc = 850, max_windows_in_tail_doc = 1800},
+        #doc_splitting_strategy{max_docs_count = 3, max_windows_in_head_doc = 850, max_windows_in_tail_doc = 1500},
+        #doc_splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 300, max_windows_in_tail_doc = 0}),
 
     ConfigMap = #{<<"TS1">> => #{
         <<"M1">> => #histogram_config{max_windows_count = 3000},
@@ -96,9 +107,12 @@ multiple_metrics_splitting_strategies_create() ->
         <<"M3">> => #histogram_config{max_windows_count = 5500}
     }},
     ExpectedMap = #{
-        {<<"TS1">>, <<"M1">>} => {doc_splitting_strategy, 4, 667, 2000},
-        {<<"TS1">>, <<"M2">>} => {doc_splitting_strategy, 5, 667, 2000},
-        {<<"TS1">>, <<"M3">>} => {doc_splitting_strategy, 7, 666, 2000}
+        {<<"TS1">>, <<"M1">>} => #doc_splitting_strategy{
+            max_docs_count = 4, max_windows_in_head_doc = 667, max_windows_in_tail_doc = 2000},
+        {<<"TS1">>, <<"M2">>} => #doc_splitting_strategy{
+            max_docs_count = 5, max_windows_in_head_doc = 667, max_windows_in_tail_doc = 2000},
+        {<<"TS1">>, <<"M3">>} => #doc_splitting_strategy{
+            max_docs_count = 7, max_windows_in_head_doc = 666, max_windows_in_tail_doc = 2000}
     },
     ?assertEqual(ExpectedMap, histogram_api:create_doc_splitting_strategies(ConfigMap)),
 
@@ -114,11 +128,16 @@ multiple_metrics_splitting_strategies_create() ->
         }
     },
     ExpectedMap2 = #{
-        {<<"TS1">>, <<"M1">>} => {doc_splitting_strategy, 5, 400, 2000},
-        {<<"TS1">>, <<"M2">>} => {doc_splitting_strategy, 5, 400, 2000},
-        {<<"TS1">>, <<"M3">>} => {doc_splitting_strategy, 6, 400, 2000},
-        {<<"TS2">>, <<"M1">>} => {doc_splitting_strategy, 4, 400, 2000},
-        {<<"TS2">>, <<"M2">>} => {doc_splitting_strategy, 11, 400, 2000}
+        {<<"TS1">>, <<"M1">>} => #doc_splitting_strategy{
+            max_docs_count = 5, max_windows_in_head_doc = 400, max_windows_in_tail_doc = 2000},
+        {<<"TS1">>, <<"M2">>} => #doc_splitting_strategy{
+            max_docs_count = 5, max_windows_in_head_doc = 400, max_windows_in_tail_doc = 2000},
+        {<<"TS1">>, <<"M3">>} => #doc_splitting_strategy{
+            max_docs_count = 6, max_windows_in_head_doc = 400, max_windows_in_tail_doc = 2000},
+        {<<"TS2">>, <<"M1">>} => #doc_splitting_strategy{
+            max_docs_count = 4, max_windows_in_head_doc = 400, max_windows_in_tail_doc = 2000},
+        {<<"TS2">>, <<"M2">>} => #doc_splitting_strategy{
+            max_docs_count = 11, max_windows_in_head_doc = 400, max_windows_in_tail_doc = 2000}
     },
     ?assertEqual(ExpectedMap2, histogram_api:create_doc_splitting_strategies(ConfigMap2)),
 
@@ -179,7 +198,7 @@ single_metrics_single_node() ->
 
     ?assertMatch({{error, historgam_get_failed}, _}, histogram_api:get(Ctx, Id, very_bad_arg, #{}, Batch6)).
 
-% TODO - dac testy startu i limitu przechodzace przez wiele node'ow
+
 single_metrics_multiple_nodes() ->
     Ctx = #{},
     Id = datastore_key:new(),
@@ -190,25 +209,33 @@ single_metrics_multiple_nodes() ->
     Batch = init_histogram(Ctx, Id, ConfigMap),
 
     Points = lists:map(fun(I) -> {2 * I, 4 * I} end, lists:seq(1, 10000)),
-
-%%    Start = os:timestamp(),
     Batch2 = update_many(Ctx, Id, Points, Batch),
-%%    T = timer:now_diff(os:timestamp(), Start),
-%%    io:format("xxxxx ~p", [T]),
 
     ExpectedGetAns = lists:reverse(Points),
     ExpectedMap = #{{TimeSeriesId, MetricsId} => ExpectedGetAns},
     ?assertMatch({{ok, ExpectedGetAns}, _}, histogram_api:get(Ctx, Id, {TimeSeriesId, MetricsId}, #{}, Batch2)),
     ?assertMatch({{ok, ExpectedMap}, _}, histogram_api:get(Ctx, Id, [{TimeSeriesId, MetricsId}], #{}, Batch2)),
 
+    ExpectedSublist = lists:sublist(ExpectedGetAns, 1001, 4000),
+    ?assertMatch({{ok, ExpectedSublist}, _},
+        histogram_api:get(Ctx, Id, {TimeSeriesId, MetricsId}, #{start => 18000, limit => 4000}, Batch2)),
+    ?assertMatch({{ok, ExpectedSublist}, _},
+        histogram_api:get(Ctx, Id, {TimeSeriesId, MetricsId}, #{start => 18000, stop => 10002}, Batch2)),
+
+    ExpectedSublist2 = lists:sublist(ExpectedGetAns, 3001, 4000),
+    ?assertMatch({{ok, ExpectedSublist2}, _},
+        histogram_api:get(Ctx, Id, {TimeSeriesId, MetricsId}, #{start => 14000, limit => 4000}, Batch2)),
+    ?assertMatch({{ok, ExpectedSublist2}, _},
+        histogram_api:get(Ctx, Id, {TimeSeriesId, MetricsId}, #{start => 14000, stop => 6002}, Batch2)),
+
     ?assertEqual(5, maps:size(Batch2)),
     DocsNums = lists:foldl(fun
-        (#document{value = {histogram_tail_node, {data, Windows, _, _}}}, {HeadsCountAcc, TailsCountAcc}) ->
+        (#document{value = {histogram_tail_node, #data{windows = Windows}}}, {HeadsCountAcc, TailsCountAcc}) ->
             ?assertEqual(2000, histogram_windows:get_size(Windows)),
             {HeadsCountAcc, TailsCountAcc + 1};
         (#document{value = {histogram_hub, TimeSeries}}, {HeadsCountAcc, TailsCountAcc}) ->
             [Metrics] = maps:values(TimeSeries),
-            [#metrics{data = {data, Windows, _, _}}] = maps:values(Metrics),
+            [#metrics{data = #data{windows = Windows}}] = maps:values(Metrics),
             ?assertEqual(2000, histogram_windows:get_size(Windows)),
             {HeadsCountAcc + 1, TailsCountAcc}
     end, {0, 0}, maps:values(Batch2)),
@@ -325,14 +352,14 @@ single_time_series_multiple_nodes() ->
     ?assertEqual(6, maps:size(Batch2)),
     TailSizes = [1500, 1500, 2000, 2000, 2000],
     RemainingTailSizes = lists:foldl(fun
-        (#document{value = {histogram_tail_node, {data, Windows, _, _}}}, TmpTailSizes) ->
+        (#document{value = {histogram_tail_node, #data{windows = Windows}}}, TmpTailSizes) ->
             Size = histogram_windows:get_size(Windows),
             ?assert(lists:member(Size, TmpTailSizes)),
             TmpTailSizes -- [Size];
         (#document{value = {histogram_hub, TimeSeries}}, TmpTailSizes) ->
             [MetricsMap] = maps:values(TimeSeries),
             ?assertEqual(4, maps:size(MetricsMap)),
-            lists:foreach(fun(#metrics{data = {data, Windows, _, _}}) ->
+            lists:foreach(fun(#metrics{data = #data{windows = Windows}}) ->
                 ?assertEqual(500, histogram_windows:get_size(Windows))
             end, maps:values(MetricsMap)),
             TmpTailSizes
@@ -452,7 +479,7 @@ multiple_time_series_multiple_nodes() ->
     ?assertEqual(8, maps:size(Batch2)),
     TailSizes = [1200, 1200, 1600, 1600, 1600, 2000, 2000],
     RemainingTailSizes = lists:foldl(fun
-        (#document{value = {histogram_tail_node, {data, Windows, _, _}}}, TmpTailSizes) ->
+        (#document{value = {histogram_tail_node, #data{windows = Windows}}}, TmpTailSizes) ->
             Size = histogram_windows:get_size(Windows),
             ?assert(lists:member(Size, TmpTailSizes)),
             TmpTailSizes -- [Size];
@@ -462,7 +489,7 @@ multiple_time_series_multiple_nodes() ->
             MetricsMap1 = maps:get(<<"TS", 1>>, TimeSeries),
             ?assertEqual(2, maps:size(MetricsMap0)),
             ?assertEqual(3, maps:size(MetricsMap1)),
-            lists:foreach(fun(#metrics{data = {data, Windows, _, _}}) ->
+            lists:foreach(fun(#metrics{data = #data{windows = Windows}}) ->
                 ?assertEqual(400, histogram_windows:get_size(Windows))
             end, maps:values(MetricsMap0) ++ maps:values(MetricsMap1)),
             TmpTailSizes
@@ -493,7 +520,8 @@ multiple_time_series_multiple_nodes() ->
 
 single_doc_splitting_strategies_create_testcase(MaxWindowsCount, WindowsInHead, WindowsInTail, DocCount) ->
     ConfigMap = #{<<"TS1">> => #{<<"M1">> => #histogram_config{max_windows_count = MaxWindowsCount}}},
-    ExpectedMap = #{{<<"TS1">>, <<"M1">>} => {doc_splitting_strategy, DocCount, WindowsInHead, WindowsInTail}},
+    ExpectedMap = #{{<<"TS1">>, <<"M1">>} => #doc_splitting_strategy{
+        max_docs_count = DocCount, max_windows_in_head_doc = WindowsInHead, max_windows_in_tail_doc = WindowsInTail}},
     ?assertEqual(ExpectedMap, histogram_api:create_doc_splitting_strategies(ConfigMap)).
 
 

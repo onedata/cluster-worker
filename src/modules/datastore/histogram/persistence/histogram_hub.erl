@@ -16,7 +16,7 @@
 -include("modules/datastore/histogram.hrl").
 
 %% API
--export([init/1, update_data/4, get_time_series/1]).
+-export([set_time_series/1, get_time_series/1]).
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
 
@@ -30,18 +30,9 @@
 %%% API
 %%%===================================================================
 
--spec init(histogram_api:time_series_map()) -> histogram_node().
-init(TimeSeries) ->
+-spec set_time_series(histogram_api:time_series_map()) -> histogram_node().
+set_time_series(TimeSeries) ->
     #histogram_hub{time_series = TimeSeries}.
-
--spec update_data(histogram_node(), histogram_api:time_series_id(), histogram_api:metrics_id(), histogram_api:data()) ->
-    histogram_node().
-% TODO - wiedza o budowie mapy jest tutaj i w API - to nie jest dobre.
-update_data(#histogram_hub{time_series = TimeSeriesMap} = Record, TimeSeriesId, MetricsId, UpdatedData) ->
-    TimeSeries = maps:get(TimeSeriesId, TimeSeriesMap),
-    Metrics = maps:get(MetricsId, TimeSeries),
-    UpdatedTimeSeriesMap = TimeSeriesMap#{TimeSeriesId => TimeSeries#{MetricsId => Metrics#metrics{data = UpdatedData}}},
-    Record#histogram_hub{time_series = UpdatedTimeSeriesMap}.
 
 -spec get_time_series(histogram_node()) -> histogram_api:time_series_map().
 get_time_series(#histogram_hub{time_series = TimeSeries}) ->
@@ -67,6 +58,7 @@ get_ctx() ->
 -spec get_record_struct(datastore_model:record_version()) ->
     datastore_model:record_struct().
 get_record_struct(1) ->
+    {record, [DataRecordStruct]} = histogram_tail_node:get_record_struct(1),
     {record, [
         {time_series, #{string => #{string => {record, [
             {config, {record, [
@@ -80,11 +72,6 @@ get_record_struct(1) ->
                 {max_windows_in_head_doc, integer},
                 {max_windows_in_tail_doc, integer}
             ]}},
-            % TODO - definicja data powinna isc do jednego miejsca (api)?
-            {data, {record, [
-                {windows, {custom, json, {histogram_windows, encode, decode}}},
-                {prev_record, string},
-                {prev_record_timestamp, integer}
-            ]}}
+            DataRecordStruct
         ]}}}}
     ]}.

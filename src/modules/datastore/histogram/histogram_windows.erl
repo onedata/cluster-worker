@@ -231,9 +231,6 @@ list_values(Iterator, Options) ->
 
 -spec split(windows(), non_neg_integer()) -> {windows(), windows(), timestamp()}.
 split(Windows, SplitPosition) ->
-    % TOOD - powonno byc na odwrot bo teraz wiekszosc zostaje w headzie
-    % TODO - sprawdzic czy split position jest prawidlowa (najweksza wartosc w starszym node)
-    % TODO - dodac do testow API test gdzie dodajemy najwiekszy/najmniejszy w danym node
     WindowsList = gb_trees:to_list(Windows),
     Windows1 = lists:sublist(WindowsList, SplitPosition),
     [{SplitKey, _} | _] = Windows2 = lists:sublist(WindowsList, SplitPosition + 1, length(WindowsList) - SplitPosition),
