@@ -111,7 +111,7 @@ reorganize_windows(WindowsInPrevRecord, WindowsInCurrentRecord, MaxWindowsInPrev
 
 -spec encode(windows()) -> binary().
 encode(Windows) ->
-    jiffy:encode(lists:map(fun
+    json_utils:encode(lists:map(fun
         ({Timestamp, {ValuesCount, ValuesSum}}) -> [Timestamp, ValuesCount, ValuesSum];
         ({Timestamp, Value}) -> [Timestamp, Value]
     end, to_list(Windows))).
@@ -119,7 +119,7 @@ encode(Windows) ->
 
 -spec decode(binary()) -> windows().
 decode(Term) ->
-    InputList = jiffy:decode(Term),
+    InputList = json_utils:decode(Term),
     from_list(lists:map(fun
         ([Timestamp, ValuesCount, ValuesSum]) -> {Timestamp, {ValuesCount, ValuesSum}};
         ([Timestamp, Value]) -> {Timestamp, Value}

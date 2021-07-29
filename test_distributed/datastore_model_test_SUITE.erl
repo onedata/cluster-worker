@@ -1122,7 +1122,6 @@ multinode_histogram_test(Config) ->
 histogram_document_fetch_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
-        ct:print("aaaaa ~p", [Model]),
         InitialKeys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)),
         Id = datastore_key:new(),
         ConfigMap = lists:foldl(fun(N, Acc) ->

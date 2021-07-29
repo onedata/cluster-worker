@@ -90,8 +90,9 @@ init(Ctx, Id, ConfigMap, Batch) ->
             {error, empty_metrics};
         _:{error, wrong_window_size} ->
             {error, wrong_window_size};
-        Error:Reason ->
-            ?error_stacktrace("Histogram ~p init error: ~p:~p~nConfig map: ~p", [Id, Error, Reason, ConfigMap]),
+        Error:Reason:Stacktrace ->
+            ?error_stacktrace("Histogram ~p init error: ~p:~p~nConfig map: ~p",
+                [Id, Error, Reason, ConfigMap], Stacktrace),
             {{error, historgam_init_failed}, Batch}
     end.
 
@@ -104,9 +105,9 @@ update(Ctx, Id, NewTimestamp, NewValue, Batch) ->
         FinalPersistenceCtx = update_time_series(maps:to_list(TimeSeriesMap), NewTimestamp, NewValue, PersistenceCtx),
         {ok, histogram_persistence:finalize(FinalPersistenceCtx)}
     catch
-        Error:Reason ->
+        Error:Reason:Stacktrace ->
             ?error_stacktrace("Histogram ~p update error: ~p:~p~nFailed to update point {~p, ~p}",
-                [Id, Error, Reason, NewTimestamp, NewValue]),
+                [Id, Error, Reason, NewTimestamp, NewValue], Stacktrace),
             {{error, historgam_update_failed}, Batch}
     end.
 
@@ -136,9 +137,9 @@ get(Ctx, Id, RequestedMetrics, Options, Batch) ->
         {Ans, FinalPersistenceCtx} = get_time_series_values(TimeSeriesMap, RequestedMetrics, Options, PersistenceCtx),
         {{ok, Ans}, histogram_persistence:finalize(FinalPersistenceCtx)}
     catch
-        Error:Reason when Reason =/= {fetch_error, not_found} ->
+        Error:Reason:Stacktrace when Reason =/= {fetch_error, not_found} ->
             ?error_stacktrace("Histogram ~p get error: ~p:~p~nRequested metrics: ~p~nOptions: ~p",
-                [Id, Error, Reason, RequestedMetrics, Options]),
+                [Id, Error, Reason, RequestedMetrics, Options], Stacktrace),
             {{error, historgam_get_failed}, Batch}
     end.
 
