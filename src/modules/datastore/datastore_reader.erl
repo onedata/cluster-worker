@@ -103,7 +103,7 @@ get_links_trees(FetchNode, Ctx, Key) ->
 
 
 -spec histogram_get(node(), datastore_doc:ctx(), list()) ->
-    ok | {ok, [histogram_windows:window()] | histogram_api:metrics_values_map()} | {error, term()}.
+    ok | {ok, [histogram_windows:window()] | histogram_api:windows_map()} | {error, term()}.
 histogram_get(FetchNode, Ctx, [Id, RequestedMetrics, Options] = Args) ->
     try
         case histogram_api:get(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined) of

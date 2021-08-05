@@ -311,11 +311,9 @@ get_links_trees(Ctx, Key) ->
 
 
 -spec histogram_operation(ctx(), key(), atom(), [term()]) ->
-    ok | {ok, [histogram_windows:window()] | histogram_api:metrics_values_map()} | {error, term()}.
+    ok | {ok, [histogram_windows:window()] | histogram_api:windows_map()} | {error, term()}.
 histogram_operation(Ctx, Key, Function, Args) ->
-    datastore_hooks:wrap(Ctx, Key, Function, Args, fun
-        (Function, Args) -> datastore_router:route_histogram_operation(Function, Args)
-    end).
+    datastore_hooks:wrap(Ctx, Key, Function, Args, fun datastore_router:route_histogram_operation/2).
 
 
 -spec infinite_log_operation(ctx(), key(), atom(), [term()]) ->

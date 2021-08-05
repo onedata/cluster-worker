@@ -1069,23 +1069,23 @@ histogram_test(Config) ->
         ConfigMap = lists:foldl(fun(N, Acc) ->
             TimeSeries = <<"TS", (N rem 2)>>,
             MetricsMap = maps:get(TimeSeries, Acc, #{}),
-            MetricsConfig = #histogram_config{window_size = N, max_windows_count = 600 div N + 10, apply_function = sum},
+            MetricsConfig = #metric_config{window_timespan = N, max_windows_count = 600 div N + 10, aggregator = sum},
             Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
         end, #{}, lists:seq(1, 5)),
-        ?assertEqual(ok, rpc:call(Worker, Model, histogram_init, [Id, ConfigMap])),
+        ?assertEqual(ok, rpc:call(Worker, Model, histogram_create, [Id, ConfigMap])),
 
-        PointsCount = 1199,
-        Points = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, PointsCount)),
+        MeasurementsCount = 1199,
+        Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementsCount)),
 
         lists:foreach(fun({NewTimestamp, NewValue}) ->
             ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, NewTimestamp, NewValue]))
-        end, Points),
+        end, Measurements),
 
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
-            maps:fold(fun(MetricsId, #histogram_config{window_size = WindowSize, max_windows_count = MaxWindowsCount}, InternalAcc) ->
+            maps:fold(fun(MetricsId, #metric_config{window_timespan = WindowSize, max_windows_count = MaxWindowsCount}, InternalAcc) ->
                 InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(lists:reverse(lists:map(fun(N) ->
                     {N, {WindowSize, (N + N + WindowSize - 1) * WindowSize}}
-                end, lists:seq(0, PointsCount, WindowSize))), MaxWindowsCount)}
+                end, lists:seq(0, MeasurementsCount, WindowSize))), MaxWindowsCount)}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
         ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, maps:keys(ExpectedMap), #{}]))
@@ -1099,20 +1099,20 @@ multinode_histogram_test(Config) ->
         ConfigMap = lists:foldl(fun(N, Acc) ->
             TimeSeries = <<"TS", (N rem 2)>>,
             MetricsMap = maps:get(TimeSeries, Acc, #{}),
-            MetricsConfig = #histogram_config{window_size = 1, max_windows_count = 10000 * N, apply_function = last},
+            MetricsConfig = #metric_config{window_timespan = 1, max_windows_count = 10000 * N, aggregator = last},
             Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
         end, #{}, lists:seq(1, 5)),
-        ?assertEqual(ok, rpc:call(Worker, Model, histogram_init, [Id, ConfigMap])),
+        ?assertEqual(ok, rpc:call(Worker, Model, histogram_create, [Id, ConfigMap])),
 
-        PointsCount = 610000,
-        Points = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, PointsCount)),
-        ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, Points])),
+        MeasurementsCount = 610000,
+        Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
+        ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, Measurements])),
 
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
-            maps:fold(fun(MetricsId, #histogram_config{max_windows_count = MaxWindowsCount}, InternalAcc) ->
+            maps:fold(fun(MetricsId, #metric_config{max_windows_count = MaxWindowsCount}, InternalAcc) ->
                 InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(
-                    lists:reverse(Points), maps:get(MaxWindowsCount, ExpectedWindowsCounts))}
+                    lists:reverse(Measurements), maps:get(MaxWindowsCount, ExpectedWindowsCounts))}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
         ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, maps:keys(ExpectedMap), #{}]))
@@ -1131,28 +1131,28 @@ histogram_document_fetch_test(Config) ->
                 5 -> sum;
                 _ -> last
             end,
-            MetricsConfig = #histogram_config{window_size = 1, max_windows_count = 10000 * N, apply_function = ApplyFun},
+            MetricsConfig = #metric_config{window_timespan = 1, max_windows_count = 10000 * N, aggregator = ApplyFun},
             Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
         end, #{}, lists:seq(1, 5)),
-        ?assertEqual(ok, rpc:call(Worker, Model, histogram_init, [Id, ConfigMap])),
+        ?assertEqual(ok, rpc:call(Worker, Model, histogram_create, [Id, ConfigMap])),
 
-        PointsCount = 610000,
-        Points = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, PointsCount)),
+        MeasurementsCount = 610000,
+        Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
 
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
             maps:fold(fun
-                (MetricsId, #histogram_config{max_windows_count = MaxWindowsCount, apply_function = last}, InternalAcc) ->
+                (MetricsId, #metric_config{max_windows_count = MaxWindowsCount, aggregator = last}, InternalAcc) ->
                     InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(
-                        lists:reverse(Points), maps:get(MaxWindowsCount, ExpectedWindowsCounts))};
-                (MetricsId, #histogram_config{max_windows_count = MaxWindowsCount, apply_function = sum}, InternalAcc) ->
-                    MappedPoints = lists:map(fun({Timestamp, Value}) -> {Timestamp, {1, Value}} end, Points),
+                        lists:reverse(Measurements), maps:get(MaxWindowsCount, ExpectedWindowsCounts))};
+                (MetricsId, #metric_config{max_windows_count = MaxWindowsCount, aggregator = sum}, InternalAcc) ->
+                    MappedMeasurements = lists:map(fun({Timestamp, Value}) -> {Timestamp, {1, Value}} end, Measurements),
                     InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(
-                        lists:reverse(MappedPoints), maps:get(MaxWindowsCount, ExpectedWindowsCounts))}
+                        lists:reverse(MappedMeasurements), maps:get(MaxWindowsCount, ExpectedWindowsCounts))}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
 
-        ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, Points])),
+        ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, Measurements])),
         Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
 
         lists:foreach(fun(Key) ->

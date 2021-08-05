@@ -19,14 +19,14 @@
 -export_type([key/0, ctx/0]).
 
 %% API
--export([init/3, update/4, update/3, get/4]).
+-export([create/3, update/4, update/3, get/4]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
--spec init(ctx(), histogram_api:id(), histogram_api:time_series_config()) -> ok | {error, term}.
-init(Ctx, Id, ConfigMap) ->
+-spec create(ctx(), histogram_api:id(), histogram_api:time_series_config()) -> ok | {error, term}.
+create(Ctx, Id, ConfigMap) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:histogram_operation/4, [?FUNCTION_NAME, [ConfigMap]]).
 
 
@@ -38,12 +38,12 @@ update(Ctx, Id, NewTimestamp, NewValue) ->
 
 -spec update(ctx(), histogram_api:id(), [{histogram_windows:timestamp(), histogram_windows:value()}]) ->
     ok | {error, term}.
-update(Ctx, Id, Points) ->
-    datastore_model:datastore_apply(Ctx, Id, fun datastore:histogram_operation/4, [?FUNCTION_NAME, [Points]]).
+update(Ctx, Id, Measurements) ->
+    datastore_model:datastore_apply(Ctx, Id, fun datastore:histogram_operation/4, [?FUNCTION_NAME, [Measurements]]).
 
 
 -spec get(ctx(), histogram_api:id(), histogram_api:requested_metrics() | [histogram_api:requested_metrics()],
-    histogram_windows:options()) -> ok | {error, term}.
+    histogram_windows:get_options()) -> ok | {error, term}.
 get(Ctx, Id, RequestedMetrics, Options) ->
     datastore_model:datastore_apply(Ctx, Id,
         fun datastore:histogram_operation/4, [?FUNCTION_NAME, [RequestedMetrics, Options]]).

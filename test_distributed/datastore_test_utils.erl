@@ -158,17 +158,17 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_infinite_log:set_ttl(Ctx, Key, Ttl)
         end},
-        {histogram_init, fun(Id, ConfigMap) ->
+        {histogram_create, fun(Id, ConfigMap) ->
             Ctx = get_ctx(Model),
-            datastore_histogram:init(Ctx, Id, ConfigMap)
+            datastore_histogram:create(Ctx, Id, ConfigMap)
         end},
         {histogram_update, fun(Id, NewTimestamp, NewValue) ->
             Ctx = get_ctx(Model),
             datastore_histogram:update(Ctx, Id, NewTimestamp, NewValue)
         end},
-        {histogram_update, fun(Id, Points) ->
+        {histogram_update, fun(Id, Measurements) ->
             Ctx = get_ctx(Model),
-            datastore_histogram:update(Ctx, Id, Points)
+            datastore_histogram:update(Ctx, Id, Measurements)
         end},
         {histogram_get, fun(Id, RequestedMetrics, Options) ->
             Ctx = get_ctx(Model),

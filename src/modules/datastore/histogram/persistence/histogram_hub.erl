@@ -16,27 +16,37 @@
 -include("modules/datastore/histogram.hrl").
 
 %% API
--export([set_time_series/1, get_time_series/1]).
+-export([set_time_series_map/1, get_time_series_map/1]).
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
 
+% TODO - uporzadkowac slownictow head/hub
 -record(histogram_hub, {
-    time_series :: histogram_api:time_series_map()
+    time_series_map :: histogram_api:time_series_map()
 }).
 
--type histogram_node() :: #histogram_hub{}.
+-type record() :: #histogram_hub{}.
+
+% Context used only by datastore to initialize internal structure's.
+% Context provided via histogram_api module functions is used to get/save
+% document instead this one.
+-define(CTX, #{
+    model => ?MODULE,
+    memory_driver => undefined,
+    disc_driver => undefined
+}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
--spec set_time_series(histogram_api:time_series_map()) -> histogram_node().
-set_time_series(TimeSeries) ->
-    #histogram_hub{time_series = TimeSeries}.
+-spec set_time_series_map(histogram_api:time_series_map()) -> record().
+set_time_series_map(TimeSeriesMap) ->
+    #histogram_hub{time_series_map = TimeSeriesMap}.
 
--spec get_time_series(histogram_node()) -> histogram_api:time_series_map().
-get_time_series(#histogram_hub{time_series = TimeSeries}) ->
-    TimeSeries.
+-spec get_time_series_map(record()) -> histogram_api:time_series_map().
+get_time_series_map(#histogram_hub{time_series_map = TimeSeriesMap}) ->
+    TimeSeriesMap.
 
 %%%===================================================================
 %%% datastore_model callbacks
@@ -44,16 +54,13 @@ get_time_series(#histogram_hub{time_series = TimeSeries}) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns model's context.
+%% Returns model's context needed to initialize internal structure's
+%% (it is not used to get or save document).
 %% @end
 %%--------------------------------------------------------------------
 -spec get_ctx() -> datastore:ctx().
 get_ctx() ->
-    #{
-        model => ?MODULE,
-        memory_driver => undefined,
-        disc_driver => undefined
-    }.
+    ?CTX.
 
 -spec get_record_struct(datastore_model:record_version()) ->
     datastore_model:record_struct().
@@ -63,11 +70,11 @@ get_record_struct(1) ->
         {time_series, #{string => #{string => {record, [
             {config, {record, [
                 {legend, binary},
-                {window_size, integer},
+                {window_timespan, integer},
                 {max_windows_count, integer},
-                {apply_function, atom}
+                {aggregator, atom}
             ]}},
-            {doc_splitting_strategy, {record, [
+            {splitting_strategy, {record, [
                 {max_docs_count, integer},
                 {max_windows_in_head_doc, integer},
                 {max_windows_in_tail_doc, integer}

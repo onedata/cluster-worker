@@ -13,11 +13,11 @@
 -ifndef(HISTOGRAM_HRL).
 -define(HISTOGRAM_HRL, 1).
 
--record(histogram_config, {
+-record(metric_config, {
     legend = <<>> :: histogram_api:legend(),
-    window_size :: non_neg_integer(),
+    window_timespan :: non_neg_integer(),
     max_windows_count :: non_neg_integer(),
-    apply_function :: histogram_windows:apply_function()
+    aggregator :: histogram_windows:aggregator()
 }).
 
 -endif.
