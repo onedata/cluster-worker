@@ -14,7 +14,7 @@
 %%% than one histogram tail node may be needed).
 %%% @end
 %%%-------------------------------------------------------------------
--module(histogram_tail_node).
+-module(histogram_metric_data).
 -author("Michal Wrzeszcz").
 
 %% API
@@ -22,11 +22,11 @@
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
 
--record(histogram_tail_node, {
-    data :: histogram_api:data()
+-record(histogram_metric_data, {
+    data :: histogram_metric:data()
 }).
 
--type record() :: #histogram_tail_node{}.
+-type record() :: #histogram_metric_data{}.
 
 % Context used only by datastore to initialize internal structure's.
 % Context provided via histogram_api module functions is used to get/save
@@ -41,12 +41,12 @@
 %%% API
 %%%===================================================================
 
--spec set_data(histogram_api:data()) -> record().
+-spec set_data(histogram_metric:data()) -> record().
 set_data(Data) ->
-    #histogram_tail_node{data = Data}.
+    #histogram_metric_data{data = Data}.
 
--spec get_data(record()) -> histogram_api:data().
-get_data(#histogram_tail_node{data = Data}) ->
+-spec get_data(record()) -> histogram_metric:data().
+get_data(#histogram_metric_data{data = Data}) ->
     Data.
 
 %%%===================================================================

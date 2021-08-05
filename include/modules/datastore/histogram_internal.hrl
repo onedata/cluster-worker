@@ -6,14 +6,13 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This file contains records definitions used by histogram_api module.
-%%% Records are defined in hrl to be used during unit tests and should
-%%% not be used by any other module.
+%%% This file contains records definitions used by datastore histogram modules.
+%%% Records are defined in hrl should not be used outside datastore.
 %%% @end
 %%%-------------------------------------------------------------------
 
--ifndef(HISTOGRAM_API_HRL).
--define(HISTOGRAM_API_HRL, 1).
+-ifndef(HISTOGRAM_INTERNAL_HRL).
+-define(HISTOGRAM_INTERNAL_HRL, 1).
 
 
 % Record storing part of metric's windows. If windows count exceeds capacity of
@@ -22,7 +21,7 @@
 % first record.
 -record(data, {
     windows = histogram_windows:init() :: histogram_windows:windows(),
-    prev_record :: histogram_api:key() | undefined,
+    prev_record :: histogram_metric:key() | undefined,
     % Timestamp of newest measurement in previous record
     prev_record_timestamp :: histogram_windows:timestamp() | undefined
 }).
@@ -41,11 +40,11 @@
 % Record describing single metric. It stores config, splitting_strategy (see above) and head of
 % list of #data{} records.
 -record(metric, {
-    config :: histogram_api:metric_config(),
+    config :: histogram_metric:config(),
     % NOTE: Doc splitting strategy may result in keeping more windows than required by config
     % (in order to optimize documents management)
-    splitting_strategy :: histogram_api:splitting_strategy(),
-    data = #data{} :: histogram_api:data()
+    splitting_strategy :: histogram_metric:splitting_strategy(),
+    data = #data{} :: histogram_metric:data()
 }).
 
 -endif.

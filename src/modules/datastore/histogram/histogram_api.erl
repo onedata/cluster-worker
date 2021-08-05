@@ -29,49 +29,36 @@
 -module(histogram_api).
 -author("Michal Wrzeszcz").
 
--include("modules/datastore/histogram_api.hrl").
+-include("modules/datastore/histogram_internal.hrl").
 -include("modules/datastore/histogram.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([create/4, update/5, update/4, get/5]).
-%% Time series map API
--export([update_time_series_map_data/4]).
 %% Test API
 -export([create_doc_splitting_strategies/1]).
 
 -type id() :: binary(). % Id of histogram
 -type time_series_id() :: binary().
--type metric_id() :: binary().
 
--type metric() :: #metric{}.
--type time_series() :: #{metric_id() => metric()}.
+-type time_series() :: #{histogram_metric:id() => histogram_metric:metric()}.
 -type time_series_map() :: #{time_series_id() => time_series()}.
--type time_series_config() :: #{time_series_id() => #{metric_id() => metric_config()}}.
+-type time_series_config() :: #{time_series_id() => #{histogram_metric:id() => histogram_metric:config()}}.
 
--type legend() :: binary().
--type metric_config() :: #metric_config{}.
--type splitting_strategy() :: #splitting_strategy{}.
--type data() :: #data{}.
-
--type requested_metrics() :: {time_series_id() | [time_series_id()], metric_id() | [metric_id()]}.
-% Metrics are stored in hierarchical map when time_series_id is used to get map with #{metric_id() => metric()}.
-% Other way of presentation is in flattened map using key {time_series_id(), metric_id()}. It is used
+-type requested_metrics() :: {time_series_id() | [time_series_id()], histogram_metric:id() | [histogram_metric:id()]}.
+% Metrics are stored in hierarchical map when time_series_id is used to get map with #{histogram_metric:id() => histogram_metric:metric()}.
+% Other way of presentation is in flattened map using key {time_series_id(), histogram_metric:id()}. It is used
 % mainly to return requested data (get can return only chosen metrics so it does not return hierarchical map).
--type full_metric_id() :: {time_series_id(), metric_id()}.
+-type full_metric_id() :: {time_series_id(), histogram_metric:id()}.
 -type windows_map() :: #{full_metric_id() => [histogram_windows:window()]}.
--type flat_config_map() :: #{full_metric_id() => metric_config()}.
+-type flat_config_map() :: #{full_metric_id() => histogram_metric:config()}.
 -type windows_count_map() :: #{full_metric_id() => non_neg_integer()}.
 
--export_type([id/0, time_series_map/0, time_series_config/0, time_series_id/0, metric_id/0,
-    data/0, metric_config/0, splitting_strategy/0, legend/0, requested_metrics/0, windows_map/0]).
+-export_type([id/0, time_series_map/0, time_series_config/0, time_series_id/0, requested_metrics/0, windows_map/0]).
 
--type key() :: datastore:key().
 -type ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
-
--export_type([key/0]).
 
 % Warning: do not use this env in app.config. Use of env limited to tests.
 -define(MAX_VALUES_IN_DOC, application:get_env(?CLUSTER_WORKER_APP_NAME, histogram_max_doc_size, 50000)).
@@ -158,7 +145,7 @@ get(Ctx, Id, RequestedMetrics, Options, Batch) ->
 
 
 %%=====================================================================
-%% Internal functions operation on time series
+%% Internal functions
 %%=====================================================================
 
 -spec update_time_series([{time_series_id(), time_series()}], histogram_windows:timestamp(), 
@@ -172,6 +159,17 @@ update_time_series([{TimeSeriesId, TimeSeries} | Tail], NewTimestamp, NewValue, 
     update_time_series(Tail, NewTimestamp, NewValue, UpdatedPersistenceCtx).
 
 
+-spec update_metrics([{histogram_metric:id(), histogram_metric:metric()}], histogram_windows:timestamp(),
+    histogram_windows:value(), histogram_persistence:ctx()) -> histogram_persistence:ctx().
+update_metrics([], _NewTimestamp, _NewValue, PersistenceCtx) ->
+    PersistenceCtx;
+update_metrics(
+    [{MetricId, Metric} | Tail], NewTimestamp, NewValue, PersistenceCtx) ->
+    UpdatedPersistenceCtx = histogram_persistence:set_active_metric(MetricId, PersistenceCtx),
+    FinalPersistenceCtx = histogram_metric:update(Metric, NewTimestamp, NewValue, UpdatedPersistenceCtx),
+    update_metrics(Tail, NewTimestamp, NewValue, FinalPersistenceCtx).
+
+
 -spec get(time_series_map(), requested_metrics() | [requested_metrics()],
     histogram_windows:get_options(), histogram_persistence:ctx()) ->
     {[histogram_windows:window()] | windows_map(), histogram_persistence:ctx()}.
@@ -180,19 +178,13 @@ get(_TimeSeriesMap, [], _Options, PersistenceCtx) ->
 
 get(TimeSeriesMap, [{TimeSeriesIds, MetricsIds} | RequestedMetrics], Options, PersistenceCtx) ->
     {Ans, UpdatedPersistenceCtx} = lists:foldl(fun(TimeSeriesId, Acc) ->
-        lists:foldl(fun(MetricsId, {TmpAns, TmpPersistenceCtx}) ->
+        lists:foldl(fun(MetricId, {TmpAns, TmpPersistenceCtx}) ->
             MetricsMap = maps:get(TimeSeriesId, TimeSeriesMap, #{}),
-            {Values, UpdatedTmpPersistenceCtx} = case maps:get(MetricsId, MetricsMap, undefined) of
-                undefined ->
-                    {undefined, TmpPersistenceCtx};
-                #metric{
-                    data = Data,
-                    config = Config
-                } ->
-                    Window = get_window(maps:get(start, Options, undefined), Config),
-                    get_from_metric(Data, Window, Options, TmpPersistenceCtx)
+            {Values, UpdatedTmpPersistenceCtx} = case maps:get(MetricId, MetricsMap, undefined) of
+                undefined -> {undefined, TmpPersistenceCtx};
+                Metric -> histogram_metric:get(Metric, Options, TmpPersistenceCtx)
             end,
-            {TmpAns#{{TimeSeriesId, MetricsId} => Values}, UpdatedTmpPersistenceCtx}
+            {TmpAns#{{TimeSeriesId, MetricId} => Values}, UpdatedTmpPersistenceCtx}
         end, Acc, utils:ensure_list(MetricsIds))
     end, {#{}, PersistenceCtx}, utils:ensure_list(TimeSeriesIds)),
 
@@ -208,190 +200,10 @@ get(TimeSeriesMap, {_, _} = Request, Options, PersistenceCtx) ->
 
 
 %%=====================================================================
-%% Internal functions operating on metrics
+%% Helper functions creating splitting strategy
 %%=====================================================================
 
--spec update_metrics([{metric_id(), metric()}], histogram_windows:timestamp(),
-    histogram_windows:value(), histogram_persistence:ctx()) -> histogram_persistence:ctx().
-update_metrics([], _NewTimestamp, _NewValue, PersistenceCtx) ->
-    PersistenceCtx;
-update_metrics(
-    [{MetricsId, #metric{
-        config = #metric_config{aggregator = Aggregator} = Config,
-        splitting_strategy = DocSplittingStrategy,
-        data = Data
-    }} | Tail], NewTimestamp, NewValue, PersistenceCtx) ->
-    WindowToBeUpdated = get_window(NewTimestamp, Config),
-    DataDocKey = histogram_persistence:get_head_key(PersistenceCtx),
-    PersistenceCtxWithIdSet = histogram_persistence:set_active_metric(MetricsId, PersistenceCtx),
-    UpdatedPersistenceCtx = update_metric(
-        Data, DataDocKey, 1, DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtxWithIdSet),
-    update_metrics(Tail, NewTimestamp, NewValue, UpdatedPersistenceCtx).
-
-
--spec update_metric(data(), key(), non_neg_integer(), splitting_strategy(),
-    histogram_windows:aggregator(), histogram_windows:timestamp(),
-    histogram_windows:value(), histogram_persistence:ctx()) -> histogram_persistence:ctx().
-update_metric(
-    #data{
-        windows = Windows
-    } = Data, DataDocKey, _DataDocPosition,
-    #splitting_strategy{
-        max_docs_count = 1,
-        max_windows_in_head_doc = MaxWindowsCount
-    }, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx) ->
-    UpdatedWindows = histogram_windows:aggregate(Windows, WindowToBeUpdated, NewValue, Aggregator),
-    FinalWindows = histogram_windows:prune_overflowing_windows(UpdatedWindows, MaxWindowsCount),
-    histogram_persistence:update(DataDocKey, Data#data{windows = FinalWindows}, PersistenceCtx);
-
-update_metric(
-    #data{
-        prev_record = undefined,
-        prev_record_timestamp = PrevRecordTimestamp
-    }, _DataDocKey, _DataDocPosition,
-    _DocSplittingStrategy, _Aggregator, WindowToBeUpdated, _NewValue, PersistenceCtx)
-    when PrevRecordTimestamp =/= undefined andalso PrevRecordTimestamp >= WindowToBeUpdated ->
-    PersistenceCtx;
-
-update_metric(
-    #data{
-        prev_record = undefined,
-        windows = Windows
-    } = Data, DataDocKey, DataDocPosition,
-    DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx) ->
-    UpdatedWindows = histogram_windows:aggregate(Windows, WindowToBeUpdated, NewValue, Aggregator),
-    {MaxWindowsCount, SplitPosition} = get_max_windows_and_split_position(DataDocKey, DocSplittingStrategy, PersistenceCtx),
-
-    case histogram_windows:should_reorganize_windows(UpdatedWindows, MaxWindowsCount) of
-        true ->
-            % Prev record is undefined so splitting is only possible way of reorganization
-            {Windows1, Windows2, SplitTimestamp} = histogram_windows:split_windows(UpdatedWindows, SplitPosition),
-            {_, _, UpdatedPersistenceCtx} = split_record(DataDocKey, Data,
-                Windows1, Windows2, SplitTimestamp, DataDocPosition, DocSplittingStrategy, PersistenceCtx),
-            UpdatedPersistenceCtx;
-        false ->
-            histogram_persistence:update(DataDocKey, Data#data{windows = UpdatedWindows}, PersistenceCtx)
-    end;
-
-update_metric(
-    #data{
-        prev_record = PrevRecordKey,
-        prev_record_timestamp = PrevRecordTimestamp
-    }, _DataDocKey, DataDocPosition,
-    DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx)
-    when PrevRecordTimestamp >= WindowToBeUpdated ->
-    {PrevRecordData, UpdatedPersistenceCtx} = histogram_persistence:get(PrevRecordKey, PersistenceCtx),
-    update_metric(PrevRecordData, PrevRecordKey, DataDocPosition + 1,
-        DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, UpdatedPersistenceCtx);
-
-update_metric(
-    #data{
-        windows = Windows,
-        prev_record = PrevRecordKey
-    } = Data, DataDocKey, DataDocPosition,
-    #splitting_strategy{
-        max_windows_in_tail_doc = MaxWindowsInTail
-    } = DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx) ->
-    WindowsWithAggregatedMeasurement = histogram_windows:aggregate(Windows, WindowToBeUpdated, NewValue, Aggregator),
-    {MaxWindowsCount, SplitPosition} = get_max_windows_and_split_position(DataDocKey, DocSplittingStrategy, PersistenceCtx),
-
-    case histogram_windows:should_reorganize_windows(WindowsWithAggregatedMeasurement, MaxWindowsCount) of
-        true ->
-            {#data{windows = WindowsInPrevRecord} = PrevRecordData, UpdatedPersistenceCtx} =
-                histogram_persistence:get(PrevRecordKey, PersistenceCtx),
-            Actions = histogram_windows:reorganize_windows(
-                WindowsInPrevRecord, WindowsWithAggregatedMeasurement, MaxWindowsInTail, SplitPosition),
-
-            lists:foldl(fun
-                ({update_current_record, UpdatedPrevRecordTimestamp, UpdatedWindows}, TmpPersistenceCtx) ->
-                    histogram_persistence:update(DataDocKey, Data#data{windows = UpdatedWindows,
-                        prev_record_timestamp = UpdatedPrevRecordTimestamp}, TmpPersistenceCtx);
-                ({split_current_record, {Windows1, Windows2, SplitTimestamp}}, TmpPersistenceCtx) ->
-                    {CreatedRecordKey, CreatedRecord, UpdatedTmpPersistenceCtx} = split_record(DataDocKey, Data,
-                        Windows1, Windows2, SplitTimestamp, DataDocPosition, DocSplittingStrategy, TmpPersistenceCtx),
-                    maybe_delete_last_doc(CreatedRecordKey, CreatedRecord, PrevRecordKey, PrevRecordData,
-                        DocSplittingStrategy, DataDocPosition + 2, UpdatedTmpPersistenceCtx);
-                ({update_previous_record, UpdatedWindowsInPrevRecord}, TmpPersistenceCtx) ->
-                    histogram_persistence:update(PrevRecordKey,
-                        PrevRecordData#data{windows = UpdatedWindowsInPrevRecord}, TmpPersistenceCtx)
-            end, UpdatedPersistenceCtx, Actions);
-        false ->
-            histogram_persistence:update(DataDocKey, Data#data{windows = WindowsWithAggregatedMeasurement}, PersistenceCtx)
-    end.
-
-
--spec maybe_delete_last_doc(key(), data(), key(), data() | undefined, splitting_strategy(), non_neg_integer(),
-    histogram_persistence:ctx()) -> histogram_persistence:ctx().
-maybe_delete_last_doc(NextRecordKey, NextRecordData, Key, _Data,
-    #splitting_strategy{max_docs_count = MaxCount}, DocumentNumber, PersistenceCtx) when DocumentNumber > MaxCount ->
-    UpdatedNextRecordData = NextRecordData#data{prev_record = undefined},
-    UpdatedPersistenceCtx = histogram_persistence:update(NextRecordKey, UpdatedNextRecordData, PersistenceCtx),
-    histogram_persistence:delete(Key, UpdatedPersistenceCtx);
-maybe_delete_last_doc(NextRecordKey, NextRecordData, Key, undefined,
-    DocSplittingStrategy, DocumentNumber, PersistenceCtx) ->
-    {Data, UpdatedPersistenceCtx} = histogram_persistence:get(Key, PersistenceCtx),
-    maybe_delete_last_doc(NextRecordKey, NextRecordData, Key, Data,
-        DocSplittingStrategy, DocumentNumber, UpdatedPersistenceCtx);
-maybe_delete_last_doc(_NextRecordKey, _NextRecordData, _Key, #data{prev_record = undefined},
-    _DocSplittingStrategy, _DocumentNumber, PersistenceCtx) ->
-    PersistenceCtx;
-maybe_delete_last_doc(_NextRecordKey, _NextRecordData, Key, #data{prev_record = PrevRecordKey} = Data,
-    DocSplittingStrategy, DocumentNumber, PersistenceCtx) ->
-    maybe_delete_last_doc(Key, Data, PrevRecordKey, undefined, DocSplittingStrategy, DocumentNumber + 1, PersistenceCtx).
-
-
--spec get_from_metric(data(), histogram_windows:timestamp() | undefined, histogram_windows:get_options(),
-    histogram_persistence:ctx()) -> {[histogram_windows:window()], histogram_persistence:ctx()}.
-get_from_metric(
-    #data{
-        windows = Windows,
-        prev_record = undefined
-    }, Window, Options, PersistenceCtx) ->
-    {_, WindowsToReturn} = histogram_windows:get(Windows, Window, Options),
-    {WindowsToReturn, PersistenceCtx};
-
-get_from_metric(
-    #data{
-        prev_record = PrevRecordKey,
-        prev_record_timestamp = PrevRecordTimestamp
-    }, Window, Options, PersistenceCtx)
-    when PrevRecordTimestamp >= Window ->
-    {PrevRecordData, UpdatedPersistenceCtx} = histogram_persistence:get(PrevRecordKey, PersistenceCtx),
-    get_from_metric(PrevRecordData, Window, Options, UpdatedPersistenceCtx);
-
-get_from_metric(
-    #data{
-        windows = Windows,
-        prev_record = PrevRecordKey
-    }, Window, Options, PersistenceCtx) ->
-    case histogram_windows:get(Windows, Window, Options) of
-        {ok, WindowsToReturn} ->
-            {WindowsToReturn, PersistenceCtx};
-        {{continue, NewOptions}, WindowsToReturn} ->
-            {PrevRecordData, UpdatedPersistenceCtx} = histogram_persistence:get(PrevRecordKey, PersistenceCtx),
-            {NextWindowsToReturn, FinalPersistenceCtx} =
-                get_from_metric(PrevRecordData, undefined, NewOptions, UpdatedPersistenceCtx),
-            {WindowsToReturn ++ NextWindowsToReturn, FinalPersistenceCtx}
-    end.
-
-
-%%=====================================================================
-%% Time series map API
-%%=====================================================================
-
--spec update_time_series_map_data(time_series_map(), histogram_api:time_series_id(), histogram_api:metric_id(),
-    histogram_api:data()) -> time_series_map().
-update_time_series_map_data(TimeSeriesMap, TimeSeriesId, MetricsId, UpdatedData) ->
-    TimeSeries = maps:get(TimeSeriesId, TimeSeriesMap),
-    Metrics = maps:get(MetricsId, TimeSeries),
-    TimeSeriesMap#{TimeSeriesId => TimeSeries#{MetricsId => Metrics#metric{data = UpdatedData}}}.
-
-
-%%=====================================================================
-%% Helper functions
-%%=====================================================================
-
--spec create_doc_splitting_strategies(time_series_config()) -> #{full_metric_id() => splitting_strategy()}.
+-spec create_doc_splitting_strategies(time_series_config()) -> #{full_metric_id() => histogram_metric:splitting_strategy()}.
 create_doc_splitting_strategies(ConfigMap) ->
     FlattenedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
         maps:fold(fun
@@ -486,44 +298,3 @@ update_windows_in_head_doc_count([Key | MetricsKeys], FullyStoredInHead, NotFull
     end,
     update_windows_in_head_doc_count(MetricsKeys, UpdatedFullyStoredInHead, UpdatedNotFullyStoredInHead, FlattenedMap,
         LimitUpdate, RemainingWindowsInHead - FinalUpdate).
-
-
--spec get_window(histogram_windows:timestamp() | undefined, metric_config()) -> histogram_windows:timestamp() | undefined.
-get_window(undefined, _) ->
-    undefined;
-get_window(Time, #metric_config{window_timespan = WindowSize}) ->
-    Time - Time rem WindowSize.
-
-
--spec get_max_windows_and_split_position(key(), splitting_strategy(), histogram_persistence:ctx()) ->
-    {non_neg_integer(), non_neg_integer()}.
-get_max_windows_and_split_position(
-    DataDocKey,
-    #splitting_strategy{
-        max_windows_in_head_doc = MaxWindowsCountInHead,
-        max_windows_in_tail_doc = MaxWindowsCountInTail
-    },
-    PersistenceCtx) ->
-    case histogram_persistence:is_head(DataDocKey, PersistenceCtx) of
-        true ->
-            % If adding of single window results in reorganization split should be at first element
-            % to move most of windows to tail doc
-            {MaxWindowsCountInHead, 1};
-        false ->
-            % Split of tail doc should result in two documents with at list of half of capacity used
-            {MaxWindowsCountInTail, ceil(MaxWindowsCountInTail / 2)}
-    end.
-
-
--spec split_record(key(), data(), histogram_windows:windows(), histogram_windows:windows(),
-    histogram_windows:timestamp(), non_neg_integer(), splitting_strategy(), histogram_persistence:ctx()) ->
-    {key() | undefined, data() | undefined, histogram_persistence:ctx()}.
-split_record(DataDocKey, Data, Windows1, _Windows2, SplitTimestamp, MaxCount,
-    #splitting_strategy{max_docs_count = MaxCount}, PersistenceCtx) ->
-    UpdatedData = Data#data{windows = Windows1, prev_record_timestamp = SplitTimestamp},
-    {undefined, undefined, histogram_persistence:update(DataDocKey, UpdatedData, PersistenceCtx)};
-split_record(DataDocKey, Data, Windows1, Windows2, SplitTimestamp, _DocumentNumber, _DocSplittingStrategy, PersistenceCtx) ->
-    DataToCreate = Data#data{windows = Windows2},
-    {CreatedRecordKey, UpdatedPersistenceCtx} = histogram_persistence:create(DataToCreate, PersistenceCtx),
-    UpdatedData = Data#data{windows = Windows1, prev_record = CreatedRecordKey, prev_record_timestamp = SplitTimestamp},
-    {CreatedRecordKey, DataToCreate, histogram_persistence:update(DataDocKey, UpdatedData, UpdatedPersistenceCtx)}.

@@ -16,7 +16,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include("modules/datastore/histogram.hrl").
--include("modules/datastore/histogram_api.hrl").
+-include("modules/datastore/histogram_internal.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include("global_definitions.hrl").
 
@@ -140,7 +140,7 @@ single_metric_multiple_nodes() ->
 
     ?assertEqual(5, maps:size(Batch2)),
     DocsNums = lists:foldl(fun
-        (#document{value = {histogram_tail_node, #data{windows = Windows}}}, {HeadsCountAcc, TailsCountAcc}) ->
+        (#document{value = {histogram_metric_data, #data{windows = Windows}}}, {HeadsCountAcc, TailsCountAcc}) ->
             ?assertEqual(2000, histogram_windows:get_size(Windows)),
             {HeadsCountAcc, TailsCountAcc + 1};
         (#document{value = {histogram_hub, TimeSeries}}, {HeadsCountAcc, TailsCountAcc}) ->
@@ -260,7 +260,7 @@ single_time_series_multiple_nodes() ->
     ?assertEqual(6, maps:size(Batch2)),
     TailSizes = [1500, 1500, 2000, 2000, 2000],
     RemainingTailSizes = lists:foldl(fun
-        (#document{value = {histogram_tail_node, #data{windows = Windows}}}, TmpTailSizes) ->
+        (#document{value = {histogram_metric_data, #data{windows = Windows}}}, TmpTailSizes) ->
             Size = histogram_windows:get_size(Windows),
             ?assert(lists:member(Size, TmpTailSizes)),
             TmpTailSizes -- [Size];
@@ -385,7 +385,7 @@ multiple_time_series_multiple_nodes() ->
     ?assertEqual(8, maps:size(Batch2)),
     TailSizes = [1200, 1200, 1600, 1600, 1600, 2000, 2000],
     RemainingTailSizes = lists:foldl(fun
-        (#document{value = {histogram_tail_node, #data{windows = Windows}}}, TmpTailSizes) ->
+        (#document{value = {histogram_metric_data, #data{windows = Windows}}}, TmpTailSizes) ->
             Size = histogram_windows:get_size(Windows),
             ?assert(lists:member(Size, TmpTailSizes)),
             TmpTailSizes -- [Size];

@@ -65,7 +65,7 @@ get_ctx() ->
 -spec get_record_struct(datastore_model:record_version()) ->
     datastore_model:record_struct().
 get_record_struct(1) ->
-    {record, [DataRecordStruct]} = histogram_tail_node:get_record_struct(1),
+    {record, [DataRecordStruct]} = histogram_metric_data:get_record_struct(1),
     {record, [
         {time_series, #{string => #{string => {record, [
             {config, {record, [

@@ -36,7 +36,7 @@
     infinite_log_sentinel,
     infinite_log_node,
     histogram_hub,
-    histogram_tail_node,
+    histogram_metric_data,
     % Model used for performance testing (mocked models cannot be used as they affect performance)
     performance_test_record
 ]).

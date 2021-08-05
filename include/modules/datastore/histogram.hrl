@@ -14,7 +14,7 @@
 -define(HISTOGRAM_HRL, 1).
 
 -record(metric_config, {
-    legend = <<>> :: histogram_api:legend(),
+    legend = <<>> :: histogram_metric:legend(),
     window_timespan :: non_neg_integer(),
     max_windows_count :: non_neg_integer(),
     aggregator :: histogram_windows:aggregator()

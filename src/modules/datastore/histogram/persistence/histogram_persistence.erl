@@ -15,18 +15,19 @@
 %%% structure used by datastore to save all changes.
 %%%
 %%% The module uses 2 helper records: histogram_hub that stores heads (beginnings)
-%%% of each metric and histogram_tail_node that stores windows of single
+%%% of each metric and histogram_metric_data that stores windows of single
 %%% metrics if there are to many of them to store then all in head
 %%% (see histogram_api for head/tail description). There is always exactly one
-%%% histogram_hub document (storing heads of all metrics). histogram_tail_node
-%%% documents are created on demand and multiple histogram_tail_node documents
+%%% histogram_hub document (storing heads of all metrics). histogram_metric_data
+%%% documents are created on demand and multiple histogram_metric_data documents
 %%% can be created for each metric. Key of histogram_hub document is equal to
-%%% id of histogram while histogram_tail_node documents have randomly  generated ids.
+%%% id of histogram while histogram_metric_data documents have randomly  generated ids.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(histogram_persistence).
 -author("Michal Wrzeszcz").
 
+-include("modules/datastore/histogram_internal.hrl").
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
@@ -38,11 +39,11 @@
     datastore_ctx :: datastore_ctx(),
     batch :: batch() | undefined, % Undefined when histogram is used outside tp process
                                   % (call via datastore_reader:histogram_get/3)
-    head :: doc(),
+    head :: doc(), % TODO head czy hub
     is_head_updated = false :: boolean(), % Field used to determine if head should be saved by finalize/1 function
     % Fields used to determine metric to update
     active_time_series :: histogram_api:time_series_id() | undefined,
-    active_metric :: histogram_api:metric_id() | undefined
+    active_metric :: histogram_metric:id() | undefined
 }).
 
 -type ctx() :: #ctx{}.
@@ -104,7 +105,7 @@ set_active_time_series(TimeSeriesId, Ctx) ->
     Ctx#ctx{active_time_series = TimeSeriesId}.
 
 
--spec set_active_metric(histogram_api:metric_id(), ctx()) -> ctx().
+-spec set_active_metric(histogram_metric:id(), ctx()) -> ctx().
 set_active_metric(MetricsId, Ctx) ->
     Ctx#ctx{active_metric = MetricsId}.
 
@@ -119,33 +120,35 @@ is_head(Key, #ctx{head = #document{key = HeadKey}}) ->
     Key =:= HeadKey.
 
 
--spec get(key(), ctx()) -> {histogram_api:data(), ctx()}.
+-spec get(key(), ctx()) -> {histogram_metric:data(), ctx()}.
 get(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     {{ok, #document{value = HistogramRecord}}, UpdatedBatch} = datastore_doc:fetch(DatastoreCtx, Key, Batch),
-    {histogram_tail_node:get_data(HistogramRecord), Ctx#ctx{batch = UpdatedBatch}}.
+    {histogram_metric_data:get_data(HistogramRecord), Ctx#ctx{batch = UpdatedBatch}}.
 
 
--spec create(histogram_api:data(), ctx()) -> {key(), ctx()}.
+-spec create(histogram_metric:data(), ctx()) -> {key(), ctx()}.
 create(DataToCreate, #ctx{head = #document{key = HeadKey}, datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     NewDocKey = datastore_key:new_adjacent_to(HeadKey),
-    Doc = #document{key = NewDocKey, value = histogram_tail_node:set_data(DataToCreate)},
+    Doc = #document{key = NewDocKey, value = histogram_metric_data:set_data(DataToCreate)},
     {{ok, _}, UpdatedBatch} = datastore_doc:save(DatastoreCtx#{generated_key => true}, NewDocKey, Doc, Batch),
     {NewDocKey, Ctx#ctx{batch = UpdatedBatch}}.
 
 
--spec update(key(), histogram_api:data(), ctx()) -> ctx().
+-spec update(key(), histogram_metric:data(), ctx()) -> ctx().
 update(HeadKey, Data, #ctx{
     head = #document{key = HeadKey, value = HistogramRecord} = HeadDoc,
     active_time_series = TimeSeriesId,
     active_metric = MetricsId
 } = Ctx) ->
     TimeSeriesMap = histogram_hub:get_time_series_map(HistogramRecord),
-    UpdatedTimeSeries = histogram_api:update_time_series_map_data(TimeSeriesMap, TimeSeriesId, MetricsId, Data),
+    TimeSeries = maps:get(TimeSeriesId, TimeSeriesMap),
+    Metrics = maps:get(MetricsId, TimeSeries),
+    UpdatedTimeSeries = TimeSeriesMap#{TimeSeriesId => TimeSeries#{MetricsId => Metrics#metric{data = Data}}},
     UpdatedDoc = HeadDoc#document{value = histogram_hub:set_time_series_map(UpdatedTimeSeries)},
     Ctx#ctx{head = UpdatedDoc, is_head_updated = true};
 
 update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
-    Doc = #document{key = DataDocKey, value = histogram_tail_node:set_data(Data)},
+    Doc = #document{key = DataDocKey, value = histogram_metric_data:set_data(Data)},
     {{ok, _}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, DataDocKey, Doc, Batch),
     Ctx#ctx{batch = UpdatedBatch}.
 
