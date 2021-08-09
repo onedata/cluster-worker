@@ -84,8 +84,8 @@
 -export([
     test_create_get/0,
     del_one_by_one/4,
-    perform_single_infinite_log_append/3,
-    perform_infinite_log_listings/4
+    measure_infinite_log_appends_time/4,
+    measure_infinite_log_listings_time/4
 ]).
 
 all() ->
@@ -1928,76 +1928,74 @@ clean_cache(_Worker, _Model, _Ctx) ->
 
 
 %% @private
--spec perform_infinite_log_appends(node(), atom(), binary(), integer(), integer(), integer()) -> [integer()].
-perform_infinite_log_appends(Worker, Model, LogId, LogSize, ProcCount, 1) ->
-    AppendFun = fun(_) ->
-        Log = str_utils:rand_hex(LogSize div 2),
-        {Time, _} = ?assertMatch({_, ok}, rpc:call(Worker, ?MODULE, perform_single_infinite_log_append, [Model, LogId, Log])),
-        Time
-    end,
-    lists_utils:pmap(AppendFun, lists:seq(1, ProcCount));
-perform_infinite_log_appends(Worker, Model, LogSize, AppendSize, ProcCount, AppendsPerProcess) ->
-    lists:foldl(fun(_, TimesListAcc) ->
-        Times = perform_infinite_log_appends(Worker, Model, LogSize, AppendSize, ProcCount, 1),
-        lists:zipwith(fun(Time, TimeAcc) -> Time + TimeAcc end, Times, TimesListAcc)
-    end, lists:duplicate(ProcCount, 0), lists:seq(1, AppendsPerProcess)).
-
-
-%% @private
 -spec repeat_infinite_log_appends(integer(), node(), atom(), binary(), binary(), integer(), integer()) -> [integer()].
 repeat_infinite_log_appends(Repeats, Worker, Model, LogId, Log, ProcCount, AppendsPerProcess) ->
     Results = lists:map(fun(_) ->
-        AppendTimes = perform_infinite_log_appends(Worker, Model, LogId, Log, ProcCount, AppendsPerProcess),
-        lists:sum(AppendTimes) / ProcCount
+        perform_infinite_log_appends(Worker, Model, LogId, Log, ProcCount, AppendsPerProcess)
     end, lists:seq(1, Repeats)),
     lists:sum(Results) / Repeats.
 
 
 %% @private
--spec perform_single_infinite_log_append(atom(), binary(), binary()) -> {integer(), term()}.
-perform_single_infinite_log_append(Model, LogId, Log) ->
-    {Time, Resp} = measure_execution_time(
-        fun() ->
-            Model:infinite_log_append(LogId, Log)
-        end
-    ),
-    {Time, Resp}.
-
-
-%% @private
--spec perform_infinite_log_listings(node(), atom(), binary(), map(), integer(), integer()) -> [integer()].
-perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess) ->
-    ListingFun = fun(_) ->
-        {Time, _} = ?assertMatch({_, ok},
-            rpc:call(Worker, ?MODULE, perform_infinite_log_listings, [Model, LogId, ListOpts, ListingsPerProcess])
-        ),
+-spec perform_infinite_log_appends(node(), atom(), binary(), integer(), integer(), integer()) -> [integer()].
+perform_infinite_log_appends(Worker, Model, LogId, LogSize, ProcCount, AppendsPerProcess) ->
+    AppendFun = fun(_) ->
+        Log = str_utils:rand_hex(LogSize div 2),
+        Function = measure_infinite_log_appends_time,
+        {_, Time} = ?assertMatch({ok, _}, rpc:call(Worker, ?MODULE, Function, [Model, LogId, Log, AppendsPerProcess])),
         Time
     end,
-    lists_utils:pmap(ListingFun, lists:seq(1, ProcCount)).
+    Times = lists_utils:pmap(AppendFun, lists:seq(1, ProcCount)),
+    lists:sum(Times) / ProcCount / AppendsPerProcess.
 
 
 %% @private
--spec perform_infinite_log_listings(atom(), binary(), map(), integer()) -> {integer(), term()}.
-perform_infinite_log_listings(Model, LogId, ListOpts, ListingsPerProcess) ->
+-spec measure_infinite_log_appends_time(atom(), binary(), binary(), integer()) -> {term(), integer()}.
+measure_infinite_log_appends_time(Model, LogId, Log, AppendsPerProcess) ->
     {Time, Resp} = measure_execution_time(
         fun() ->
-            ListingsPerProcessSeq = lists:seq(1, ListingsPerProcess),
             lists:foreach(fun(_) ->
-                Model:infinite_log_list(LogId, ListOpts)
-            end, ListingsPerProcessSeq)
+                Model:infinite_log_append(LogId, Log)
+            end, lists:seq(1, AppendsPerProcess))
         end
     ),
-    {Time, Resp}.
+    {Resp, Time}.
 
 
 %% @private
 -spec repeat_infinite_log_listings(integer(), node(), atom(), binary(), map(), integer(), integer()) -> [integer()].
 repeat_infinite_log_listings(Repeats, Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess) ->
     Results = lists:map(fun(_) ->
-        AppendTimes = perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess),
-        lists:sum(AppendTimes) / ProcCount
+        perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess)
     end, lists:seq(1, Repeats)),
     lists:sum(Results) / Repeats.
+
+
+%% @private
+-spec perform_infinite_log_listings(node(), atom(), binary(), map(), integer(), integer()) -> [integer()].
+perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess) ->
+    ListingFun = fun(_) ->
+        Function = measure_infinite_log_listings_time,
+        {_, Time} = ?assertMatch({ok, _},
+            rpc:call(Worker, ?MODULE, Function, [Model, LogId, ListOpts, ListingsPerProcess])
+        ),
+        Time
+    end,
+    Times = lists_utils:pmap(ListingFun, lists:seq(1, ProcCount)),
+    lists:sum(Times) / ProcCount / ListingsPerProcess.
+
+
+%% @private
+-spec measure_infinite_log_listings_time(atom(), binary(), map(), integer()) -> {term(), integer()}.
+measure_infinite_log_listings_time(Model, LogId, ListOpts, ListingsPerProcess) ->
+    {Time, Resp} = measure_execution_time(
+        fun() ->
+            lists:foreach(fun(_) ->
+                Model:infinite_log_list(LogId, ListOpts)
+            end, lists:seq(1, ListingsPerProcess))
+        end
+    ),
+    {Resp, Time}.
 
 
 %% @private
