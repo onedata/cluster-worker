@@ -490,7 +490,7 @@ save_memory_copies(#{routing := local}, _Key, _Doc, _PoolType) ->
     ok;
 save_memory_copies(#{memory_copies_nodes := Nodes} = Ctx, Key, Doc, PoolType) ->
     Pool = datastore_multiplier:extend_name(Key, PoolType),
-    {Ans, BadNodes} = FullAns = rpc:multicall(Nodes, ?MODULE, save_memory_copy, [Ctx, Key, Doc, Pool]),
+    {Ans, BadNodes} = FullAns = utils:rpc_multicall(Nodes, ?MODULE, save_memory_copy, [Ctx, Key, Doc, Pool]),
     Errors = lists:filter(fun
         ({ok, _}) -> false;
         (_) -> true
