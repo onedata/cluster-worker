@@ -6,14 +6,24 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% TODO
+%%% Helper module for histogram_api operating on single metric.
+%%% Metric is described by #metric{} record containing among others
+%%% #data{} records that stores windows. If there are too many windows
+%%% to store in single #data{} record, further #data{} records are added
+%%% forming linked list of records. histogram_persistence module is then
+%%% responsible for persisting #metric{} and #data{} records into datastore.
+%%%
+%%% NOTE: first record (head) of #data{} records linked list is unique as it
+%%% is stored inside #metric{} record and all #metric{} records are
+%%% persisted in single datastore document (see histogram_persistence).
+%%% Thus, capacity of head record and other #data{} records can differ.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(histogram_metric).
 -author("Michal Wrzeszcz").
 
 -include("modules/datastore/histogram_internal.hrl").
--include("modules/datastore/histogram.hrl").
+-include("modules/datastore/metric_config.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -43,7 +53,7 @@ update(#metric{
     data = Data
 }, NewTimestamp, NewValue, PersistenceCtx) ->
     WindowToBeUpdated = get_window(NewTimestamp, Config),
-    DataDocKey = histogram_persistence:get_head_key(PersistenceCtx),
+    DataDocKey = histogram_persistence:get_histogram_id(PersistenceCtx),
     update(Data, DataDocKey, 1, DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx).
 
 
@@ -223,7 +233,7 @@ get_max_windows_and_split_position(
         max_windows_in_tail_doc = MaxWindowsCountInTail
     },
     PersistenceCtx) ->
-    case histogram_persistence:is_head(DataDocKey, PersistenceCtx) of
+    case histogram_persistence:is_hub_key(DataDocKey, PersistenceCtx) of
         true ->
             % If adding of single window results in reorganization split should be at first element
             % to move most of windows to tail doc

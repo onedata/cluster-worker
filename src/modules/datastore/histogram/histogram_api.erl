@@ -20,17 +20,26 @@
 %%% Window = {Timestamp, aggregator(Measurement1Value, Measurement2Value, ...)}
 %%% See histogram_windows:aggregate/3 to see possible aggregation functions.
 %%%
-%%% The module works on #data{} record that represents part of
-%%% windows of particular metric. #data{} record is encapsulated in document
-%%% and saved/get to/from datastore by histogram_persistence
-%%% helper module.
+%%% The module delegates operations on single metric to histogram_metric module
+%%% that is able to handle infinite number of windows inside single metric splitting
+%%% windows set to subsets stored in multiple records that are saved to multiple
+%%% datastore documents by histogram_persistence helper module.
+%%%
+%%% All metrics from all time series are kept together. If any metric windows count
+%%% is so high that it cannot be stored in single datastore document, the metric's
+%%% windows set is divided into several records by histogram_metric module and then
+%%% persisted as several datastore documents by histogram_persistence module. Thus,
+%%% windows of each metric form linked list of records storing parts of windows set,
+%%% with head of the list treated exceptionally (heads are kept together for all
+%%% metrics while rest of records with windows are kept separately for each metric).
 %%% @end
 %%%-------------------------------------------------------------------
+% TODO zmienic nazwy wedlug: https://docs.google.com/document/d/1cd82L00f0YgZx_WVg8TzhJj_gPQPbPV-0Z5dnmmYiv8/edit
 -module(histogram_api).
 -author("Michal Wrzeszcz").
 
 -include("modules/datastore/histogram_internal.hrl").
--include("modules/datastore/histogram.hrl").
+-include("modules/datastore/metric_config.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -55,7 +64,8 @@
 -type flat_config_map() :: #{full_metric_id() => histogram_metric:config()}.
 -type windows_count_map() :: #{full_metric_id() => non_neg_integer()}.
 
--export_type([id/0, time_series_map/0, time_series_config/0, time_series_id/0, requested_metrics/0, windows_map/0]).
+-export_type([id/0, time_series_map/0, time_series_config/0, time_series_id/0, full_metric_id/0,
+    requested_metrics/0, windows_map/0]).
 
 -type ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
@@ -99,6 +109,7 @@ create(Ctx, Id, ConfigMap, Batch) ->
 
 -spec update(ctx(), id(), histogram_windows:timestamp(), histogram_windows:value(), batch()) ->
     {ok | {error, term()}, batch()}.
+% TODO - dodac mozliwosc update'owania tylko wybranych mietryk + dla roznych time series rozne wartosci
 update(Ctx, Id, NewTimestamp, NewValue, Batch) ->
     try
         {TimeSeriesMap, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
@@ -143,6 +154,7 @@ get(Ctx, Id, RequestedMetrics, Options, Batch) ->
             {{error, histogram_get_failed}, Batch}
     end.
 
+% TODO - dodac delete
 
 %%=====================================================================
 %% Internal functions

@@ -7,20 +7,20 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Helper module to histogram_persistence operating on histogram
-%%% hub node that stores beginnings of each metrics.
+%%% hub node that stores heads of each metric's #data{} records linked list
+%%% (see histogram_persistence module).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(histogram_hub).
 -author("Michal Wrzeszcz").
 
--include("modules/datastore/histogram.hrl").
+-include("modules/datastore/metric_config.hrl").
 
 %% API
 -export([set_time_series_map/1, get_time_series_map/1]).
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
 
-% TODO - uporzadkowac slownictow head/hub
 -record(histogram_hub, {
     time_series_map :: histogram_api:time_series_map()
 }).
@@ -28,8 +28,8 @@
 -type record() :: #histogram_hub{}.
 
 % Context used only by datastore to initialize internal structure's.
-% Context provided via histogram_api module functions is used to get/save
-% document instead this one.
+% Context provided via histogram_api module functions overrides it in
+% other cases.
 -define(CTX, #{
     model => ?MODULE,
     memory_driver => undefined,

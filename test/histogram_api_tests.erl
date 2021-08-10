@@ -15,7 +15,7 @@
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
--include("modules/datastore/histogram.hrl").
+-include("modules/datastore/metric_config.hrl").
 -include("modules/datastore/histogram_internal.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include("global_definitions.hrl").

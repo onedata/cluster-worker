@@ -6,17 +6,17 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This file contains histogram config record definition.
+%%% This file contains metric config record definition.
 %%% @end
 %%%-------------------------------------------------------------------
 
--ifndef(HISTOGRAM_HRL).
--define(HISTOGRAM_HRL, 1).
+-ifndef(METRIC_CONFIG_HRL).
+-define(METRIC_CONFIG_HRL, 1).
 
 -record(metric_config, {
     legend = <<>> :: histogram_metric:legend(),
-    window_timespan :: non_neg_integer(),
-    max_windows_count :: non_neg_integer(),
+    window_timespan :: non_neg_integer(), % TODO - zmienic na resolution
+    max_windows_count :: non_neg_integer(), % TODO - zmienic na retention
     aggregator :: histogram_windows:aggregator()
 }).
 

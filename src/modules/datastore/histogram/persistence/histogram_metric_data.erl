@@ -7,11 +7,11 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Helper module to histogram_persistence operating on histogram
-%%% tail node. Each histogram tail node is connected with singe metric.
-%%% Values that exceeds histogram hub capacity for particular metric
-%%% are stored in list of histogram tail nodes
-%%% (capacity of single histogram tail node is also limited so more
-%%% than one histogram tail node may be needed).
+%%% metric data node. Each histogram metric data node is connected with
+%%% singe metric. Values that exceeds histogram hub capacity for particular
+%%% metric are stored in list of histogram metric data nodes
+%%% (capacity of single histogram metric data node is also limited so more
+%%% than one histogram metric data node may be needed).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(histogram_metric_data).
@@ -29,8 +29,8 @@
 -type record() :: #histogram_metric_data{}.
 
 % Context used only by datastore to initialize internal structure's.
-% Context provided via histogram_api module functions is used to get/save
-% document instead this one.
+% Context provided via histogram_api module functions overrides it in
+% other cases.
 -define(CTX, #{
     model => ?MODULE,
     memory_driver => undefined,
