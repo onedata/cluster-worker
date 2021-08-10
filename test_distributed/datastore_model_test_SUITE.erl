@@ -1415,7 +1415,6 @@ infinite_log_append_performance_test(Config) ->
         ]}
     ]).
 
-
 infinite_log_append_performance_test_base(Config) ->
     ct:timetrap({hours, 3}),
     Repeats = ?config(repeats, Config),
@@ -1502,7 +1501,6 @@ infinite_log_list_performance_test(Config) ->
             {description, "Both pruning on"}
         ]}
     ]).
-
 
 infinite_log_list_performance_test_base(Config) ->
     ct:timetrap({hours, 4}),
@@ -1941,8 +1939,8 @@ repeat_infinite_log_appends(Repeats, Worker, Model, LogId, Log, ProcCount, Appen
 perform_infinite_log_appends(Worker, Model, LogId, LogSize, ProcCount, AppendsPerProcess) ->
     AppendFun = fun(_) ->
         Log = str_utils:rand_hex(LogSize div 2),
-        Function = measure_infinite_log_appends_time,
-        {_, Time} = ?assertMatch({ok, _}, rpc:call(Worker, ?MODULE, Function, [Model, LogId, Log, AppendsPerProcess])),
+        {_, Time} = ?assertMatch({ok, _}, rpc:call(Worker, ?MODULE, measure_infinite_log_appends_time,
+            [Model, LogId, Log, AppendsPerProcess])),
         Time
     end,
     Times = lists_utils:pmap(AppendFun, lists:seq(1, ProcCount)),
@@ -1952,14 +1950,13 @@ perform_infinite_log_appends(Worker, Model, LogId, LogSize, ProcCount, AppendsPe
 %% @private
 -spec measure_infinite_log_appends_time(atom(), binary(), binary(), integer()) -> {term(), integer()}.
 measure_infinite_log_appends_time(Model, LogId, Log, AppendsPerProcess) ->
-    {Time, Resp} = measure_execution_time(
+    measure_execution_time(
         fun() ->
             lists:foreach(fun(_) ->
                 Model:infinite_log_append(LogId, Log)
             end, lists:seq(1, AppendsPerProcess))
         end
-    ),
-    {Resp, Time}.
+    ).
 
 
 %% @private
@@ -1975,9 +1972,9 @@ repeat_infinite_log_listings(Repeats, Worker, Model, LogId, ListOpts, ProcCount,
 -spec perform_infinite_log_listings(node(), atom(), binary(), map(), integer(), integer()) -> [integer()].
 perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess) ->
     ListingFun = fun(_) ->
-        Function = measure_infinite_log_listings_time,
         {_, Time} = ?assertMatch({ok, _},
-            rpc:call(Worker, ?MODULE, Function, [Model, LogId, ListOpts, ListingsPerProcess])
+            rpc:call(Worker, ?MODULE, measure_infinite_log_listings_time,
+                [Model, LogId, ListOpts, ListingsPerProcess])
         ),
         Time
     end,
@@ -1988,19 +1985,18 @@ perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, Listing
 %% @private
 -spec measure_infinite_log_listings_time(atom(), binary(), map(), integer()) -> {term(), integer()}.
 measure_infinite_log_listings_time(Model, LogId, ListOpts, ListingsPerProcess) ->
-    {Time, Resp} = measure_execution_time(
+    measure_execution_time(
         fun() ->
             lists:foreach(fun(_) ->
                 Model:infinite_log_list(LogId, ListOpts)
             end, lists:seq(1, ListingsPerProcess))
         end
-    ),
-    {Resp, Time}.
+    ).
 
 
 %% @private
--spec measure_execution_time(fun(() -> term())) -> {integer(), term()}.
+-spec measure_execution_time(fun(() -> term())) -> {term(), integer()}.
 measure_execution_time(Fun) ->
     Stopwatch = stopwatch:start(),
     Ans = Fun(),
-    {stopwatch:read_millis(Stopwatch), Ans}.
+    {Ans, stopwatch:read_millis(Stopwatch)}.
