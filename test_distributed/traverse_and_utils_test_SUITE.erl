@@ -241,7 +241,8 @@ traverse_loadbalancing_mixed_ids_test(Config) ->
 traverse_loadbalancing_base(Config, Tasks, Check) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun({ID, GR, Ans}) ->
-        ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, ID, {self(), 1, Ans}, #{group_id => GR}]))
+        ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, ID, {self(), 1, Ans}, #{group_id => GR}])),
+        timer:sleep(1) % sleep to guarantee that all runs have different timestamps
     end, Tasks),
 
     {Expected, Description} = traverse_test_pool:get_expected(),
@@ -323,7 +324,9 @@ traverse_restart_test_base(Config, TaskNameBase, BeforeRestartAction, FirstJobSt
 
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, Task1, {self(), 1, 100}])),
+    timer:sleep(1), % sleep to guarantee that all runs have different timestamps
     ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, Task2, {self(), 1, 2}])),
+    timer:sleep(1), % sleep to guarantee that all runs have different timestamps
     ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, Task3, {self(), 1, 3}])),
 
     RecAns = receive 
@@ -373,8 +376,10 @@ traverse_cancel_test(Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"1traverse_cancel_test">>, {self(), 1, 100}])),
+    timer:sleep(1), % sleep to guarantee that all runs have different timestamps
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"2traverse_cancel_test">>, {self(), 1, 2}])),
+    timer:sleep(1), % sleep to guarantee that all runs have different timestamps
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"3traverse_cancel_test">>, {self(), 1, 3}])),
 
