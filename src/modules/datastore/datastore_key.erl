@@ -67,6 +67,7 @@
 -export([new/0, new_from_digest/1]).
 -export([new_adjacent_to/1, build_adjacent/2, adjacent_from_digest/2]).
 -export([any_responsible_node/1, primary_responsible_node/1, get_chash_seed/1]).
+-export([concatenate_chash_label/2, to_basic_key_and_chash_label/1]).
 
 %%%===================================================================
 %%% API
@@ -194,6 +195,22 @@ get_chash_seed(Key) ->
             CHashLabel
     end.
 
+
+-spec concatenate_chash_label(key(), chash_label()) -> key().
+concatenate_chash_label(BasicKey, CHashLabel) ->
+    <<BasicKey/binary, ?CHASH_LABEL_SEPARATOR, CHashLabel/binary>>.
+
+
+-spec to_basic_key_and_chash_label(key()) -> {key(), undefined | chash_label()}.
+to_basic_key_and_chash_label(Key) ->
+    BasicKeyLength = byte_size(Key) - ?CHASH_LABEL_SEPARATOR_SIZE - ?CHASH_LABEL_CHARS,
+    case Key of
+        <<BasicKey:BasicKeyLength/binary, ?CHASH_LABEL_SEPARATOR, CHashLabel:4/binary>> ->
+            {BasicKey, CHashLabel};
+        _ ->
+            {Key, undefined}
+    end.
+
 %% ====================================================================
 %% Internal functions
 %% ====================================================================
@@ -216,21 +233,3 @@ gen_legacy_key(Seed, Key) ->
 -spec digest(digest_components()) -> binary().
 digest(DigestComponents) ->
     str_utils:md5_digest(DigestComponents).
-
-
-%% @private
--spec concatenate_chash_label(key(), chash_label()) -> key().
-concatenate_chash_label(BasicKey, CHashLabel) ->
-    <<BasicKey/binary, ?CHASH_LABEL_SEPARATOR, CHashLabel/binary>>.
-
-
-%% @private
--spec to_basic_key_and_chash_label(key()) -> {key(), undefined | chash_label()}.
-to_basic_key_and_chash_label(Key) ->
-    BasicKeyLength = byte_size(Key) - ?CHASH_LABEL_SEPARATOR_SIZE - ?CHASH_LABEL_CHARS,
-    case Key of
-        <<BasicKey:BasicKeyLength/binary, ?CHASH_LABEL_SEPARATOR, CHashLabel:4/binary>> ->
-            {BasicKey, CHashLabel};
-        _ ->
-            {Key, undefined}
-    end.
