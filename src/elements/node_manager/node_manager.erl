@@ -36,6 +36,7 @@
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
 -export([are_db_and_workers_ready/0, get_cluster_status/0, get_cluster_status/1]).
+-export([is_cluster_healthy/0]).
 -export([get_cluster_ips/0]).
 -export([reschedule_service_healthcheck/4]).
 
@@ -1450,3 +1451,12 @@ handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
         end
     end),
     ok.
+
+is_cluster_healthy() ->
+    {_, {_, NodesStatus}} = get_cluster_status(),
+    lists:foldl(fun({_, Status, _}, HealthAcc) ->
+        case Status of
+            ok -> HealthAcc;
+            _ -> false
+        end
+    end, true, NodesStatus).
