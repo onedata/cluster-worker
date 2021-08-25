@@ -1452,6 +1452,7 @@ handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
     end),
     ok.
 
+-spec is_cluster_healthy() -> boolean().
 is_cluster_healthy() ->
     {_, {_, NodesStatus}} = get_cluster_status(),
     lists:foldl(fun({_, Status, _}, HealthAcc) ->
