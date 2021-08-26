@@ -1454,10 +1454,8 @@ handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
 
 -spec is_cluster_healthy() -> boolean().
 is_cluster_healthy() ->
-    {_, {_, NodesStatus}} = get_cluster_status(),
-    lists:foldl(fun({_, Status, _}, HealthAcc) ->
-        case Status of
-            ok -> HealthAcc;
-            _ -> false
-        end
-    end, true, NodesStatus).
+    {_, {AppStatus, _}} = get_cluster_status(),
+    case AppStatus of
+        ok -> true;
+        _ -> false
+    end.
