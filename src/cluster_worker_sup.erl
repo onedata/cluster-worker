@@ -12,8 +12,10 @@
 -module(cluster_worker_sup).
 -author("Michal Wrzeszcz").
 
--include("global_definitions.hrl").
 -behaviour(supervisor).
+
+-include("global_definitions.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([start_link/0]).
@@ -32,6 +34,7 @@
 %%--------------------------------------------------------------------
 -spec start_link() -> {ok, pid()} | ignore | {error, Reason :: term()}.
 start_link() ->
+    ?info("Starting cluster-worker supervisor..."),
     Name = {local, ?CLUSTER_WORKER_APPLICATION_SUPERVISOR_NAME},
     supervisor:start_link(Name, ?MODULE, []).
 
