@@ -249,7 +249,7 @@ start_worker(Module, Args, Options) ->
                 case supervisor:start_child(
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {Module, {worker_host, start_link,
-                        [Module, Args, LoadMemorySize]}, transient,
+                        [Module, Args, LoadMemorySize]}, permanent,
                         proplists:get_value(terminate_timeout, Options, ?DEFAULT_TERMINATE_TIMEOUT),
                         worker, [worker_host]}
                 ) of
@@ -261,7 +261,7 @@ start_worker(Module, Args, Options) ->
                 case supervisor:start_child(
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {WorkerSupervisorName, {worker_host_sup, start_link,
-                        [WorkerSupervisorName, Args]}, transient, infinity,
+                        [WorkerSupervisorName, Args]}, permanent, infinity,
                         supervisor, [worker_host_sup]}
                 ) of
                     {ok, _} -> ok;
@@ -273,7 +273,7 @@ start_worker(Module, Args, Options) ->
                 case supervisor:start_child(
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {WorkerSupervisorName, {worker_host_sup, start_link,
-                        [WorkerSupervisorName, Args]}, transient, infinity,
+                        [WorkerSupervisorName, Args]}, permanent, infinity,
                         supervisor, [worker_host_sup]}
                 ) of
                     {ok, _} -> ok;
@@ -284,7 +284,7 @@ start_worker(Module, Args, Options) ->
                 case supervisor:start_child(
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {Module, {worker_host, start_link,
-                        [Module, Args, LoadMemorySize]}, transient,
+                        [Module, Args, LoadMemorySize]}, permanent,
                         proplists:get_value(terminate_timeout, Options, ?DEFAULT_TERMINATE_TIMEOUT),
                         worker, [worker_host]}
                 ) of
