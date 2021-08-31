@@ -62,7 +62,7 @@ node_manager_spec() ->
   #{
     id => node_manager,
     start => {node_manager, start_link, []},
-    restart => transient,
+    restart => permanent,
     shutdown => timer:seconds(5),
     type => worker,
     modules => [node_manager]

@@ -53,7 +53,7 @@ start_link() ->
 init([]) ->
     node_cache:init(),
     global_clock:try_to_restore_previous_synchronization(),
-    {ok, {#{strategy => one_for_one, intensity => 5, period => 10}, [
+    {ok, {#{strategy => one_for_one, intensity => 0, period => 10}, [
         cluster_worker_specs:node_manager_spec(),
         cluster_worker_specs:request_dispatcher_spec()
     ]}}.
