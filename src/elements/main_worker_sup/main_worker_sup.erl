@@ -54,7 +54,7 @@ start_link() ->
 -spec init(Args :: term()) ->
     {ok, {SupFlags :: supervisor:sup_flags(), [ChildSpec :: supervisor:child_spec()]}}.
 init([]) ->
-    {ok, {#{strategy => one_for_all, intensity => 1000, period => 3600}, []}}.
+    {ok, {#{strategy => one_for_all, intensity => 10, period => 3600}, []}}.
 
 %%%===================================================================
 %%% Internal functions
