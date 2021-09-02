@@ -1077,8 +1077,12 @@ histogram_test(Config) ->
         MeasurementsCount = 1199,
         Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementsCount)),
 
-        lists:foreach(fun({NewTimestamp, NewValue}) ->
-            ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, NewTimestamp, NewValue]))
+        lists:foreach(fun
+            ({NewTimestamp, NewValue}) when NewTimestamp < 1000 ->
+                ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, NewTimestamp, NewValue]));
+            ({NewTimestamp, NewValue}) ->
+                ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, NewTimestamp, <<"TS", 0>>, NewValue])),
+                ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, NewTimestamp, <<"TS", 1>>, NewValue]))
         end, Measurements),
 
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
@@ -1088,6 +1092,7 @@ histogram_test(Config) ->
                 end, lists:seq(0, MeasurementsCount, WindowSize))), MaxWindowsCount)}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, #{}])),
         ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, maps:keys(ExpectedMap), #{}]))
     end, ?TEST_MODELS).
 
@@ -1095,6 +1100,7 @@ histogram_test(Config) ->
 multinode_histogram_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
+        InitialKeys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)),
         Id = datastore_key:new(),
         ConfigMap = lists:foldl(fun(N, Acc) ->
             TimeSeries = <<"TS", (N rem 2)>>,
@@ -1106,7 +1112,7 @@ multinode_histogram_test(Config) ->
 
         MeasurementsCount = 610000,
         Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
-        ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, Measurements])),
+        ?assertEqual(ok, rpc:call(Worker, Model, histogram_update_many, [Id, Measurements])),
 
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
@@ -1115,7 +1121,13 @@ multinode_histogram_test(Config) ->
                     lists:reverse(Measurements), maps:get(MaxWindowsCount, ExpectedWindowsCounts))}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
-        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, maps:keys(ExpectedMap), #{}]))
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, #{}])),
+
+        Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
+        ?assertMatch(ok, rpc:call(Worker, Model, histogram_delete, [Id])),
+        lists:foreach(fun(Key) ->
+            assert_key_not_in_memory(Worker, Model, Key)
+        end, Keys)
     end, ?TEST_MODELS).
 
 
@@ -1152,15 +1164,19 @@ histogram_document_fetch_test(Config) ->
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
 
-        ?assertEqual(ok, rpc:call(Worker, Model, histogram_update, [Id, Measurements])),
+        ?assertEqual(ok, rpc:call(Worker, Model, histogram_update_many, [Id, Measurements])),
         Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
 
         lists:foreach(fun(Key) ->
             assert_key_on_disc(Worker, Model, Key, false),
             MemCtx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
+
             ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
             assert_key_not_in_memory(Worker, Model, Key),
+            ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, #{}])),
 
+            ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
+            assert_key_not_in_memory(Worker, Model, Key),
             ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, maps:keys(ExpectedMap), #{}]))
         end, Keys)
     end, ?TEST_CACHED_MODELS).
@@ -1679,7 +1695,9 @@ get_all_keys(Worker, mnesia_driver, MemoryDriverCtx) ->
                 ({entry, Key, #document{deleted = false}}, Acc) -> [Key | Acc]
             end, [], Table)
         end])
-    end, [], rpc:call(Worker, datastore_multiplier, get_names, [MemoryDriverCtx])).
+    end, [], rpc:call(Worker, datastore_multiplier, get_names, [MemoryDriverCtx]));
+get_all_keys(_Worker, undefined, _MemoryDriverCtx) ->
+    [].
 
 fold_links_token(Key, Worker, Model, Opts) ->
     {{ok, Links}, Token} = ?assertMatch({{ok, _}, _}, rpc:call(Worker, Model, fold_links,

@@ -39,6 +39,7 @@ histogram_api_test_() ->
             {timeout, 300, fun single_time_series_multiple_nodes/0},
             fun multiple_time_series_single_node/0,
             {timeout, 300, fun multiple_time_series_multiple_nodes/0},
+            fun update_subset/0,
             fun single_doc_splitting_strategies_create/0,
             fun multiple_metrics_splitting_strategies_create/0
         ]
@@ -420,6 +421,37 @@ multiple_time_series_multiple_nodes() ->
     ?assertMatch(?GET_OK_ANS(GetAllExpected), ?GET(Id, GetAllArg2, Batch2)).
 
 
+update_subset() ->
+    Id = datastore_key:new(),
+    ConfigMap = lists:foldl(fun(N, Acc) ->
+        TimeSeries = <<"TS", (N rem 2)>>,
+        MetricsMap = maps:get(TimeSeries, Acc, #{}),
+        MetricsConfig = #metric_config{window_timespan = 1, max_windows_count = 1000, aggregator = max},
+        Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
+    end, #{}, lists:seq(1, 5)),
+    Batch = init_histogram(Id, ConfigMap),
+
+    Batch2 = update(Id, 0, <<"TS", 0>>, 0, Batch),
+    Batch3 = update(Id, 0, <<"TS", 1>>, 1, Batch2),
+    Batch4 = update(Id, 1, [<<"TS", 0>>], 2, Batch3),
+    Batch5 = update(Id, 2, [<<"TS", 1>>], 3, Batch4),
+    Batch6 = update(Id, 3, {<<"TS", 0>>, <<"M", 1>>}, 4, Batch5),
+    Batch7 = update(Id, 4, [{<<"TS", 1>>, [<<"M", 1>>, <<"M", 2>>]}], 5, Batch6),
+    Batch8 = update(Id, 5, [{<<"TS", 0>>, <<"M", 1>>}, {<<"TS", 1>>, <<"M", 0>>}], 6, Batch7),
+    Batch9 = update(Id, 6, [{{<<"TS", 0>>, <<"M", 1>>}, 7}, {[{<<"TS", 1>>, [<<"M", 0>>, <<"M", 1>>]}], 8}], Batch8),
+    Batch10 = update(Id, 7, [{<<"TS", 0>>, 9}, {<<"TS", 1>>, 10}], Batch9),
+
+    GetAllArg = maps:to_list(maps:map(fun(_TimeSeriesId, MetricsConfigs) -> maps:keys(MetricsConfigs) end, ConfigMap)),
+    GetAllExpected = #{
+        {<<"TS", 0>>, <<"M", 1>>} => [{7, 9}, {6,7}, {5,6}, {3,4}, {1,2}, {0,0}],
+        {<<"TS", 0>>, <<"M", 2>>} => [{7, 9}, {1,2}, {0,0}],
+        {<<"TS", 1>>, <<"M", 0>>} => [{7, 10}, {6,8}, {5,6}, {2,3}, {0,1}],
+        {<<"TS", 1>>, <<"M", 1>>} => [{7, 10}, {6,8}, {4,5}, {2,3}, {0,1}],
+        {<<"TS", 1>>, <<"M", 2>>} => [{7, 10}, {4,5}, {2,3}, {0,1}]
+    },
+    ?assertMatch(?GET_OK_ANS(GetAllExpected), ?GET(Id, GetAllArg, Batch10)).
+
+
 single_doc_splitting_strategies_create() ->
     Id = datastore_key:new(),
     Batch = datastore_doc_batch:init(),
@@ -543,16 +575,23 @@ init_histogram(Id, ConfigMap) ->
     Batch2.
 
 
-update(Id, NewTimestamp, NewValue, Batch) ->
-    UpdateAns = histogram_api:update(#{}, Id, NewTimestamp, NewValue, Batch),
+update(Id, NewTimestamp, ValueOrUpdateRange, Batch) ->
+    UpdateAns = histogram_api:update(#{}, Id, NewTimestamp, ValueOrUpdateRange, Batch),
+    ?assertMatch({ok, _}, UpdateAns),
+    {ok, Batch2} = UpdateAns,
+    Batch2.
+
+
+update(Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
+    UpdateAns = histogram_api:update(#{}, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch),
     ?assertMatch({ok, _}, UpdateAns),
     {ok, Batch2} = UpdateAns,
     Batch2.
 
 
 update_many(Id, Measurements, Batch) ->
-    lists:foldl(fun({NewTimestamp, NewValue}, Acc) ->
-        update(Id, NewTimestamp, NewValue, Acc)
+    lists:foldl(fun({NewTimestamp, ValueOrUpdateRange}, Acc) ->
+        update(Id, NewTimestamp, ValueOrUpdateRange, Acc)
     end, Batch, Measurements).
 
 -endif.

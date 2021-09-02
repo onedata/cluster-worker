@@ -162,17 +162,29 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_histogram:create(Ctx, Id, ConfigMap)
         end},
-        {histogram_update, fun(Id, NewTimestamp, NewValue) ->
+        {histogram_update, fun(Id, NewTimestamp, ValueOrUpdateRange) ->
             Ctx = get_ctx(Model),
-            datastore_histogram:update(Ctx, Id, NewTimestamp, NewValue)
+            datastore_histogram:update(Ctx, Id, NewTimestamp, ValueOrUpdateRange)
         end},
-        {histogram_update, fun(Id, Measurements) ->
+        {histogram_update, fun(Id, NewTimestamp, MetricsToUpdate, NewValue) ->
             Ctx = get_ctx(Model),
-            datastore_histogram:update(Ctx, Id, Measurements)
+            datastore_histogram:update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue)
+        end},
+        {histogram_update_many, fun(Id, Measurements) ->
+            Ctx = get_ctx(Model),
+            datastore_histogram:update_many(Ctx, Id, Measurements)
+        end},
+        {histogram_get, fun(Id, Options) ->
+            Ctx = get_ctx(Model),
+            datastore_histogram:get(Ctx, Id, Options)
         end},
         {histogram_get, fun(Id, RequestedMetrics, Options) ->
             Ctx = get_ctx(Model),
             datastore_histogram:get(Ctx, Id, RequestedMetrics, Options)
+        end},
+        {histogram_delete, fun(Id) ->
+            Ctx = get_ctx(Model),
+            datastore_histogram:delete(Ctx, Id)
         end}
     ]).
 

@@ -73,7 +73,7 @@
 -export([init_for_new_histogram/4, init_for_existing_histogram/3, finalize/1,
     set_active_time_series/2, set_active_metric/2,
     get_histogram_id/1, is_hub_key/2,
-    get/2, create/2, update/3, delete/2]).
+    get/2, create/2, update/3, delete/2, delete_hub/1]).
 
 -record(ctx, {
     datastore_ctx :: datastore_ctx(),
@@ -178,7 +178,6 @@ update(HubKey, Data, #ctx{
     active_time_series = TimeSeriesId,
     active_metric = MetricsId
 } = Ctx) ->
-    % TODO - trzymamy flattened map z kluczami {TimeSeriesId, MetricsId} - wtedy uprosci nam sie wiele w API
     TimeSeriesMap = histogram_hub:get_time_series_map(HistogramRecord),
     TimeSeries = maps:get(TimeSeriesId, TimeSeriesMap),
     Metrics = maps:get(MetricsId, TimeSeries),
@@ -195,4 +194,10 @@ update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx
 -spec delete(key(), ctx()) -> ctx().
 delete(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     {ok, UpdatedBatch} = datastore_doc:delete(DatastoreCtx, Key, Batch),
+    Ctx#ctx{batch = UpdatedBatch}.
+
+
+-spec delete_hub(ctx()) -> ctx().
+delete_hub(#ctx{hub = #document{key = HubKey}, datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
+    {ok, UpdatedBatch} = datastore_doc:delete(DatastoreCtx, HubKey, Batch),
     Ctx#ctx{batch = UpdatedBatch}.
