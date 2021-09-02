@@ -25,6 +25,7 @@
     cache_clearing_test/1,
     traverse_test/1,
     sequential_traverse_test/1,
+    single_master_job_test/1,
     traverse_multitask_concurrent_test/1,
     traverse_multitask_sequential_test/1,
     traverse_loadbalancing_test/1,
@@ -47,6 +48,7 @@ all() ->
         cache_clearing_test,
         traverse_test,
         sequential_traverse_test,
+        single_master_job_test,
         traverse_multitask_concurrent_test,
         traverse_multitask_sequential_test,
         traverse_loadbalancing_test,
@@ -144,6 +146,26 @@ sequential_traverse_test(Config) ->
     check_ended(Worker, [<<"sequential_traverse_test">>]),
     traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
 
+single_master_job_test(Config) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    TestMap = #{<<"key">> => <<"value">>},
+    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, <<"single_master_job_test">>, {self(), 1, 1},
+        #{additional_data => TestMap, master_job_mode => single}])),
+    check_task_list(Worker, ongoing, [<<"single_master_job_test">>]),
+
+    {Expected, Description} = traverse_test_pool:get_expected(),
+    Ans = traverse_test_pool:get_slave_ans(false),
+    ?assertEqual(Expected, lists:sort(Ans)),
+
+    traverse_test_pool:get_and_verify_job_activity_log(),
+
+    ?assertMatch({ok, #document{value = #traverse_task{description = Description, enqueued = false, status = finished,
+        additional_data = TestMap}}}, rpc:call(Worker, traverse_task, get, [?POOL, <<"single_master_job_test">>]), 5),
+    ?assertMatch({ok, TestMap}, rpc:call(Worker, traverse_task, get_additional_data, [?POOL, <<"single_master_job_test">>]), 5),
+    ?assertMatch({ok, [], _}, rpc:call(Worker, traverse_task_list, list, [?POOL, ongoing]), 1),
+    check_ended(Worker, [<<"single_master_job_test">>]),
+    traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
+
 traverse_multitask_concurrent_test(Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
@@ -219,7 +241,8 @@ traverse_loadbalancing_mixed_ids_test(Config) ->
 traverse_loadbalancing_base(Config, Tasks, Check) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun({ID, GR, Ans}) ->
-        ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, ID, {self(), 1, Ans}, #{group_id => GR}]))
+        ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, ID, {self(), 1, Ans}, #{group_id => GR}])),
+        timer:sleep(1) % sleep to guarantee that all runs have different timestamps
     end, Tasks),
 
     {Expected, Description} = traverse_test_pool:get_expected(),
@@ -301,7 +324,9 @@ traverse_restart_test_base(Config, TaskNameBase, BeforeRestartAction, FirstJobSt
 
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, Task1, {self(), 1, 100}])),
+    timer:sleep(1), % sleep to guarantee that all runs have different timestamps
     ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, Task2, {self(), 1, 2}])),
+    timer:sleep(1), % sleep to guarantee that all runs have different timestamps
     ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, Task3, {self(), 1, 3}])),
 
     RecAns = receive 
@@ -351,8 +376,10 @@ traverse_cancel_test(Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"1traverse_cancel_test">>, {self(), 1, 100}])),
+    timer:sleep(1), % sleep to guarantee that all runs have different timestamps
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"2traverse_cancel_test">>, {self(), 1, 2}])),
+    timer:sleep(1), % sleep to guarantee that all runs have different timestamps
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"3traverse_cancel_test">>, {self(), 1, 3}])),
 
@@ -430,7 +457,7 @@ init_per_testcase(sequential_traverse_test, Config) ->
     ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 1, 3, 10])),
     Config;
 init_per_testcase(Case, Config) when
-    Case =:= traverse_test ; Case =:= traverse_multitask_concurrent_test ;
+    Case =:= traverse_test ; Case =:= single_master_job_test ; Case =:= traverse_multitask_concurrent_test ;
     Case =:= traverse_multienvironment_test ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]),

@@ -18,6 +18,7 @@
 -include("global_definitions.hrl").
 -include_lib("xmerl/include/xmerl.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include_lib("ctool/include/http/headers.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
 -export([init/2]).
@@ -39,12 +40,12 @@ init(#{method := <<"GET">>} = Req, State) ->
         {ok, {AppStatus, NodeStatuses}} ->
             Reply = format_reply(AppStatus, NodeStatuses),
             cowboy_req:reply(200,
-                #{<<"content-type">> => <<"application/xml">>}, Reply, Req
+                #{?HDR_CONTENT_TYPE => <<"application/xml">>}, Reply, Req
             )
     end,
     {ok, NewReq, State};
 init(Req, State) ->
-    NewReq = cowboy_req:reply(405, #{<<"allow">> => <<"GET">>}, Req),
+    NewReq = cowboy_req:reply(405, #{?HDR_ALLOW => <<"GET">>}, Req),
     {ok, NewReq, State}.
 
 

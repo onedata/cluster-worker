@@ -19,16 +19,16 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% Lifecycle API
--export([create/11, start/5, schedule_for_local_execution/3, finish/6, cancel/5, on_task_change/2,
+-export([create/12, start/5, schedule_for_local_execution/3, finish/6, cancel/5, on_task_change/2,
     on_remote_change/4, delete_ended/2]).
 
 %%% Setters and getters API
 -export([update_description/4, update_status/4, fix_description/4,
-    get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1,
+    get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1, get_description/1,
     get_additional_data/1, get_additional_data/2, update_additional_data/4]).
 
 %% datastore_model callbacks
--export([get_ctx/0, get_record_struct/1, resolve_conflict/3]).
+-export([get_ctx/0, get_record_struct/1, get_record_version/0, upgrade_record/2, resolve_conflict/3]).
 
 %% code/decode description
 -export([encode_description/1, decode_description/1]).
@@ -60,9 +60,9 @@
 %%--------------------------------------------------------------------
 -spec create(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), traverse:environment_id(),
     traverse:environment_id(), traverse:group(), traverse:job_id(), remote | undefined | node(),
-    traverse:description(), traverse:additional_data()) -> ok.
+    traverse:description(), traverse:additional_data(), traverse:master_job_mode()) -> ok.
 create(ExtendedCtx, Pool, CallbackModule, TaskId, Creator, Executor, GroupId, Job, Node, InitialDescription,
-    AdditionalData) ->
+    AdditionalData, MasterJobMode) ->
     {ok, Timestamp} = get_timestamp(CallbackModule),
     Value0 = #traverse_task{
         callback_module = CallbackModule,
@@ -72,7 +72,8 @@ create(ExtendedCtx, Pool, CallbackModule, TaskId, Creator, Executor, GroupId, Jo
         description = InitialDescription,
         schedule_time = Timestamp,
         main_job_id = Job,
-        additional_data = AdditionalData
+        additional_data = AdditionalData,
+        master_job_mode = MasterJobMode
     },
 
     Value = case Node of
@@ -469,14 +470,16 @@ get_execution_info(#document{value = #traverse_task{
     executor = Executor,
     main_job_id = MainJobId,
     node = Node,
-    start_time = StartTimestamp
+    start_time = StartTimestamp,
+    master_job_mode = MasterJobMode
 }}) ->
     {ok, #task_execution_info{
         callback_module = CallbackModule,
         executor = Executor,
         main_job_id = MainJobId,
         node = Node,
-        start_time = StartTimestamp
+        start_time = StartTimestamp,
+        master_job_mode = MasterJobMode
     }}.
 
 -spec get_execution_info(traverse:pool(), traverse:id()) -> {ok, traverse:task_execution_info()} | {error, term()}.
@@ -487,6 +490,11 @@ get_execution_info(Pool, TaskId) ->
         Other ->
             Other
     end.
+
+-spec get_description(doc()) -> {ok, traverse:description()}.
+get_description(#document{value = #traverse_task{description = Description}}) ->
+    {ok, Description}.
+
 
 -spec get_additional_data(doc()) -> {ok, traverse:additional_data()}.
 get_additional_data(#document{value = #traverse_task{additional_data = AdditionalData}}) ->
@@ -541,7 +549,37 @@ get_record_struct(1) ->
         {status, atom},
         {description, {custom, json, {?MODULE, encode_description, decode_description}}},
         {additional_data, #{string => binary}}
+    ]};
+get_record_struct(2) ->
+    {record, [
+        {callback_module, atom},
+        {creator, string},
+        {executor, string},
+        {group, string},
+        {schedule_time, integer},
+        {start_time, integer},
+        {finish_time, integer},
+        {main_job_id, string},
+        {enqueued, boolean},
+        {canceled, boolean},
+        {node, atom},
+        {status, atom},
+        {description, {custom, json, {?MODULE, encode_description, decode_description}}},
+        {additional_data, #{string => binary}},
+        {master_job_mode, atom} % field added
     ]}.
+
+-spec get_record_version() -> datastore_model:record_version().
+get_record_version() ->
+    2.
+
+-spec upgrade_record(datastore_model:record_version(), datastore_model:record()) ->
+    {datastore_model:record_version(), datastore_model:record()}.
+upgrade_record(1, {?MODULE, CallbackModule, Creator, Executor, Group, ScheduleTime, StartTime,
+    FinishTime, MainJobId, Enqueued, Canceled, Node, Status, Description, AdditionalData}
+) ->
+    {2, {?MODULE, CallbackModule, Creator, Executor, Group, ScheduleTime, StartTime,
+        FinishTime, MainJobId, Enqueued, Canceled, Node, Status, Description, AdditionalData, all}}.
 
 %%--------------------------------------------------------------------
 %% @doc

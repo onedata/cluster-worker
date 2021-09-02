@@ -67,11 +67,26 @@
     stress_performance_test/1,
     stress_performance_test_base/1,
     memory_only_stress_performance_test/1,
-    memory_only_stress_performance_test_base/1
+    memory_only_stress_performance_test_base/1,
+    infinite_log_create_test/1,
+    infinite_log_destroy_test/1,
+    infinite_log_operations_test/1,
+    infinite_log_operations_direct_access_test/1,
+    infinite_log_set_ttl_test/1,
+    infinite_log_age_pruning_test/1,
+    infinite_log_append_performance_test/1,
+    infinite_log_append_performance_test_base/1,
+    infinite_log_list_performance_test/1,
+    infinite_log_list_performance_test_base/1
 ]).
 
 % for rpc
--export([test_create_get/0, del_one_by_one/4]).
+-export([
+    test_create_get/0,
+    del_one_by_one/4,
+    measure_infinite_log_appends_time/4,
+    measure_infinite_log_listings_time/4
+]).
 
 all() ->
     ?ALL([
@@ -115,12 +130,20 @@ all() ->
         fold_links_id_should_succeed,
         fold_links_token_and_id_should_succeed,
         memory_only_stress_performance_test,
-        stress_performance_test
+        stress_performance_test,
+        infinite_log_create_test,
+        infinite_log_destroy_test,
+        infinite_log_operations_test,
+        infinite_log_operations_direct_access_test,
+        infinite_log_set_ttl_test,
+        infinite_log_age_pruning_test
     ], [
         links_performance,
         create_get_performance,
         memory_only_stress_performance_test,
-        stress_performance_test
+        stress_performance_test,
+        infinite_log_append_performance_test,
+        infinite_log_list_performance_test
     ]).
 
 -define(DOC(Model), ?DOC(?KEY, Model)).
@@ -478,7 +501,6 @@ get_links_after_expiration_time_should_succeed(Config) ->
     {LinksNames, _} = lists:unzip(Links),
 
 
-
     % Check links deletion
     ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
         ?KEY, ?LINK_TREE_ID, Links
@@ -503,7 +525,6 @@ get_links_after_expiration_time_should_succeed(Config) ->
     )),
 
 
-
     % Check links adding after deletion
     ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
         ?KEY, ?LINK_TREE_ID, Links
@@ -525,8 +546,6 @@ get_links_after_expiration_time_should_succeed(Config) ->
         [?KEY, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
     )),
     ?assertEqual(LinksNum, length(Results3)),
-
-
 
     % Test fold links
     ?assertMatch({ok, #document{}},
@@ -569,7 +588,7 @@ disk_fetch_links_should_succeed(Config) ->
         ?assertEqual(?LINK_TARGET, Link#link.target),
         ?assertEqual(undefined, Link#link.rev),
 
-        [LinkNode |__] = get_link_nodes(),
+        [LinkNode | __] = get_link_nodes(),
 
         MemCtx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY), ?MEM_CTX(Model)),
         ?assertMatch({ok, _}, rpc:call(Worker, ?MEM_DRV(Model), get, [MemCtx, LinkNode])),
@@ -824,7 +843,7 @@ expired_doc_should_not_exist(Config) ->
         assert_on_disc(Worker, Model, Key),
         timer:sleep(8000),
         assert_not_on_disc(Worker, Model, Key)
-    end, [global_clock:timestamp_seconds()+5, 5]).
+    end, [global_clock:timestamp_seconds() + 5, 5]).
 
 deleted_doc_should_expire(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -918,6 +937,130 @@ link_del_should_delay_inactivate(Config) ->
 
     ?assertNotEqual(undefined, Timestamp),
     ?assert(Timestamp - Now > timer:seconds(5)).
+
+
+infinite_log_create_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        ?assertMatch(ok,
+            rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 8}])
+        ),
+        assert_in_memory(Worker, Model, ?KEY),
+        assert_on_disc(Worker, Model, ?KEY)
+    end, ?TEST_MODELS).
+
+
+infinite_log_destroy_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 8}]),
+        ?assertMatch(ok,
+            rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
+        ),
+        assert_in_memory(Worker, Model, ?KEY, true),
+        assert_on_disc(Worker, Model, ?KEY, true)
+    end, ?TEST_MODELS).
+
+
+infinite_log_operations_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 8}]),
+
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary">>])),
+        ?assertMatch({ok, {done, [{0, {_, <<"some_binary">>}}]}}, rpc:call(Worker, Model,
+            infinite_log_list, [?KEY, #{}])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"another_binary">>])),
+        ?assertMatch({ok, {done, [{1, {_, <<"another_binary">>}}]}}, rpc:call(Worker, Model,
+            infinite_log_list, [?KEY, #{limit => 1, start_from => {index, 1}}])),
+
+        ok = rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
+    end, ?TEST_MODELS).
+
+
+infinite_log_operations_direct_access_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        MemoryOnlyCtx = (datastore_test_utils:get_ctx(Model))#{disc_driver => undefined, disc_driver_ctx => #{}},
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 8}]),
+        ExtendedMemTableCtx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY), ?MEM_CTX(Model)),
+
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary">>])),
+        ?assertMatch(
+            {ok, {done, [{0, {_, <<"some_binary">>}}]}},
+            check_direct_access_operation(Worker, Model, datastore_infinite_log, list, [?KEY, #{}], ExtendedMemTableCtx)),
+
+        clean_cache(Worker, Model, ExtendedMemTableCtx),
+        ?assertEqual({error, not_found}, rpc:call(Worker, datastore_infinite_log, append, [MemoryOnlyCtx, ?KEY, <<"another_binary">>])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"another_binary">>])),
+
+        ?assertMatch(
+            {ok, {done, [{1, {_, <<"another_binary">>}}]}},
+            check_direct_access_operation(Worker, Model, datastore_infinite_log, list, [?KEY, #{limit => 1, start_from => {index, 1}}], ExtendedMemTableCtx)),
+
+        clean_cache(Worker, Model, ExtendedMemTableCtx),
+        ok = rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
+    end, ?TEST_CACHED_MODELS).
+
+
+infinite_log_set_ttl_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY),
+            ?MEM_CTX(Model)),
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 1}]),
+
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary1">>])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary2">>])),
+        ?assertMatch({ok, {done, [
+            {0, {_, <<"some_binary1">>}},
+            {1, {_, <<"some_binary2">>}}
+        ]}}, rpc:call(Worker, Model, infinite_log_list, [?KEY, #{}])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_set_ttl, [?KEY, 2])),
+        clean_cache(Worker, Model, Ctx),
+        timer:sleep(timer:seconds(3)),
+
+        ?assertEqual({error, not_found}, rpc:call(Worker, Model,
+            infinite_log_append, [?KEY, <<"another_binary">>])),
+        ?assertMatch({error, not_found}, rpc:call(Worker, Model,
+            infinite_log_list, [?KEY, #{}])),
+
+        ok = rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
+    end, ?TEST_MODELS).
+
+
+infinite_log_age_pruning_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY),
+            ?MEM_CTX(Model)),
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY, #{max_entries_per_node => 1, age_pruning_threshold => 2}]),
+
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary1">>])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary2">>])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary3">>])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"some_binary4">>])),
+        ?assertMatch({ok, {done, [
+            {0, {_, <<"some_binary1">>}},
+            {1, {_, <<"some_binary2">>}},
+            {2, {_, <<"some_binary3">>}},
+            {3, {_, <<"some_binary4">>}}
+        ]}}, rpc:call(Worker, Model, infinite_log_list, [?KEY, #{}])),
+        clean_cache(Worker, Model, Ctx),
+        timer:sleep(timer:seconds(3)),
+
+        ?assertMatch({ok, {done, [
+            {3, {_, <<"some_binary4">>}}
+        ]}}, rpc:call(Worker, Model, infinite_log_list, [?KEY, #{}])),
+
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY, <<"another_binary">>])),
+        ?assertMatch({ok, {done, [
+            {4, {_, <<"another_binary">>}}
+        ]}}, rpc:call(Worker, Model, infinite_log_list, [?KEY, #{}])),
+
+        ok = rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
+    end, ?TEST_PERSISTENT_MODELS).
+
 
 %%%===================================================================
 %%% Stress tests
@@ -1220,9 +1363,229 @@ test_create_get() ->
     Diff5 = Time5 - Time4,
     {ok, {Diff1, Diff2, Diff3, Diff4, Diff5}}.
 
+
+infinite_log_append_performance_test(Config) ->
+    ?PERFORMANCE(Config, [
+        {repeats, ?REPEATS},
+        {success_rate, ?SUCCESS_RATE},
+        {description, "Append to infinite-log performance test case."},
+        {parameters, [
+            [{name, repeats}, {value, 2}, {description, "Repeats of each append test."}],
+            [{name, proc_count_list}, {value, [1, 100]}, {description, "Processes to be used."}],
+            [{name, log_size}, {value, 20}, {description, "Number of bytes for single log entry."}],
+            [{name, appends_count}, {value, 50000}, {description, "Total logs append count."}],
+            [{name, max_entries_per_node_list},
+                {value, [100, 200, 400, 600, 800, 1000]},
+                {description, "Max entries per node values to be tested."}],
+            [{name, models}, {value, [ets_only_model, ets_cached_model]}, {description, "Model used for tests"}],
+            [{name, size_pruning}, {value, undefined}, {description, "Default size pruning"}],
+            [{name, age_pruning}, {value, undefined}, {description, "Default without age pruning"}]
+        ]},
+        {config, [
+            {name, pruning_off},
+            {parameters, [
+                [{name, size_pruning}, {value, undefined}],
+                [{name, age_pruning}, {value, undefined}]
+            ]},
+            {description, "Append with no pruning."}
+        ]},
+        {config, [
+            {name, age_pruning_on},
+            {parameters, [
+                [{name, size_pruning}, {value, undefined}],
+                [{name, age_pruning}, {value, 2}]
+            ]},
+            {description, "Append with age pruning."}
+        ]},
+        {config, [
+            {name, size_pruning_on},
+            {parameters, [
+                [{name, size_pruning}, {value, 5000}],
+                [{name, age_pruning}, {value, undefined}]
+            ]},
+            {description, "Append with size pruning."}
+        ]},
+        {config, [
+            {name, size_and_age_pruning_on},
+            {parameters, [
+                [{name, size_pruning}, {value, 2000}],
+                [{name, age_pruning}, {value, 2}]
+            ]},
+            {description, "Append with size and age pruning."}
+        ]}
+    ]).
+
+infinite_log_append_performance_test_base(Config) ->
+    ct:timetrap({hours, 3}),
+    Repeats = ?config(repeats, Config),
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Models = ?config(models, Config),
+
+    ProcCountList = ?config(proc_count_list, Config),
+    AppendsCount = ?config(appends_count, Config),
+    LogSize = 100,
+
+    MaxEntriesPerNodeList = ?config(max_entries_per_node_list, Config),
+    SizePruningThreshold = ?config(size_pruning, Config),
+    AgePruningThreshold = ?config(age_pruning, Config),
+
+    lists:foreach(fun(Model) ->
+        lists:foreach(fun(ProcCount) ->
+            lists:foreach(fun(MaxEntriesPerNode) ->
+                AppendsPerProcess = AppendsCount div ProcCount,
+                LogId = str_utils:rand_hex(10),
+                LogOpts = #{
+                    max_entries_per_node => MaxEntriesPerNode,
+                    size_pruning_threshold => SizePruningThreshold,
+                    age_pruning_threshold => AgePruningThreshold
+                },
+                ?assertMatch(ok, rpc:call(Worker, Model, infinite_log_create, [LogId, LogOpts])),
+                AvgTime = repeat_infinite_log_appends(Repeats, Worker, Model, LogId, LogSize, ProcCount, AppendsPerProcess),
+                ?assertMatch(ok, rpc:call(Worker, Model, infinite_log_destroy, [LogId])),
+                ct:pal("Results for infinite log append tests:\n"
+                "model:                  ~p~n"
+                "process count:          ~p~n"
+                "process repeats:        ~p~n"
+                "log size:               ~p~n"
+                "max entries per node:   ~p~n"
+                "size pruning threshold: ~p~n"
+                "age pruning threshold:  ~p~n"
+                "efficiency:             ~p [appends/s]",
+                    [Model, ProcCount, AppendsPerProcess, LogSize, MaxEntriesPerNode, SizePruningThreshold, AgePruningThreshold,
+                        AppendsCount / AvgTime * 1000])
+            end, MaxEntriesPerNodeList)
+        end, ProcCountList)
+    end, Models).
+
+
+infinite_log_list_performance_test(Config) ->
+    ?PERFORMANCE(Config, [
+        {repeats, ?REPEATS},
+        {success_rate, ?SUCCESS_RATE},
+        {description, "List from infinite-log testcase"},
+        {parameters, [
+            [{name, repeats}, {value, 2}, {description, "Repeats of each listing test."}],
+            [{name, models}, {value, [ets_only_model, ets_cached_model]}, {description, "Model used for tests"}],
+            [{name, listing_direction_list}, {value, [backward_from_newest, forward_from_oldest]}, {description, "Listing directions to be tested."}],
+            [{name, listing_start_from_list}, {value, [undefined, #{index => 3000}, #{timestamp => 100}]}, {description, "Starting from options to be tested."}],
+            [{name, listing_offset_list}, {value, [0, 5000]}, {description, "Listing offsets to be tested."}],
+            [{name, listing_limit_list}, {value, [1, 1000]}, {description, "Listing limits to be tested."}],
+            [{name, proc_count_list}, {value, [1, 1000]}, {description, "Processes to be used."}],
+            [{name, listings_count}, {value, 50000}, {description, "Total listings count to be performed."}],
+            [{name, appends_count}, {value, 50000}, {description, "Total log appends count"}],
+            [{name, log_size}, {value, 20}, {description, "Size of each log"}],
+            [{name, size_pruning_threshold}, {value, undefined}, {description, "Default size pruning threshold."}],
+            [{name, age_pruning_threshold}, {value, undefined}, {description, "Default age pruning threshold."}],
+            [{name, max_entries_per_node_list}, {value, [100, 200, 400, 600, 800, 1000]}, {description, "Max entries per node to be tested."}]
+        ]},
+        {config, [
+            {name, size_pruning_on},
+            {parameters, [
+                [{name, size_pruning_threshold}, {value, 10000}]
+            ]},
+            {description, "Size pruning on"}
+        ]},
+        {config, [
+            {name, age_pruning_on},
+            {parameters, [
+                [{name, age_pruning_threshold}, {value, 2}]
+            ]},
+            {description, "Age pruning on"}
+        ]},
+        {config, [
+            {name, both_pruning_on},
+            {parameters, [
+                [{name, size_pruning_threshold}, {value, 10000}],
+                [{name, age_pruning_threshold}, {value, 2}]
+            ]},
+            {description, "Both pruning on"}
+        ]}
+    ]).
+
+infinite_log_list_performance_test_base(Config) ->
+    ct:timetrap({hours, 4}),
+    Repeats = ?config(repeats, Config),
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Models = ?config(models, Config),
+
+    ProcCountList = ?config(proc_count_list, Config),
+    ListingsCount = ?config(listings_count, Config),
+
+    % Log options
+    LogSize = ?config(log_size, Config),
+    AppendsCount = ?config(appends_count, Config),
+    MaxEntriesPerNodeList = ?config(max_entries_per_node_list, Config),
+    SizePruningThreshold = ?config(size_pruning_threshold, Config),
+    AgePruningThreshold = ?config(age_pruning_threshold, Config),
+
+    % Listing options
+    ListingDirectionList = ?config(listing_direction_list, Config),
+    ListingStartFromList = ?config(listing_start_from_list, Config),
+    ListingOffsetList = ?config(listing_offset_list, Config),
+    ListingLimitList = ?config(listing_limit_list, Config),
+    AppendProcessesCount = 500,
+
+    lists:foreach(fun(Model) ->
+        lists:foreach(fun(MaxEntriesPerNode) ->
+            LogId = str_utils:rand_hex(10),
+            LogOpts = #{
+                max_entries_per_node => MaxEntriesPerNode,
+                size_pruning_threshold => SizePruningThreshold,
+                age_pruning_threshold => AgePruningThreshold
+            },
+            ?assertMatch(ok, rpc:call(Worker, Model, infinite_log_create, [LogId, LogOpts])),
+            perform_infinite_log_appends(Worker, Model, LogId, LogSize, AppendProcessesCount, AppendsCount div AppendProcessesCount),
+
+            lists:foreach(fun(ListingDirection) ->
+                lists:foreach(fun(ListingStartFrom) ->
+                    lists:foreach(fun(ListingOffset) ->
+                        lists:foreach(fun(ListingLimit) ->
+                            lists:foreach(fun(ProcCount) ->
+                                ListingsPerProcess = ListingsCount div ProcCount,
+
+                                ListingStartFromParsed = case is_map(ListingStartFrom) of
+                                    true -> {hd(maps:keys(ListingStartFrom)), hd(maps:values(ListingStartFrom))};
+                                    false -> undefined
+                                end,
+
+                                ListOpts = #{
+                                    direction => ListingDirection,
+                                    start_from => ListingStartFromParsed,
+                                    offset => ListingOffset,
+                                    limit => ListingLimit
+                                },
+                                AvgTime = repeat_infinite_log_listings(Repeats, Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess),
+
+                                ct:pal("Results for infinite log list tests:~n"
+                                "model:                  ~p~n"
+                                "process count:          ~p~n"
+                                "process repeats:        ~p~n"
+                                "log size:               ~p~n"
+                                "max entries per node:   ~p~n"
+                                "size pruning threshold: ~p~n"
+                                "age pruning threshold:  ~p~n"
+                                "list direction:         ~p~n"
+                                "list starting from:     ~p~n"
+                                "offset:                 ~p~n"
+                                "limit:                  ~p~n"
+                                "efficiency:             ~p [listings/s]",
+                                    [Model, ProcCount, ListingsPerProcess, LogSize, MaxEntriesPerNode, SizePruningThreshold,
+                                        AgePruningThreshold, ListingDirection, ListingStartFromParsed, ListingOffset,
+                                        ListingLimit, 1000 * ProcCount * ListingsPerProcess / AvgTime])
+                            end, ProcCountList)
+                        end, ListingLimitList)
+                    end, ListingOffsetList)
+                end, ListingStartFromList)
+            end, ListingDirectionList),
+            ?assertMatch(ok, rpc:call(Worker, Model, infinite_log_destroy, [LogId]))
+        end, MaxEntriesPerNodeList)
+    end, Models).
+
+
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
+
 
 init_per_suite(Config) ->
     datastore_test_utils:init_suite(?TEST_MODELS, Config,
@@ -1311,7 +1674,6 @@ end_per_testcase(link_doc_should_expire, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     Expiry = ?config(expiry, Config),
     test_utils:set_env(Workers, cluster_worker, link_disk_expiry, Expiry),
-
     test_utils:mock_unload(Workers, links_tree);
 end_per_testcase(link_del_should_delay_inactivate, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
@@ -1332,6 +1694,7 @@ end_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_lis
     test_utils:mock_unload(Workers, [datastore_model, datastore]);
 end_per_testcase(_Case, _Config) ->
     ok.
+
 
 end_per_suite(_Config) ->
     ok.
@@ -1531,3 +1894,109 @@ del_one_by_one(Model, Key, Tree, ExpectedLinkNames) ->
     lists:map(fun(Name) ->
         apply(Model, delete_links, [Key, Tree, Name])
     end, ExpectedLinkNames).
+
+
+check_direct_access_operation(Worker, Model, Module, Function, Args, ExtendedMemTableCtx) ->
+    Ctx = datastore_test_utils:get_ctx(Model),
+    MemoryOnlyCtx = Ctx#{disc_driver => undefined, disc_driver_ctx => #{}},
+    {ok, Res} = ?assertMatch({ok, _}, rpc:call(Worker, Module, Function, [MemoryOnlyCtx | Args])),
+    clean_cache(Worker, Model, ExtendedMemTableCtx),
+    ?assertMatch({error, not_found}, rpc:call(Worker, Module, Function, [MemoryOnlyCtx | Args])),
+    ?assertMatch({ok, Res}, rpc:call(Worker, Module, Function, [Ctx | Args])),
+    ?assertMatch({ok, Res}, rpc:call(Worker, Module, Function, [MemoryOnlyCtx | Args])).
+
+
+clean_cache(Worker, Model, Ctx) when
+    Model =:= ets_only_model;
+    Model =:= ets_cached_model ->
+    % wait for documents to be saved on disc
+    timer:sleep(timer:seconds(1)),
+    rpc:call(Worker, ets_driver, delete_all, [Ctx]);
+clean_cache(Worker, Model, Ctx) when
+    Model =:= mnesia_only_model;
+    Model =:= mnesia_cached_model ->
+    % wait for documents to be saved on disc
+    timer:sleep(timer:seconds(1)),
+    {ok, Keys} = rpc:call(Worker, mnesia_driver, fold, [Ctx, fun(Key, _, Acc) -> {ok, [Key | Acc]} end, []]),
+    lists:foreach(fun(Key) ->
+        ok = rpc:call(Worker, mnesia_driver, delete, [Ctx, Key])
+    end, Keys);
+clean_cache(_Worker, _Model, _Ctx) ->
+    ok.
+
+
+%% @private
+-spec repeat_infinite_log_appends(integer(), node(), atom(), binary(), binary(), integer(), integer()) -> [integer()].
+repeat_infinite_log_appends(Repeats, Worker, Model, LogId, Log, ProcCount, AppendsPerProcess) ->
+    Results = lists:map(fun(_) ->
+        perform_infinite_log_appends(Worker, Model, LogId, Log, ProcCount, AppendsPerProcess)
+    end, lists:seq(1, Repeats)),
+    lists:sum(Results) / Repeats.
+
+
+%% @private
+-spec perform_infinite_log_appends(node(), atom(), binary(), integer(), integer(), integer()) -> [integer()].
+perform_infinite_log_appends(Worker, Model, LogId, LogSize, ProcCount, AppendsPerProcess) ->
+    AppendFun = fun(_) ->
+        Log = str_utils:rand_hex(LogSize div 2),
+        {_, Time} = ?assertMatch({ok, _}, rpc:call(Worker, ?MODULE, measure_infinite_log_appends_time,
+            [Model, LogId, Log, AppendsPerProcess])),
+        Time
+    end,
+    Times = lists_utils:pmap(AppendFun, lists:seq(1, ProcCount)),
+    lists:sum(Times) / ProcCount / AppendsPerProcess.
+
+
+%% @private
+-spec measure_infinite_log_appends_time(atom(), binary(), binary(), integer()) -> {term(), integer()}.
+measure_infinite_log_appends_time(Model, LogId, Log, AppendsPerProcess) ->
+    measure_execution_time(
+        fun() ->
+            lists:foreach(fun(_) ->
+                Model:infinite_log_append(LogId, Log)
+            end, lists:seq(1, AppendsPerProcess))
+        end
+    ).
+
+
+%% @private
+-spec repeat_infinite_log_listings(integer(), node(), atom(), binary(), map(), integer(), integer()) -> [integer()].
+repeat_infinite_log_listings(Repeats, Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess) ->
+    Results = lists:map(fun(_) ->
+        perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess)
+    end, lists:seq(1, Repeats)),
+    lists:sum(Results) / Repeats.
+
+
+%% @private
+-spec perform_infinite_log_listings(node(), atom(), binary(), map(), integer(), integer()) -> [integer()].
+perform_infinite_log_listings(Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess) ->
+    ListingFun = fun(_) ->
+        {_, Time} = ?assertMatch({ok, _},
+            rpc:call(Worker, ?MODULE, measure_infinite_log_listings_time,
+                [Model, LogId, ListOpts, ListingsPerProcess])
+        ),
+        Time
+    end,
+    Times = lists_utils:pmap(ListingFun, lists:seq(1, ProcCount)),
+    lists:sum(Times) / ProcCount / ListingsPerProcess.
+
+
+%% @private
+-spec measure_infinite_log_listings_time(atom(), binary(), map(), integer()) -> {term(), integer()}.
+measure_infinite_log_listings_time(Model, LogId, ListOpts, ListingsPerProcess) ->
+    measure_execution_time(
+        fun() ->
+            lists:foreach(fun(_) ->
+                Model:infinite_log_list(LogId, ListOpts)
+            end, lists:seq(1, ListingsPerProcess))
+        end
+    ).
+
+
+%% @private
+-spec measure_execution_time(fun(() -> term())) -> {term(), integer()}.
+measure_execution_time(Fun) ->
+    Stopwatch = stopwatch:start(),
+    Ans = Fun(),
+    {Ans, stopwatch:read_millis(Stopwatch)}.

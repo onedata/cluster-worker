@@ -158,11 +158,11 @@ get(Connection, Requests) ->
                     try
                         {Key, {ok, Cas, datastore_json:decode(Value)}}
                     catch
-                        _:Reason ->
+                        _:Reason:Stacktrace ->
                             ?error_stacktrace("Cannot decode couchbase value for key ~p~nValue: ~p~nReason: ~p", [
                                 Key, Value, Reason
-                            ]),
-                            {Key, {error, {Reason, erlang:get_stacktrace()}}}
+                            ], Stacktrace),
+                            {Key, {error, {Reason, Stacktrace}}}
                     end;
                 ({Key, {error, Reason}}) ->
                     {Key, {error, Reason}}
@@ -377,11 +377,11 @@ prepare_store(Requests) ->
                     Responses
                 }
             catch
-                Type:Reason ->
+                Type:Reason:Stacktrace ->
                     ?warning_stacktrace("Cannot encode document due to ~p:~p~nDoc: ~p", [
-                        Type, Reason, Value
-                    ]),
-                    Reason2 = {Reason, erlang:get_stacktrace()},
+                        Type, Reason
+                    ], Stacktrace),
+                    Reason2 = {Reason, Stacktrace},
                     {
                         StoreRequests,
                         Requests2,

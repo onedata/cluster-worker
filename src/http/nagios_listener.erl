@@ -34,8 +34,7 @@
 %%--------------------------------------------------------------------
 -spec port() -> integer().
 port() ->
-    {ok, Port} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_nagios_port),
+    {ok, Port} = application:get_env(?CLUSTER_WORKER_APP_NAME, http_nagios_port),
     Port.
 
 
@@ -66,11 +65,14 @@ start() ->
 
     % Start the listener for nagios handler
     Result = cowboy:start_clear(?NAGIOS_LISTENER,
-        [
-            {ip, {0, 0, 0, 0}},
-            {port, port()},
-            {num_acceptors, NbAcceptors}
-        ], #{
+        #{
+            num_acceptors => NbAcceptors,
+            socket_opts => [
+                {ip, any},
+                {port, port()}
+            ]
+        },
+        #{
             env => #{dispatch => Dispatch},
             max_keepalive => MaxKeepAlive,
             request_timeout => timer:seconds(Timeout)

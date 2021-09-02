@@ -15,6 +15,7 @@
 
 % Request sent to datastore_writer by processes that use datastore
 -record(datastore_request, {
+    module :: module() | undefined,
     function :: atom(),
     ctx :: datastore:ctx(),
     args :: list()

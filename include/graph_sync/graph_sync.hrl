@@ -118,6 +118,7 @@
 -define(THROUGH_HANDLE(HandleId), {throughHandle, HandleId}).
 -define(THROUGH_HARVESTER(HarvesterId), {throughHarvester, HarvesterId}).
 -define(THROUGH_CLUSTER(ClusterId), {throughCluster, ClusterId}).
+-define(THROUGH_ATM_INVENTORY(AtmInventoryId), {throughInventory, AtmInventoryId}).
 % Auth hint denoting context in which an aspect is created
 -define(AS_USER(UserId), {asUser, UserId}).
 -define(AS_GROUP(GroupId), {asGroup, GroupId}).

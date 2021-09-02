@@ -77,7 +77,7 @@ encode(#bp_tree_node{leaf = Leaf, children = Children, order = Order, rebalance_
             maps:put(<<"rebalance_info">>, RI_Lists, FinalMap2)
     end,
 
-    jiffy:encode(FinalMap3).
+    json_utils:encode(FinalMap3).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -89,7 +89,7 @@ decode(Term) ->
     #{
         <<"leaf">> := Leaf,
         <<"children">> := Children
-    } = InputMap = jiffy:decode(Term, [return_maps]),
+    } = InputMap = json_utils:decode(Term),
     Children2 = maps:fold(fun
         (Key, #{<<"target">> := LinkTarget, <<"_rev">> := <<"undefined">>,
             <<"type">> := <<"int">>}, Map) ->

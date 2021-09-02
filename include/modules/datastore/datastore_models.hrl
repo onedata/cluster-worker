@@ -84,7 +84,9 @@
     node :: undefined | node(),
     status = scheduled :: traverse:status(),
     description = #{} :: traverse:description(),
-    additional_data = #{} :: traverse:additional_data()
+    additional_data = #{} :: traverse:additional_data(),
+
+    master_job_mode :: traverse:master_job_mode()
 }).
 
 -record(traverse_tasks_scheduler, {

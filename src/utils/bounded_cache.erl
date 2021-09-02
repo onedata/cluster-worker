@@ -27,7 +27,7 @@
 
 %% Basic cache API
 -export([get_or_calculate/4, get_or_calculate/5, get/2,
-    calculate_and_cache/4, calculate_and_cache/5,
+    calculate_and_cache/4, calculate_and_cache/5, cache/4,
     invalidate/1, get_timestamp/0]).
 %% Cache management API
 -export([init_group_manager/0, init_cache/2, init_group/2, cache_exists/1, terminate_cache/1, check_cache_size/1]).
@@ -64,7 +64,8 @@
 }.
 -type in_critical_section() :: boolean().
 
--export_type([additional_info/0, cache/0, callback/0, timestamp/0, value/0]).
+-export_type([additional_info/0, cache/0, group/0, cache_options/0, group_options/0,
+    callback/0, timestamp/0, value/0]).
 
 -define(TIMER_MESSAGE(Options), {bounded_cache_timer, Options}).
 -define(CACHE_MANAGER, bounded_cache_manager).
@@ -72,7 +73,8 @@
 -define(INVALIDATION_TIMESTAMP_KEY(Cache), {invalidation_timestamp, Cache}).
 -define(GROUP_MEMBERS_KEY(Group), {group_members, Group}).
 -define(CREATE_CRITICAL_SECTION(Group), {bounded_cache_group_create, Group}).
--define(INVALIDATE_CRITICAL_SECTION(Cache), {bounded_cache_invalidation, Cache}).
+-define(INVALIDATE_CRITICAL_SECTION(Cache),
+    {bounded_cache_invalidation, Cache}).
 -define(INSERT_CRITICAL_SECTION(Cache, Key), {bounded_cache_insert, Cache, Key}).
 
 -record(cache_item, {
@@ -161,31 +163,48 @@ calculate_and_cache(Cache, Key, CalculateCallback, Args) ->
 calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp) ->
     case CalculateCallback(Args) of
         {ok, Value, _CalculationInfo} = Ans ->
-            % Insert value with timestamp
-            case ets:insert_new(Cache, #cache_item{
-                key = Key,
-                value = Value,
-                timestamp = Timestamp,
-                timestamp_check = 0
-            }) of
-                true ->
-                    case check_invalidation(Cache, Timestamp) of
-                        invalidated ->
-                            ok; % value in cache will be invalid without counter update
-                        _ ->
-                            % Increment timestamp_check field as there was no invalidation.
-                            % Use incrementation threshold in case of parallel insert race.
-                            % As update_counter fails if there is no particular key, races
-                            % with invalidation are prevented.
-                            catch ets:update_counter(Cache, Key,
-                                {#cache_item.timestamp_check, Timestamp, Timestamp, Timestamp})
-                    end;
-                _ ->
-                    ok
-            end,
+            cache(Cache, Key, Value, Timestamp),
             Ans;
         Other ->
             Other
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Caches value if invalidation has not been done after timestamp.
+%% @end
+%%--------------------------------------------------------------------
+-spec cache(cache(), key(), value(), timestamp()) -> ok.
+cache(Cache, Key, Value, Timestamp) ->
+    % Insert value with timestamp
+    case ets:insert_new(Cache, #cache_item{
+        key = Key,
+        value = Value,
+        timestamp = Timestamp,
+        timestamp_check = 0
+    }) of
+        true ->
+            case check_invalidation(Cache, Timestamp) of
+                invalidated ->
+                    ok; % value in cache will be invalid without counter update
+                _ ->
+                    % Increment timestamp_check field as there was no invalidation.
+                    % Use incrementation threshold in case of parallel insert race.
+                    % As update_counter fails if there is no particular key, races
+                    % with invalidation are prevented.
+                    catch ets:update_counter(Cache, Key,
+                        {#cache_item.timestamp_check, Timestamp, Timestamp, Timestamp}),
+                    ok
+            end;
+        _ ->
+            case ets:lookup(Cache, Key) of
+                [#cache_item{timestamp = ItemTimestamp, timestamp_check = 0}] when ItemTimestamp < Timestamp ->
+                    % Old value from insert interrupted by invalidation - delete and retry
+                    ets:delete(Cache, Key),
+                    cache(Cache, Key, Value, Timestamp);
+                _ ->
+                    ok
+            end
     end.
 
 %%--------------------------------------------------------------------
@@ -225,7 +244,7 @@ init_group_manager() ->
         ets:new(?CACHE_MANAGER, [set, public, named_table]),
         ok
     catch
-        _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
+        _:Reason:Stacktrace -> {error, {Reason, Stacktrace}}
     end.
 
 %%--------------------------------------------------------------------
@@ -245,7 +264,7 @@ init_cache(Cache, #{group := Group}) ->
         end),
         ok
     catch
-        _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
+        _:Reason:Stacktrace -> {error, {Reason, Stacktrace}}
     end;
 init_cache(Cache, Options) ->
     try
@@ -253,7 +272,7 @@ init_cache(Cache, Options) ->
         send_check_message(Options#{name => Cache}),
         ok
     catch
-        _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
+        _:Reason:Stacktrace -> {error, {Reason, Stacktrace}}
     end.
 
 %%--------------------------------------------------------------------
@@ -268,7 +287,7 @@ init_group(Group, Options) ->
         send_check_message(Options#{group => true, name => Group}),
         ok
     catch
-        _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
+        _:Reason:Stacktrace -> {error, {Reason, Stacktrace}}
     end.
 
 %%--------------------------------------------------------------------

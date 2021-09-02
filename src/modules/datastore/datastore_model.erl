@@ -19,6 +19,7 @@
 
 %% API
 -export([init/1, get_unique_key/2]).
+-export([datastore_apply/4]).
 -export([create/2, save/2, save_with_routing_key/2, update/3, update/4]).
 -export([get/2, exists/2]).
 -export([delete/2, delete/3, delete_all/1]).
@@ -96,6 +97,18 @@ get_unique_key(#{model := Model}, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Fills context with default parameters, generates unique key and forwards
+%% function call to the {@link datastore} module.
+%% @end
+%%--------------------------------------------------------------------
+-spec datastore_apply(ctx(), key(), fun(), list()) -> term().
+datastore_apply(Ctx0, Key, Fun, Args) ->
+    UniqueKey = get_unique_key(Ctx0, Key),
+    Ctx = datastore_model_default:set_defaults(UniqueKey, Ctx0),
+    erlang:apply(Fun, [Ctx, UniqueKey | Args]).
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Creates model document in a datastore.
 %% @end
 %%--------------------------------------------------------------------
@@ -106,7 +119,7 @@ create(#{secure_fold_enabled := true} = Ctx, Doc) ->
 create(Ctx, Doc = #document{key = undefined}) ->
     save(Ctx, Doc);
 create(Ctx, Doc = #document{key = Key}) ->
-    Result = datastore_apply(Ctx, Key, fun datastore:create/3, create, [Doc]),
+    Result = datastore_apply(Ctx, Key, fun datastore:create/3, [Doc]),
     add_fold_link(Ctx, Key, Result).
 
 %%--------------------------------------------------------------------
@@ -122,7 +135,7 @@ save(Ctx, Doc = #document{key = undefined}) ->
     Doc2 = Doc#document{key = datastore_key:new()},
     save(Ctx2, Doc2);
 save(Ctx, Doc = #document{key = Key}) ->
-    Result = datastore_apply(Ctx, Key, fun datastore:save/3, save, [Doc]),
+    Result = datastore_apply(Ctx, Key, fun datastore:save/3, [Doc]),
     add_fold_link(Ctx, Key, Result).
 
 %%--------------------------------------------------------------------
@@ -143,7 +156,7 @@ save_with_routing_key(#{routing_key := RoutingKey} = Ctx, Doc = #document{key = 
 %%--------------------------------------------------------------------
 -spec update(ctx(), key(), diff()) -> {ok, doc()} | {error, term()}.
 update(Ctx, Key, Diff) ->
-    datastore_apply(Ctx, Key, fun datastore:update/3, update, [Diff]).
+    datastore_apply(Ctx, Key, fun datastore:update/3, [Diff]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -156,7 +169,7 @@ update(Ctx, Key, Diff) ->
 update(#{secure_fold_enabled := true}, _Key, _Diff, _Default = #document{}) ->
     {error, not_supported};
 update(Ctx, Key, Diff, Default = #document{}) ->
-    Result = datastore_apply(Ctx, Key, fun datastore:update/4, update, [
+    Result = datastore_apply(Ctx, Key, fun datastore:update/4, [
         Diff, Default
     ]),
     add_fold_link(Ctx, Key, Result);
@@ -170,7 +183,7 @@ update(Ctx, Key, Diff, Default) ->
 %%--------------------------------------------------------------------
 -spec get(ctx(), key()) -> {ok, doc()} | {error, term()}.
 get(Ctx, Key) ->
-    datastore_apply(Ctx, Key, fun datastore:get/2, get, []).
+    datastore_apply(Ctx, Key, fun datastore:get/2, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -179,7 +192,7 @@ get(Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec exists(ctx(), key()) -> {ok, boolean()} | {error, term()}.
 exists(Ctx, Key) ->
-    datastore_apply(Ctx, Key, fun datastore:exists/2, exists, []).
+    datastore_apply(Ctx, Key, fun datastore:exists/2, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -200,7 +213,7 @@ delete(#{secure_fold_enabled := true} = Ctx, Key, Pred) ->
     UpdatedCtx = maps:remove(secure_fold_enabled, Ctx#{fold_enabled => true}),
     fold_critical_section(Ctx, fun() -> delete(UpdatedCtx, Key, Pred) end);
 delete(#{disc_driver := undefined} = Ctx, Key, Pred) ->
-    Result = datastore_apply(Ctx, Key, fun datastore:delete/3, delete, [Pred]),
+    Result = datastore_apply(Ctx, Key, fun datastore:delete/3, [Pred]),
     delete_all_links(Ctx, Key, Result),
     delete_fold_link(Ctx, Key, Result);
 delete(Ctx, Key, Pred) ->
@@ -212,7 +225,7 @@ delete(Ctx, Key, Pred) ->
             1
     end,
     CtxWithExpiry = couchbase_driver:set_expiry(Ctx, Expiry),
-    Result = datastore_apply(CtxWithExpiry, Key, fun datastore:delete/3, delete, [Pred]),
+    Result = datastore_apply(CtxWithExpiry, Key, fun datastore:delete/3, [Pred]),
     delete_all_links(Ctx, Key, Result),
     delete_fold_link(Ctx, Key, Result).
 
@@ -313,7 +326,7 @@ local_fold_all_nodes(_Ctx, _Fun, _Acc) ->
     one_or_many({link_name(), link_target()})) ->
     one_or_many({ok, link()} | {error, term()}).
 add_links(Ctx, Key, TreeId, Links) when is_list(Links) ->
-    datastore_apply(Ctx, Key, fun datastore:add_links/4, add_links, [TreeId, Links]);
+    datastore_apply(Ctx, Key, fun datastore:add_links/4, [TreeId, Links]);
 add_links(Ctx, Key, TreeId, Link) ->
     hd_if_list(add_links(Ctx, Key, TreeId, [Link])).
 
@@ -326,7 +339,7 @@ add_links(Ctx, Key, TreeId, Link) ->
     one_or_many({link_name(), link_target()})) ->
     one_or_many({ok, link()} | {error, term()}).
 check_and_add_links(Ctx, Key, TreeId, CheckTrees, Links) when is_list(Links) ->
-    datastore_apply(Ctx, Key, fun datastore:check_and_add_links/5, check_and_add_links, [TreeId, CheckTrees, Links]);
+    datastore_apply(Ctx, Key, fun datastore:check_and_add_links/5, [TreeId, CheckTrees, Links]);
 check_and_add_links(Ctx, Key, TreeId, CheckTrees, Link) ->
     hd_if_list(check_and_add_links(Ctx, Key, TreeId, CheckTrees, [Link])).
 
@@ -338,7 +351,7 @@ check_and_add_links(Ctx, Key, TreeId, CheckTrees, Link) ->
 -spec get_links(ctx(), key(), tree_ids(), one_or_many(link_name())) ->
     one_or_many({ok, [link()]} | {error, term()}).
 get_links(Ctx, Key, TreeIds, LinkNames) when is_list(LinkNames) ->
-    datastore_apply(Ctx, Key, fun datastore:get_links/4, get_links, [TreeIds, LinkNames]);
+    datastore_apply(Ctx, Key, fun datastore:get_links/4, [TreeIds, LinkNames]);
 get_links(Ctx, Key, TreeIds, LinkName) ->
     hd_if_list(get_links(Ctx, Key, TreeIds, [LinkName])).
 
@@ -351,7 +364,7 @@ get_links(Ctx, Key, TreeIds, LinkName) ->
     one_or_many(link_name() | {link_name(), link_rev()})) ->
     one_or_many(ok | {error, term()}).
 delete_links(Ctx, Key, TreeId, Links) when is_list(Links) ->
-    datastore_apply(Ctx, Key, fun datastore:delete_links/4, delete_links, [TreeId, Links]);
+    datastore_apply(Ctx, Key, fun datastore:delete_links/4, [TreeId, Links]);
 delete_links(Ctx, Key, TreeId, Link) ->
     hd_if_list(delete_links(Ctx, Key, TreeId, [Link])).
 
@@ -364,7 +377,7 @@ delete_links(Ctx, Key, TreeId, Link) ->
     one_or_many(link_name() | {link_name(), link_rev()})) ->
     one_or_many(ok | {error, term()}).
 mark_links_deleted(Ctx, Key, TreeId, Links) when is_list(Links) ->
-    datastore_apply(Ctx, Key, fun datastore:mark_links_deleted/4, mark_links_deleted, [
+    datastore_apply(Ctx, Key, fun datastore:mark_links_deleted/4, [
         TreeId, Links
     ]);
 mark_links_deleted(Ctx, Key, TreeId, Link) ->
@@ -379,7 +392,7 @@ mark_links_deleted(Ctx, Key, TreeId, Link) ->
     fold_opts()) -> {ok, fold_acc()} |
     {{ok, fold_acc()}, datastore_links_iter:token()} | {error, term()}.
 fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
-    datastore_apply(Ctx, Key, fun datastore:fold_links/6, fold_links, [
+    datastore_apply(Ctx, Key, fun datastore:fold_links/6, [
         TreeIds, Fun, Acc, Opts
     ]).
 
@@ -391,7 +404,7 @@ fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
 %%--------------------------------------------------------------------
 -spec get_links_trees(ctx(), key()) -> {ok, [tree_id()]} | {error, term()}.
 get_links_trees(Ctx, Key) ->
-    datastore_apply(Ctx, Key, fun datastore:get_links_trees/2, get_links_trees, []).
+    datastore_apply(Ctx, Key, fun datastore:get_links_trees/2, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -443,19 +456,6 @@ get_fold_ctx_and_key(#{model := Model} = Ctx) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Fills context with default parameters, generates unique key and forwards
-%% function call to the {@link datastore} module.
-%% @end
-%%--------------------------------------------------------------------
--spec datastore_apply(ctx(), key(), fun(), atom(), list()) -> term().
-datastore_apply(Ctx0, Key, Fun, _FunName, Args) ->
-    UniqueKey = get_unique_key(Ctx0, Key),
-    Ctx = datastore_model_default:set_defaults(UniqueKey, Ctx0),
-    erlang:apply(Fun, [Ctx, UniqueKey | Args]).
 
 %%--------------------------------------------------------------------
 %% @private

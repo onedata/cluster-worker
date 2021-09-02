@@ -177,12 +177,12 @@ websocket_info({push, Msg}, #gs_session{protocol_version = ProtoVer} = SessionDa
         {ok, JSONMap} = gs_protocol:encode(ProtoVer, Msg),
         {reply, {text, json_utils:encode(JSONMap)}, SessionData}
     catch
-        Type:Message ->
+        Type:Message:Stacktrace ->
             ?error_stacktrace(
                 "Discarding GS message to client as "
                 "it cannot be encoded - ~p:~p~nMessage: ~p", [
                     Type, Message, Msg
-                ]),
+                ], Stacktrace),
             {ok, SessionData}
     end;
 
@@ -268,10 +268,11 @@ process_request_async(SessionData, Request) ->
         catch
             throw:{error, _} = Error ->
                 gs_protocol:generate_error_response(Request, Error);
-            Type:Message ->
+            Type:Message:Stacktrace ->
                 ?error_stacktrace(
                     "Unexpected error while handling graph_sync request - ~p:~p",
-                    [Type, Message]
+                    [Type, Message],
+                    Stacktrace
                 ),
                 gs_protocol:generate_error_response(
                     Request, ?ERROR_INTERNAL_SERVER_ERROR

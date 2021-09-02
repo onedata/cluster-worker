@@ -26,7 +26,7 @@ compile:
 upgrade:
 	$(REBAR) upgrade
 
-generate: compile
+generate:
 	$(REBAR) release $(OVERLAY_VARS)
 
 clean: relclean

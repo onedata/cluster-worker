@@ -33,6 +33,7 @@
     {ok, Pid :: pid()} | {ok, Pid :: pid(), State :: term()} |
     {error, Reason ::term()}.
 start(_StartType, _StartArgs) ->
+    ?info("Starting cluster-worker application..."),
     test_node_starter:maybe_start_cover(),
     {ok, SchedulersMonitoring} = application:get_env(?CLUSTER_WORKER_APP_NAME,
         schedulers_monitoring),

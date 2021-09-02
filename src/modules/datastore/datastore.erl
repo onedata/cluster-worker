@@ -20,6 +20,7 @@
 -export([delete/3, delete_all/2]).
 -export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, get_links_trees/2]).
+-export([infinite_log_operation/4]).
 
 -type ctx() :: #{model := datastore_model:model(),
                  mutator => datastore_doc:mutator(),
@@ -61,8 +62,8 @@
                         % Specify the expiration time. For disc/cached models
                         % This is either an absolute Unix timestamp or
                         % a relative offset from now, in seconds.
-                        % If the value of this number is greater than 
-                        % the value of thirty days in seconds, 
+                        % If the value of this number is greater than
+                        % the value of thirty days in seconds,
                         % then it is a Unix timestamp. For memory models
                         % it is always a relative offset from now.
                  throw_not_found => boolean()
@@ -307,3 +308,9 @@ get_links_trees(Ctx, Key) ->
     datastore_hooks:wrap(Ctx, Key, get_links_trees, [], fun
         (Function, Args) -> datastore_router:route(Function, Args)
     end).
+
+
+-spec infinite_log_operation(ctx(), key(), atom(), [term()]) ->
+    ok | {ok, infinite_log_browser:listing_result()} | {error, term()}.
+infinite_log_operation(Ctx, Key, Function, Args) ->
+    datastore_hooks:wrap(Ctx, Key, Function, Args, fun datastore_router:route_infinite_log_operation/2).

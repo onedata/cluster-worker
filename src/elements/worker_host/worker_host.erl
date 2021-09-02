@@ -293,7 +293,7 @@ proc_request(Plugin, Request = #worker_request{req = Msg}) ->
     Response = try
         Plugin:handle(Msg)
     catch
-        Type:Error ->
+        Type:Error:Stacktrace ->
             LogRequest = application:get_env(?CLUSTER_WORKER_APP_NAME, log_requests_on_error, false),
             {MsgFormat, FormatArgs} = case LogRequest of
                 true ->
@@ -305,7 +305,7 @@ proc_request(Plugin, Request = #worker_request{req = Msg}) ->
                     FA = [Plugin, Type, Error],
                     {MF, FA}
             end,
-            ?error_stacktrace(MsgFormat, FormatArgs),
+            ?error_stacktrace(MsgFormat, FormatArgs, Stacktrace),
             worker_plugin_error
     end,
     send_response(Plugin, BeforeProcessingRequest, Request, Response).

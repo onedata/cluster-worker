@@ -179,10 +179,10 @@ apply_with_retry(Module, Fun, Args, Sleep, RetryCount) ->
     try
         apply(Module, Fun, Args)
     catch
-        Error:Reason ->
+        Error:Reason:Stacktrace ->
             ?error_stacktrace("Error while applying fun ~p:~p with args ~p: ~p:~p"
             "~nnext retry in ~p ms",
-                [Module, Fun, Args, Error, Reason, Sleep]),
+                [Module, Fun, Args, Error, Reason, Sleep], Stacktrace),
             timer:sleep(Sleep),
             apply_with_retry(Module, Fun, Args, Sleep * 2, RetryCount - 1)
     end.

@@ -79,7 +79,8 @@ run_stress_proc(Key, Worker, NextWorker, Repeats, ManyKeys, MemoryOnly, CheckNex
 
             Master ! {slave_ans, {ok, stopwatch:read_micros(Stopwatch)}}
         catch
-            E1:E2 -> Master ! {slave_ans, {error, E1, E2, erlang:get_stacktrace()}}
+            E1:E2:Stacktrace ->
+                Master ! {slave_ans, {error, E1, E2, Stacktrace}}
         end
     end).
 

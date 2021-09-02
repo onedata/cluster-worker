@@ -25,14 +25,16 @@
 -type record_value() :: record_key() | json | custom_coder() |
                         record_struct() | [record_value()] | {record_value()} |
                         #{record_key() => record_value()}.
-%% encoder Mod:Encoder(Term) or Mod:Encoder(Type, Term) shell return JSON binary
-%% decoder Mod:Decoder(JSON) or Mod:Encoder(Type, JSON) shell return Erlang term
+%% encoder Mod:Encoder(Term) or Mod:Encoder(Term, State) must return JSON binary
+%% decoder Mod:Decoder(JSON) or Mod:Encoder(JSON, State) must return Erlang term
 %% Encoder defaults to 'encode_value' and Decoder defaults to 'decode_value'
 -type encoder() :: atom().
 -type decoder() :: atom().
--type custom_coder() ::{custom, json | string, {module(), encoder(), decoder()}}.
+%% State is a static, opaque term that will be passed to the encoder/decoder
+%% in the second argument and can be used to adjust the encoder/decoder behaviour
+-type custom_coder() :: {custom, json | string, {module(), encoder(), decoder()} | {module(), encoder(), decoder(), State :: term()}}.
 -type record_struct() :: {record, [{record_field(), record_value()}]}.
--type ejson() :: jiffy:json_value().
+-type ejson() :: json_utils:json_term().
 
 -export_type([record_struct/0, ejson/0]).
 
@@ -173,6 +175,10 @@ encode_term(Term, {custom, json, {Mod, Encoder, _Decoder}}) ->
     encode_term(Mod:Encoder(Term), json);
 encode_term(Term, {custom, string, {Mod, Encoder, _Decoder}}) ->
     encode_term(Mod:Encoder(Term), string);
+encode_term(Term, {custom, json, {Mod, Encoder, _Decoder, State}}) ->
+    encode_term(Mod:Encoder(Term, State), json);
+encode_term(Term, {custom, string, {Mod, Encoder, _Decoder, State}}) ->
+    encode_term(Mod:Encoder(Term, State), string);
 encode_term(Term, {record, Fields}) when is_tuple(Term), is_list(Fields) ->
     Values = tuple_to_list(Term),
     {Keys, Types} = lists:unzip(Fields),
@@ -231,7 +237,7 @@ decode_term(Term, float) when is_integer(Term) orelse is_float(Term) ->
 decode_term(Term, integer) when is_integer(Term) ->
     Term;
 decode_term(Term, json) ->
-    jiffy:encode(Term);
+    json_utils:encode(Term);
 decode_term(Term, string) when is_binary(Term) ->
     Term;
 decode_term(Term, string_or_integer) when is_binary(Term) ->
@@ -244,6 +250,10 @@ decode_term(Term, {custom, json, {Mod, _Encoder, Decoder}}) ->
     Mod:Decoder(decode_term(Term, json));
 decode_term(Term, {custom, string, {Mod, _Encoder, Decoder}}) ->
     Mod:Decoder(decode_term(Term, string));
+decode_term(Term, {custom, json, {Mod, _Encoder, Decoder, State}}) ->
+    Mod:Decoder(decode_term(Term, json), State);
+decode_term(Term, {custom, string, {Mod, _Encoder, Decoder, State}}) ->
+    Mod:Decoder(decode_term(Term, string), State);
 decode_term({Term}, {record, Fields}) when is_list(Term), is_list(Fields) ->
     {<<"_record">>, RecordName} = lists:keyfind(<<"_record">>, 1, Term),
     list_to_tuple(lists:reverse(lists:foldl(fun({Key, Type}, Values) ->
