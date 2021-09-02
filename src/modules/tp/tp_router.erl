@@ -114,7 +114,7 @@ init_supervisors() ->
         case supervisor:start_child(
             ?TP_ROUTER_SUP,
             {Name, {tp_subtree_supervisor, start_link, [Name]},
-                transient, infinity, supervisor, [tp_subtree_supervisor]}
+                permanent, infinity, supervisor, [tp_subtree_supervisor]}
         ) of
             {ok, _} -> ok;
             {error, {already_started, _}} ->

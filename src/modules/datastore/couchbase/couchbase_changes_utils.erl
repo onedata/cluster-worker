@@ -46,14 +46,17 @@ get_docs(Changes, Bucket, FilterMutator, MaxSeqNum) ->
     Ctx = #{bucket => Bucket},
     {Keys, RevisionsAnsSequences} = lists:unzip(KeyRevisionsAndSequences),
     lists:filtermap(fun
-        ({{ok, _, #document{revs = [Rev | _], seq = Seq} = Doc}, {Rev, Seq}}) when Seq =< MaxSeqNum ->
+        ({_Key, {ok, _, #document{revs = [Rev | _], seq = Seq} = Doc}, {Rev, Seq}}) when Seq =< MaxSeqNum ->
             {true, Doc};
-        ({{ok, _, #document{}}, _Rev}) ->
+        ({_Key, {ok, _, #document{}}, _Rev}) ->
             false;
-        ({{error, not_found}, Rev}) ->
-            ?debug("Document not found in changes stream in revision ~p", [Rev]),
-            false
-    end, lists:zip(couchbase_driver:get(Ctx, Keys), RevisionsAnsSequences)).
+        ({Key, {error, not_found}, Rev}) ->
+            ?debug("Document ~p not found in changes stream in revision ~p", [Key, Rev]),
+            false;
+        ({Key, Error, Rev}) ->
+            ?error("Document ~p (revision ~p) get error ~p", [Key, Rev, Error]),
+            throw({get_error, Key})
+    end, lists:zip3(Keys, couchbase_driver:get(Ctx, Keys), RevisionsAnsSequences)).
 
 %%--------------------------------------------------------------------
 %% @doc
