@@ -108,7 +108,7 @@ single_metric_single_node() ->
         [{50, {1, 5}}] ++ lists:sublist(ExpectedGetAns, 2, 2),
     ?assertMatch(?GET_OK_ANS(ExpectedGetAns5), ?GET(Id, {TimeSeriesId, MetricsId}, Batch6)),
 
-    ?assertMatch({{error, histogram_get_failed}, _}, ?GET(Id, very_bad_arg, Batch6)).
+    ?assertMatch(?GET_OK_ANS(undefined), ?GET(Id, very_bad_arg, Batch6)).
 
 
 single_metric_multiple_nodes() ->
@@ -233,13 +233,10 @@ single_time_series_single_node() ->
         UpdatedGetMetrics
     end, [], maps:to_list(ExpectedMap)),
 
-    NotExistingMetricsValue = #{{TimeSeriesId, <<"not_existing">>} => undefined},
-    ?assertMatch(?GET_OK_ANS(NotExistingMetricsValue),
-        ?GET(Id, {TimeSeriesId, <<"not_existing">>}, Batch2)),
-
-    ExpectedWithNotExistingMetrics = maps:merge(maps:from_list(lists:map(fun(MId) ->
+    ?assertMatch(?GET_OK_ANS(undefined), ?GET(Id, {TimeSeriesId, <<"not_existing">>}, Batch2)),
+    ExpectedWithNotExistingMetrics = (maps:from_list(lists:map(fun(MId) ->
         {{TimeSeriesId, MId}, maps:get(MId, ExpectedMap)}
-    end, maps:keys(ExpectedMap))), NotExistingMetricsValue),
+    end, maps:keys(ExpectedMap))))#{{TimeSeriesId, <<"not_existing">>} => undefined},
     ?assertMatch(?GET_OK_ANS(ExpectedWithNotExistingMetrics),
         ?GET(Id, {TimeSeriesId, [<<"not_existing">> | maps:keys(ExpectedMap)]}, Batch2)).
 

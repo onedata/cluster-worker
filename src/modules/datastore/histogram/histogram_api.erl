@@ -306,28 +306,26 @@ get_internal(TimeSeriesMap, [{TimeSeriesIds, MetricIds} | RequestedMetrics], Opt
 
     {Ans2, FinalPersistenceCtx} = get_internal(TimeSeriesMap, RequestedMetrics, Options, UpdatedPersistenceCtx),
     {maps:merge(Ans, Ans2), FinalPersistenceCtx};
-% TODO - tutaj nie trzeba listy TimeSeriesIds - wystaryczy jedno TimeSeriesId (bo moze byc ich wiele na liscie)
-get_internal(TimeSeriesMap, [TimeSeriesIds | RequestedMetrics], Options, PersistenceCtx) ->
-    {Ans, UpdatedPersistenceCtx} = lists:foldl(fun(TimeSeriesId, {AnsAcc, PersistenceCtxAcc} = Acc) ->
-        case maps:get(TimeSeriesId, TimeSeriesMap, undefined) of
-            undefined ->
-                {AnsAcc#{TimeSeriesId => undefined}, PersistenceCtxAcc};
-            MetricsMap ->
-                lists:foldl(fun({MetricId, Metric}, {TmpAns, TmpPersistenceCtx}) ->
-                    {Values, UpdatedTmpPersistenceCtx} = histogram_metric:get(Metric, Options, TmpPersistenceCtx),
-                    {TmpAns#{{TimeSeriesId, MetricId} => Values}, UpdatedTmpPersistenceCtx}
-                end, Acc, maps:to_list(MetricsMap))
-        end
-    end, {#{}, PersistenceCtx}, utils:ensure_list(TimeSeriesIds)),
+
+get_internal(TimeSeriesMap, [TimeSeriesId | RequestedMetrics], Options, PersistenceCtx) ->
+    {Ans, UpdatedPersistenceCtx} = case maps:get(TimeSeriesId, TimeSeriesMap, undefined) of
+        undefined ->
+            {#{TimeSeriesId => undefined}, PersistenceCtx};
+        MetricsMap ->
+            lists:foldl(fun({MetricId, Metric}, {TmpAns, TmpPersistenceCtx}) ->
+                {Values, UpdatedTmpPersistenceCtx} = histogram_metric:get(Metric, Options, TmpPersistenceCtx),
+                {TmpAns#{{TimeSeriesId, MetricId} => Values}, UpdatedTmpPersistenceCtx}
+            end, {#{}, PersistenceCtx}, maps:to_list(MetricsMap))
+    end,
 
     {Ans2, FinalPersistenceCtx} = get_internal(TimeSeriesMap, RequestedMetrics, Options, UpdatedPersistenceCtx),
     {maps:merge(Ans, Ans2), FinalPersistenceCtx};
 
 get_internal(TimeSeriesMap, Request, Options, PersistenceCtx) ->
     {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesMap, [Request], Options, PersistenceCtx),
-    case maps:get(Request, Ans, undefined) of
-        undefined -> {Ans, FinalPersistenceCtx};
-        GetAns -> {GetAns, FinalPersistenceCtx}
+    case maps:is_key(Request, Ans) of
+        true -> {maps:get(Request, Ans), FinalPersistenceCtx};
+        false -> {Ans, FinalPersistenceCtx}
     end.
 
 
