@@ -228,9 +228,9 @@ fetch_links_trees(Ctx, Key) ->
 
 
 -spec histogram_operation(ctx(), atom(), list()) ->
-    ok | {ok, [histogram_windows:window()] | histogram_api:windows_map()} | {error, term()}.
+    ok | {ok, [histogram_windows:window()] | histogram_time_series:windows_map()} | {error, term()}.
 histogram_operation(Ctx, Function, [Key | ArgsTail]) ->
-    call(Ctx, get_key(Ctx, Key, histogram), histogram_api, Function, [Key | ArgsTail]).
+    call(Ctx, get_key(Ctx, Key, histogram), histogram_time_series, Function, [Key | ArgsTail]).
 
 
 -spec infinite_log_operation(ctx(), atom(), list()) ->

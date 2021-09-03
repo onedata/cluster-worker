@@ -29,8 +29,8 @@
 -type record() :: #histogram_metric_data{}.
 
 % Context used only by datastore to initialize internal structure's.
-% Context provided via histogram_api module functions overrides it in
-% other cases.
+% Context provided via histogram_time_series module functions
+% overrides it in other cases.
 -define(CTX, #{
     model => ?MODULE,
     memory_driver => undefined,

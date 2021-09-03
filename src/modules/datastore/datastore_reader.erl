@@ -103,14 +103,14 @@ get_links_trees(FetchNode, Ctx, Key) ->
 
 
 -spec histogram_get(node(), datastore_doc:ctx(), list()) ->
-    ok | {ok, [histogram_windows:window()] | histogram_api:windows_map()} | {error, term()}.
+    ok | {ok, [histogram_windows:window()] | histogram_time_series:windows_map()} | {error, term()}.
 histogram_get(FetchNode, Ctx, Args) ->
     try
         GetResult = case Args of
             [Id, Options] ->
-                histogram_api:get(set_direct_access_ctx(FetchNode, Ctx), Id, Options, undefined);
+                histogram_time_series:get(set_direct_access_ctx(FetchNode, Ctx), Id, Options, undefined);
             [Id, RequestedMetrics, Options] ->
-                histogram_api:get(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined)
+                histogram_time_series:get(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined)
         end,
         case GetResult of
             {{ok, Result}, _} ->

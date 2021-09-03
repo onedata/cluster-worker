@@ -15,8 +15,8 @@
 
 -record(metric_config, {
     legend = <<>> :: histogram_metric:legend(),
-    window_timespan :: non_neg_integer(), % TODO - zmienic na resolution
-    max_windows_count :: non_neg_integer(), % TODO - zmienic na retention
+    resolution :: non_neg_integer(), % TODO - zmienic na resolution
+    retention :: non_neg_integer(), % TODO - zmienic na retention
     aggregator :: histogram_windows:aggregator()
 }).
 

@@ -35,7 +35,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 % TODO zmienic nazwy wedlug: https://docs.google.com/document/d/1cd82L00f0YgZx_WVg8TzhJj_gPQPbPV-0Z5dnmmYiv8/edit
--module(histogram_api).
+-module(histogram_time_series).
 -author("Michal Wrzeszcz").
 
 -include("modules/datastore/histogram_internal.hrl").
@@ -52,7 +52,7 @@
 -type time_series_id() :: binary().
 
 -type time_series() :: #{histogram_metric:id() => histogram_metric:metric()}.
--type time_series_map() :: #{time_series_id() => time_series()}.
+-type time_series_pack() :: #{time_series_id() => time_series()}.
 -type time_series_config() :: #{time_series_id() => #{histogram_metric:id() => histogram_metric:config()}}.
 
 % Metrics are stored in hierarchical map when time_series_id is used to get map with #{histogram_metric:id() => histogram_metric:metric()}.
@@ -69,7 +69,7 @@
 -type request_range() :: range() | [range()].
 -type update_range() :: {request_range(), histogram_windows:value()} | [{request_range(), histogram_windows:value()}].
 
--export_type([id/0, time_series_map/0, time_series_config/0, time_series_id/0, full_metric_id/0,
+-export_type([id/0, time_series_pack/0, time_series_config/0, time_series_id/0, full_metric_id/0,
     request_range/0, update_range/0, windows_map/0]).
 
 -type ctx() :: datastore:ctx().
@@ -103,8 +103,8 @@ create(Ctx, Id, ConfigMap, Batch) ->
             {error, to_many_metrics};
         _:{error, empty_metric} ->
             {error, empty_metric};
-        _:{error, wrong_window_timespan} ->
-            {error, wrong_window_timespan};
+        _:{error, wrong_resolution} ->
+            {error, wrong_resolution};
         Error:Reason:Stacktrace ->
             ?error_stacktrace("Histogram ~p init error: ~p:~p~nConfig map: ~p",
                 [Id, Error, Reason, ConfigMap], Stacktrace),
@@ -116,8 +116,8 @@ create(Ctx, Id, ConfigMap, Batch) ->
     {ok | {error, term()}, batch()}.
 update(Ctx, Id, NewTimestamp, NewValue, Batch) when is_number(NewValue) ->
     try
-        {TimeSeriesMap, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
-        FinalPersistenceCtx = update_time_series(maps:to_list(TimeSeriesMap), NewTimestamp, NewValue, PersistenceCtx),
+        {TimeSeriesPack, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
+        FinalPersistenceCtx = update_time_series(maps:to_list(TimeSeriesPack), NewTimestamp, NewValue, PersistenceCtx),
         {ok, histogram_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace ->
@@ -128,9 +128,9 @@ update(Ctx, Id, NewTimestamp, NewValue, Batch) when is_number(NewValue) ->
 
 update(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch) when is_list(MetricsToUpdateWithValues) ->
     try
-        {TimeSeriesMap, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
+        {TimeSeriesPack, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
         FinalPersistenceCtx = lists:foldl(fun({MetricsToUpdate, NewValue}, Acc) ->
-            FilteredTimeSeries = filter_time_series_map(TimeSeriesMap, MetricsToUpdate),
+            FilteredTimeSeries = filter_time_series_pack(TimeSeriesPack, MetricsToUpdate),
             update_time_series(maps:to_list(FilteredTimeSeries), NewTimestamp, NewValue, Acc)
         end, PersistenceCtx, MetricsToUpdateWithValues),
         {ok, histogram_persistence:finalize(FinalPersistenceCtx)}
@@ -149,8 +149,8 @@ update(Ctx, Id, NewTimestamp, {MetricsToUpdate, NewValue}, Batch) ->
     {ok | {error, term()}, batch()}.
 update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
     try
-        {TimeSeriesMap, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
-        FilteredTimeSeries = filter_time_series_map(TimeSeriesMap, MetricsToUpdate),
+        {TimeSeriesPack, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
+        FilteredTimeSeries = filter_time_series_pack(TimeSeriesPack, MetricsToUpdate),
         FinalPersistenceCtx = update_time_series(maps:to_list(FilteredTimeSeries), NewTimestamp, NewValue, PersistenceCtx),
         {ok, histogram_persistence:finalize(FinalPersistenceCtx)}
     catch
@@ -177,13 +177,13 @@ update_many(Ctx, Id, [{NewTimestamp, NewValue} | Measurements], Batch) ->
     {{ok, windows_map()} | {error, term()}, batch() | undefined}.
 get(Ctx, Id, Options, Batch) ->
     try
-        {TimeSeriesMap, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
+        {TimeSeriesPack, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
         FillMetricsIds = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
             maps:fold(fun(MetricsId, _Config, InternalAcc) ->
                 [{TimeSeriesId, MetricsId} | InternalAcc]
             end, Acc, MetricsConfigs)
-        end, [], TimeSeriesMap),
-        {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesMap, FillMetricsIds, Options, PersistenceCtx),
+        end, [], TimeSeriesPack),
+        {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesPack, FillMetricsIds, Options, PersistenceCtx),
         {{ok, Ans}, histogram_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace when Reason =/= {fetch_error, not_found} ->
@@ -203,8 +203,8 @@ get(Ctx, Id, Options, Batch) ->
     {{ok, [histogram_windows:window()] | windows_map()} | {error, term()}, batch() | undefined}.
 get(Ctx, Id, RequestedMetrics, Options, Batch) ->
     try
-        {TimeSeriesMap, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
-        {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesMap, RequestedMetrics, Options, PersistenceCtx),
+        {TimeSeriesPack, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
+        {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesPack, RequestedMetrics, Options, PersistenceCtx),
         {{ok, Ans}, histogram_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace when Reason =/= {fetch_error, not_found} ->
@@ -217,8 +217,8 @@ get(Ctx, Id, RequestedMetrics, Options, Batch) ->
 -spec delete(ctx(), id(), batch() ) -> {ok | {error, term()}, batch()}.
 delete(Ctx, Id, Batch) ->
     try
-        {TimeSeriesMap, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
-        FinalPersistenceCtx = delete(maps:to_list(TimeSeriesMap), PersistenceCtx),
+        {TimeSeriesPack, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
+        FinalPersistenceCtx = delete(maps:to_list(TimeSeriesPack), PersistenceCtx),
         {ok, histogram_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace when Reason =/= {fetch_error, not_found} ->
@@ -231,13 +231,13 @@ delete(Ctx, Id, Batch) ->
 %% Internal functions
 %%=====================================================================
 
--spec filter_time_series_map(time_series_map(), request_range()) -> time_series_map().
-filter_time_series_map(_TimeSeriesMap, []) ->
+-spec filter_time_series_pack(time_series_pack(), request_range()) -> time_series_pack().
+filter_time_series_pack(_TimeSeriesPack, []) ->
     #{};
 
-filter_time_series_map(TimeSeriesMap, [{TimeSeriesId, MetricIds} | Tail]) ->
-    Ans = filter_time_series_map(TimeSeriesMap, Tail),
-    case maps:get(TimeSeriesId, TimeSeriesMap, undefined) of
+filter_time_series_pack(TimeSeriesPack, [{TimeSeriesId, MetricIds} | Tail]) ->
+    Ans = filter_time_series_pack(TimeSeriesPack, Tail),
+    case maps:get(TimeSeriesId, TimeSeriesPack, undefined) of
         undefined ->
             Ans;
         TimeSeries ->
@@ -254,15 +254,15 @@ filter_time_series_map(TimeSeriesMap, [{TimeSeriesId, MetricIds} | Tail]) ->
             end
     end;
 
-filter_time_series_map(TimeSeriesMap, [TimeSeriesId | Tail]) ->
-    Ans = filter_time_series_map(TimeSeriesMap, Tail),
-    case maps:get(TimeSeriesId, TimeSeriesMap, undefined) of
+filter_time_series_pack(TimeSeriesPack, [TimeSeriesId | Tail]) ->
+    Ans = filter_time_series_pack(TimeSeriesPack, Tail),
+    case maps:get(TimeSeriesId, TimeSeriesPack, undefined) of
         undefined -> Ans;
         TimeSeries -> maps:put(TimeSeriesId, TimeSeries, Ans)
     end;
 
-filter_time_series_map(TimeSeriesMap, ToBeIncluded) ->
-    filter_time_series_map(TimeSeriesMap, [ToBeIncluded]).
+filter_time_series_pack(TimeSeriesPack, ToBeIncluded) ->
+    filter_time_series_pack(TimeSeriesPack, [ToBeIncluded]).
 
 
 -spec update_time_series([{time_series_id(), time_series()}], histogram_windows:timestamp(), 
@@ -286,15 +286,15 @@ update_metrics([{MetricId, Metric} | Tail], NewTimestamp, NewValue, PersistenceC
     update_metrics(Tail, NewTimestamp, NewValue, FinalPersistenceCtx).
 
 
--spec get_internal(time_series_map(), request_range(),
+-spec get_internal(time_series_pack(), request_range(),
     histogram_windows:get_options(), histogram_persistence:ctx()) ->
     {[histogram_windows:window()] | windows_map(), histogram_persistence:ctx()}.
-get_internal(_TimeSeriesMap, [], _Options, PersistenceCtx) ->
+get_internal(_TimeSeriesPack, [], _Options, PersistenceCtx) ->
     {#{}, PersistenceCtx};
 
-get_internal(TimeSeriesMap, [{TimeSeriesIds, MetricIds} | RequestedMetrics], Options, PersistenceCtx) ->
+get_internal(TimeSeriesPack, [{TimeSeriesIds, MetricIds} | RequestedMetrics], Options, PersistenceCtx) ->
     {Ans, UpdatedPersistenceCtx} = lists:foldl(fun(TimeSeriesId, Acc) ->
-        MetricsMap = maps:get(TimeSeriesId, TimeSeriesMap, #{}),
+        MetricsMap = maps:get(TimeSeriesId, TimeSeriesPack, #{}),
         lists:foldl(fun(MetricId, {TmpAns, TmpPersistenceCtx}) ->
             {Values, UpdatedTmpPersistenceCtx} = case maps:get(MetricId, MetricsMap, undefined) of
                 undefined -> {undefined, TmpPersistenceCtx};
@@ -304,11 +304,11 @@ get_internal(TimeSeriesMap, [{TimeSeriesIds, MetricIds} | RequestedMetrics], Opt
         end, Acc, utils:ensure_list(MetricIds))
     end, {#{}, PersistenceCtx}, utils:ensure_list(TimeSeriesIds)),
 
-    {Ans2, FinalPersistenceCtx} = get_internal(TimeSeriesMap, RequestedMetrics, Options, UpdatedPersistenceCtx),
+    {Ans2, FinalPersistenceCtx} = get_internal(TimeSeriesPack, RequestedMetrics, Options, UpdatedPersistenceCtx),
     {maps:merge(Ans, Ans2), FinalPersistenceCtx};
 
-get_internal(TimeSeriesMap, [TimeSeriesId | RequestedMetrics], Options, PersistenceCtx) ->
-    {Ans, UpdatedPersistenceCtx} = case maps:get(TimeSeriesId, TimeSeriesMap, undefined) of
+get_internal(TimeSeriesPack, [TimeSeriesId | RequestedMetrics], Options, PersistenceCtx) ->
+    {Ans, UpdatedPersistenceCtx} = case maps:get(TimeSeriesId, TimeSeriesPack, undefined) of
         undefined ->
             {#{TimeSeriesId => undefined}, PersistenceCtx};
         MetricsMap ->
@@ -318,11 +318,11 @@ get_internal(TimeSeriesMap, [TimeSeriesId | RequestedMetrics], Options, Persiste
             end, {#{}, PersistenceCtx}, maps:to_list(MetricsMap))
     end,
 
-    {Ans2, FinalPersistenceCtx} = get_internal(TimeSeriesMap, RequestedMetrics, Options, UpdatedPersistenceCtx),
+    {Ans2, FinalPersistenceCtx} = get_internal(TimeSeriesPack, RequestedMetrics, Options, UpdatedPersistenceCtx),
     {maps:merge(Ans, Ans2), FinalPersistenceCtx};
 
-get_internal(TimeSeriesMap, Request, Options, PersistenceCtx) ->
-    {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesMap, [Request], Options, PersistenceCtx),
+get_internal(TimeSeriesPack, Request, Options, PersistenceCtx) ->
+    {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesPack, [Request], Options, PersistenceCtx),
     case maps:is_key(Request, Ans) of
         true -> {maps:get(Request, Ans), FinalPersistenceCtx};
         false -> {Ans, FinalPersistenceCtx}
@@ -354,10 +354,10 @@ delete_metric([{_MetricId, Metric} | Tail], PersistenceCtx) ->
 create_doc_splitting_strategies(ConfigMap) ->
     FlattenedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
         maps:fold(fun
-            (_, #metric_config{max_windows_count = WindowsCount}, _) when WindowsCount =< 0 ->
+            (_, #metric_config{retention = Retention}, _) when Retention =< 0 ->
                 throw({error, empty_metric});
-            (_, #metric_config{window_timespan = WindowSize}, _) when WindowSize =< 0 ->
-                throw({error, wrong_window_timespan});
+            (_, #metric_config{resolution = Resolution}, _) when Resolution =< 0 ->
+                throw({error, wrong_resolution});
             (MetricsId, Config, InternalAcc) ->
                 InternalAcc#{{TimeSeriesId, MetricsId} => Config}
         end, Acc, MetricsConfigs)
@@ -366,22 +366,22 @@ create_doc_splitting_strategies(ConfigMap) ->
     MaxValuesInDoc = ?MAX_VALUES_IN_DOC,
     MaxWindowsInHeadMap = calculate_windows_in_head_doc_count(FlattenedMap),
     maps:map(fun(Key, MaxWindowsInHead) ->
-        #metric_config{max_windows_count = MaxWindowsCount} = maps:get(Key, FlattenedMap),
+        #metric_config{retention = Retention} = maps:get(Key, FlattenedMap),
         {MaxWindowsInTailDoc, MaxDocsCount} = case MaxWindowsInHead of
-            MaxWindowsCount ->
+            Retention ->
                 % All windows can be stored in head
                 {0, 1};
             _ ->
                 % It is guaranteed that each tail document used at least half of its capacity after split
                 % so windows count should be multiplied by 2 when calculating number of tail documents
                 % (head can be cleared to optimize upload so tail documents have to store required windows count).
-                case {MaxWindowsCount =< MaxValuesInDoc, MaxWindowsCount =< MaxValuesInDoc div 2} of
+                case {Retention =< MaxValuesInDoc, Retention =< MaxValuesInDoc div 2} of
                     {true, true} ->
-                        {2 * MaxWindowsCount, 2};
+                        {2 * Retention, 2};
                     {true, false} ->
-                        {MaxWindowsCount, 3};
+                        {Retention, 3};
                     _ ->
-                        {MaxValuesInDoc, 1 + ceil(2 * MaxWindowsCount / MaxValuesInDoc)}
+                        {MaxValuesInDoc, 1 + ceil(2 * Retention / MaxValuesInDoc)}
                 end
         end,
         #splitting_strategy{
@@ -433,13 +433,13 @@ update_windows_in_head_doc_count([], FullyStoredInHead, NotFullyStoredInHead, _F
 update_windows_in_head_doc_count([Key | MetricsKeys], FullyStoredInHead, NotFullyStoredInHead, FlattenedMap,
     LimitUpdate, RemainingWindowsInHead) ->
     Update = min(LimitUpdate, RemainingWindowsInHead),
-    #metric_config{max_windows_count = MaxWindowsCount} = maps:get(Key, FlattenedMap),
+    #metric_config{retention = Retention} = maps:get(Key, FlattenedMap),
     CurrentLimit = maps:get(Key, NotFullyStoredInHead),
     NewLimit = CurrentLimit + Update,
-    {UpdatedFullyStoredInHead, UpdatedNotFullyStoredInHead, FinalUpdate} = case NewLimit >= MaxWindowsCount of
+    {UpdatedFullyStoredInHead, UpdatedNotFullyStoredInHead, FinalUpdate} = case NewLimit >= Retention of
         true ->
-            {FullyStoredInHead#{Key => MaxWindowsCount},
-                maps:remove(Key, NotFullyStoredInHead), MaxWindowsCount - CurrentLimit};
+            {FullyStoredInHead#{Key => Retention},
+                maps:remove(Key, NotFullyStoredInHead), Retention - CurrentLimit};
         false ->
             {FullyStoredInHead, NotFullyStoredInHead#{Key => NewLimit}, Update}
     end,

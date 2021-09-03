@@ -17,7 +17,7 @@
 %%% The module uses 2 helper records: histogram_hub that stores heads
 %%% of each metric and histogram_metric_data that stores windows of single
 %%% metrics if there are to many of them to store then all in head
-%%% (see histogram_api for head/tail description). Head of each metric contains
+%%% (see histogram_time_series for head/tail description). Head of each metric contains
 %%% all windows or part of windows set (depending on windows count) as well as config 
 %%% and splitting strategy (see #metric{} record definition) while histogram_metric_data
 %%% stores only parts of windows sets. There is always exactly one 
@@ -82,7 +82,7 @@
     hub :: doc(),
     is_hub_updated = false :: boolean(), % Field used to determine if hub should be saved by finalize/1 function
     % Fields used to determine metric to update
-    active_time_series :: histogram_api:time_series_id() | undefined,
+    active_time_series :: histogram_time_series:time_series_id() | undefined,
     active_metric :: histogram_metric:id() | undefined
 }).
 
@@ -98,9 +98,9 @@
 %%% API
 %%%===================================================================
 
--spec init_for_new_histogram(datastore_ctx(), histogram_api:id(), histogram_api:time_series_map(), batch()) -> ctx().
-init_for_new_histogram(DatastoreCtx, Id, TimeSeriesMap, Batch) ->
-    HistogramHub = #document{key = Id, value = histogram_hub:set_time_series_map(TimeSeriesMap)},
+-spec init_for_new_histogram(datastore_ctx(), histogram_time_series:id(), histogram_time_series:time_series_pack(), batch()) -> ctx().
+init_for_new_histogram(DatastoreCtx, Id, TimeSeriesPack, Batch) ->
+    HistogramHub = #document{key = Id, value = histogram_hub:set_time_series_pack(TimeSeriesPack)},
     {{ok, SavedHistogramHub}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, Id, HistogramHub, Batch),
     #ctx{
         datastore_ctx = DatastoreCtx,
@@ -109,13 +109,13 @@ init_for_new_histogram(DatastoreCtx, Id, TimeSeriesMap, Batch) ->
     }.
 
 
--spec init_for_existing_histogram(datastore_ctx(), histogram_api:id(), batch() | undefined) ->
-    {histogram_api:time_series_map(), ctx()}.
+-spec init_for_existing_histogram(datastore_ctx(), histogram_time_series:id(), batch() | undefined) ->
+    {histogram_time_series:time_series_pack(), ctx()}.
 init_for_existing_histogram(DatastoreCtx, Id, Batch) ->
     {{ok, #document{value = HistogramHubRecord} = HistogramHub}, UpdatedBatch} =
         datastore_doc:fetch(DatastoreCtx, Id, Batch),
     {
-        histogram_hub:get_time_series_map(HistogramHubRecord),
+        histogram_hub:get_time_series_pack(HistogramHubRecord),
         #ctx{
             datastore_ctx = DatastoreCtx,
             batch = UpdatedBatch,
@@ -138,7 +138,7 @@ finalize(#ctx{
     UpdatedBatch.
 
 
--spec set_active_time_series(histogram_api:time_series_id(), ctx()) -> ctx().
+-spec set_active_time_series(histogram_time_series:time_series_id(), ctx()) -> ctx().
 set_active_time_series(TimeSeriesId, Ctx) ->
     Ctx#ctx{active_time_series = TimeSeriesId}.
 
@@ -178,11 +178,11 @@ update(HubKey, Data, #ctx{
     active_time_series = TimeSeriesId,
     active_metric = MetricsId
 } = Ctx) ->
-    TimeSeriesMap = histogram_hub:get_time_series_map(HistogramRecord),
-    TimeSeries = maps:get(TimeSeriesId, TimeSeriesMap),
+    TimeSeriesPack = histogram_hub:get_time_series_pack(HistogramRecord),
+    TimeSeries = maps:get(TimeSeriesId, TimeSeriesPack),
     Metrics = maps:get(MetricsId, TimeSeries),
-    UpdatedTimeSeries = TimeSeriesMap#{TimeSeriesId => TimeSeries#{MetricsId => Metrics#metric{data = Data}}},
-    UpdatedDoc = HubDoc#document{value = histogram_hub:set_time_series_map(UpdatedTimeSeries)},
+    UpdatedTimeSeries = TimeSeriesPack#{TimeSeriesId => TimeSeries#{MetricsId => Metrics#metric{data = Data}}},
+    UpdatedDoc = HubDoc#document{value = histogram_hub:set_time_series_pack(UpdatedTimeSeries)},
     Ctx#ctx{hub = UpdatedDoc, is_hub_updated = true};
 
 update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->

@@ -17,19 +17,19 @@
 -include("modules/datastore/metric_config.hrl").
 
 %% API
--export([set_time_series_map/1, get_time_series_map/1]).
+-export([set_time_series_pack/1, get_time_series_pack/1]).
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
 
 -record(histogram_hub, {
-    time_series_map :: histogram_api:time_series_map()
+    time_series_pack :: histogram_time_series:time_series_pack()
 }).
 
 -type record() :: #histogram_hub{}.
 
 % Context used only by datastore to initialize internal structure's.
-% Context provided via histogram_api module functions overrides it in
-% other cases.
+% Context provided via histogram_time_series module functions
+% overrides it in other cases.
 -define(CTX, #{
     model => ?MODULE,
     memory_driver => undefined,
@@ -40,13 +40,13 @@
 %%% API
 %%%===================================================================
 
--spec set_time_series_map(histogram_api:time_series_map()) -> record().
-set_time_series_map(TimeSeriesMap) ->
-    #histogram_hub{time_series_map = TimeSeriesMap}.
+-spec set_time_series_pack(histogram_time_series:time_series_pack()) -> record().
+set_time_series_pack(TimeSeriesPack) ->
+    #histogram_hub{time_series_pack = TimeSeriesPack}.
 
--spec get_time_series_map(record()) -> histogram_api:time_series_map().
-get_time_series_map(#histogram_hub{time_series_map = TimeSeriesMap}) ->
-    TimeSeriesMap.
+-spec get_time_series_pack(record()) -> histogram_time_series:time_series_pack().
+get_time_series_pack(#histogram_hub{time_series_pack = TimeSeriesPack}) ->
+    TimeSeriesPack.
 
 %%%===================================================================
 %%% datastore_model callbacks
@@ -70,8 +70,8 @@ get_record_struct(1) ->
         {time_series, #{string => #{string => {record, [
             {config, {record, [
                 {legend, binary},
-                {window_timespan, integer},
-                {max_windows_count, integer},
+                {resolution, integer},
+                {retention, integer},
                 {aggregator, atom}
             ]}},
             {splitting_strategy, {record, [

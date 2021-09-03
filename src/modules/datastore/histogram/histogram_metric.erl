@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Helper module for histogram_api operating on single metric.
+%%% Helper module for histogram_time_series operating on single metric.
 %%% Metric is described by #metric{} record containing among others
 %%% #data{} records that stores windows. If there are too many windows
 %%% to store in single #data{} record, further #data{} records are added
@@ -238,8 +238,8 @@ delete(DataRecordKey, #data{prev_record = PrevRecordKey}, PersistenceCtx) ->
 -spec get_window(histogram_windows:timestamp() | undefined, config()) -> histogram_windows:timestamp() | undefined.
 get_window(undefined, _) ->
     undefined;
-get_window(Time, #metric_config{window_timespan = WindowSize}) ->
-    Time - Time rem WindowSize.
+get_window(Time, #metric_config{resolution = Resolution}) ->
+    Time - Time rem Resolution.
 
 
 -spec get_max_windows_and_split_position(key(), splitting_strategy(), histogram_persistence:ctx()) ->

@@ -1069,7 +1069,7 @@ histogram_test(Config) ->
         ConfigMap = lists:foldl(fun(N, Acc) ->
             TimeSeries = <<"TS", (N rem 2)>>,
             MetricsMap = maps:get(TimeSeries, Acc, #{}),
-            MetricsConfig = #metric_config{window_timespan = N, max_windows_count = 600 div N + 10, aggregator = sum},
+            MetricsConfig = #metric_config{resolution = N, retention = 600 div N + 10, aggregator = sum},
             Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
         end, #{}, lists:seq(1, 5)),
         ?assertEqual(ok, rpc:call(Worker, Model, histogram_create, [Id, ConfigMap])),
@@ -1086,10 +1086,10 @@ histogram_test(Config) ->
         end, Measurements),
 
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
-            maps:fold(fun(MetricsId, #metric_config{window_timespan = WindowSize, max_windows_count = MaxWindowsCount}, InternalAcc) ->
+            maps:fold(fun(MetricsId, #metric_config{resolution = Resolution, retention = Retention}, InternalAcc) ->
                 InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(lists:reverse(lists:map(fun(N) ->
-                    {N, {WindowSize, (N + N + WindowSize - 1) * WindowSize}}
-                end, lists:seq(0, MeasurementsCount, WindowSize))), MaxWindowsCount)}
+                    {N, {Resolution, (N + N + Resolution - 1) * Resolution}}
+                end, lists:seq(0, MeasurementsCount, Resolution))), Retention)}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
         ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, #{}])),
@@ -1105,7 +1105,7 @@ multinode_histogram_test(Config) ->
         ConfigMap = lists:foldl(fun(N, Acc) ->
             TimeSeries = <<"TS", (N rem 2)>>,
             MetricsMap = maps:get(TimeSeries, Acc, #{}),
-            MetricsConfig = #metric_config{window_timespan = 1, max_windows_count = 10000 * N, aggregator = last},
+            MetricsConfig = #metric_config{resolution = 1, retention = 10000 * N, aggregator = last},
             Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
         end, #{}, lists:seq(1, 5)),
         ?assertEqual(ok, rpc:call(Worker, Model, histogram_create, [Id, ConfigMap])),
@@ -1116,9 +1116,9 @@ multinode_histogram_test(Config) ->
 
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
-            maps:fold(fun(MetricsId, #metric_config{max_windows_count = MaxWindowsCount}, InternalAcc) ->
+            maps:fold(fun(MetricsId, #metric_config{retention = Retention}, InternalAcc) ->
                 InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(
-                    lists:reverse(Measurements), maps:get(MaxWindowsCount, ExpectedWindowsCounts))}
+                    lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
         ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, histogram_get, [Id, #{}])),
@@ -1143,7 +1143,7 @@ histogram_document_fetch_test(Config) ->
                 5 -> sum;
                 _ -> last
             end,
-            MetricsConfig = #metric_config{window_timespan = 1, max_windows_count = 10000 * N, aggregator = ApplyFun},
+            MetricsConfig = #metric_config{resolution = 1, retention = 10000 * N, aggregator = ApplyFun},
             Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
         end, #{}, lists:seq(1, 5)),
         ?assertEqual(ok, rpc:call(Worker, Model, histogram_create, [Id, ConfigMap])),
@@ -1154,13 +1154,13 @@ histogram_document_fetch_test(Config) ->
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
             maps:fold(fun
-                (MetricsId, #metric_config{max_windows_count = MaxWindowsCount, aggregator = last}, InternalAcc) ->
+                (MetricsId, #metric_config{retention = Retention, aggregator = last}, InternalAcc) ->
                     InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(
-                        lists:reverse(Measurements), maps:get(MaxWindowsCount, ExpectedWindowsCounts))};
-                (MetricsId, #metric_config{max_windows_count = MaxWindowsCount, aggregator = sum}, InternalAcc) ->
+                        lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))};
+                (MetricsId, #metric_config{retention = Retention, aggregator = sum}, InternalAcc) ->
                     MappedMeasurements = lists:map(fun({Timestamp, Value}) -> {Timestamp, {1, Value}} end, Measurements),
                     InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(
-                        lists:reverse(MappedMeasurements), maps:get(MaxWindowsCount, ExpectedWindowsCounts))}
+                        lists:reverse(MappedMeasurements), maps:get(Retention, ExpectedWindowsCounts))}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
 

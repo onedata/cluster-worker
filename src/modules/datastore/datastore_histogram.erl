@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module provides datastore model API for histograms
-%%% (mapped to internal datastore API provided by histogram_api).
+%%% (mapped to internal datastore API provided by histogram_time_series).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_histogram).
@@ -25,44 +25,44 @@
 %%% API
 %%%===================================================================
 
--spec create(ctx(), histogram_api:id(), histogram_api:time_series_config()) -> ok | {error, term()}.
+-spec create(ctx(), histogram_time_series:id(), histogram_time_series:time_series_config()) -> ok | {error, term()}.
 create(Ctx, Id, ConfigMap) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:histogram_operation/4, [?FUNCTION_NAME, [ConfigMap]]).
 
 
--spec update(ctx(), histogram_api:id(), histogram_windows:timestamp(),
-    histogram_windows:value() | histogram_api:update_range()) -> ok | {error, term()}.
+-spec update(ctx(), histogram_time_series:id(), histogram_windows:timestamp(),
+    histogram_windows:value() | histogram_time_series:update_range()) -> ok | {error, term()}.
 update(Ctx, Id, NewTimestamp, ValueOrUpdateRange) ->
     datastore_model:datastore_apply(Ctx, Id,
         fun datastore:histogram_operation/4, [?FUNCTION_NAME, [NewTimestamp, ValueOrUpdateRange]]).
 
 
--spec update(ctx(), histogram_api:id(), histogram_windows:timestamp(), histogram_api:request_range(),
+-spec update(ctx(), histogram_time_series:id(), histogram_windows:timestamp(), histogram_time_series:request_range(),
     histogram_windows:value()) -> ok | {error, term()}.
 update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue) ->
     datastore_model:datastore_apply(Ctx, Id,
         fun datastore:histogram_operation/4, [?FUNCTION_NAME, [NewTimestamp, MetricsToUpdate, NewValue]]).
 
 
--spec update_many(ctx(), histogram_api:id(), [{histogram_windows:timestamp(), histogram_windows:value()}]) ->
+-spec update_many(ctx(), histogram_time_series:id(), [{histogram_windows:timestamp(), histogram_windows:value()}]) ->
     ok | {error, term()}.
 update_many(Ctx, Id, Measurements) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:histogram_operation/4, [?FUNCTION_NAME, [Measurements]]).
 
 
--spec get(ctx(), histogram_api:id(), histogram_windows:get_options()) -> ok | {error, term()}.
+-spec get(ctx(), histogram_time_series:id(), histogram_windows:get_options()) -> ok | {error, term()}.
 get(Ctx, Id, Options) ->
     datastore_model:datastore_apply(Ctx, Id,
         fun datastore:histogram_operation/4, [?FUNCTION_NAME, [Options]]).
 
 
--spec get(ctx(), histogram_api:id(), histogram_api:request_range(),
+-spec get(ctx(), histogram_time_series:id(), histogram_time_series:request_range(),
     histogram_windows:get_options()) -> ok | {error, term()}.
 get(Ctx, Id, RequestedMetrics, Options) ->
     datastore_model:datastore_apply(Ctx, Id,
         fun datastore:histogram_operation/4, [?FUNCTION_NAME, [RequestedMetrics, Options]]).
 
 
--spec delete(ctx(), histogram_api:id()) -> ok | {error, term()}.
+-spec delete(ctx(), histogram_time_series:id()) -> ok | {error, term()}.
 delete(Ctx, Id) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:histogram_operation/4, [?FUNCTION_NAME, []]).
