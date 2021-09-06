@@ -19,7 +19,7 @@
 
 %% Pool callbacks
 -export([do_master_job/2, do_slave_job/2, task_finished/2, update_job_progress/5, get_job/1,
-    node_crash_policy/2]).
+    node_crash_policy/2, get_timestamp/0]).
 %% Helper functions
 -export([get_slave_ans/1, get_node_slave_ans/2, get_expected/0, copy_jobs_store/2, check_schedulers_after_test/3]).
 -export([delete_ongoing_jobs/1]).
@@ -111,6 +111,9 @@ get_job(ID) ->
 
 node_crash_policy(_, _) ->
     cancel_task.
+
+get_timestamp() ->
+    {ok, erlang:system_time(millisecond)}.
 
 %%%===================================================================
 %%% Helper functions

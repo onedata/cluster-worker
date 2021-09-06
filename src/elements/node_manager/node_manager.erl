@@ -36,6 +36,7 @@
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
 -export([are_db_and_workers_ready/0, get_cluster_status/0, get_cluster_status/1]).
+-export([is_cluster_healthy/0]).
 -export([get_cluster_ips/0]).
 -export([reschedule_service_healthcheck/4]).
 
@@ -249,7 +250,7 @@ start_worker(Module, Args, Options) ->
                 case supervisor:start_child(
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {Module, {worker_host, start_link,
-                        [Module, Args, LoadMemorySize]}, transient,
+                        [Module, Args, LoadMemorySize]}, permanent,
                         proplists:get_value(terminate_timeout, Options, ?DEFAULT_TERMINATE_TIMEOUT),
                         worker, [worker_host]}
                 ) of
@@ -261,7 +262,7 @@ start_worker(Module, Args, Options) ->
                 case supervisor:start_child(
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {WorkerSupervisorName, {worker_host_sup, start_link,
-                        [WorkerSupervisorName, Args]}, transient, infinity,
+                        [WorkerSupervisorName, Args]}, permanent, infinity,
                         supervisor, [worker_host_sup]}
                 ) of
                     {ok, _} -> ok;
@@ -273,7 +274,7 @@ start_worker(Module, Args, Options) ->
                 case supervisor:start_child(
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {WorkerSupervisorName, {worker_host_sup, start_link,
-                        [WorkerSupervisorName, Args]}, transient, infinity,
+                        [WorkerSupervisorName, Args]}, permanent, infinity,
                         supervisor, [worker_host_sup]}
                 ) of
                     {ok, _} -> ok;
@@ -284,7 +285,7 @@ start_worker(Module, Args, Options) ->
                 case supervisor:start_child(
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {Module, {worker_host, start_link,
-                        [Module, Args, LoadMemorySize]}, transient,
+                        [Module, Args, LoadMemorySize]}, permanent,
                         proplists:get_value(terminate_timeout, Options, ?DEFAULT_TERMINATE_TIMEOUT),
                         worker, [worker_host]}
                 ) of
@@ -1450,3 +1451,11 @@ handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
         end
     end),
     ok.
+
+-spec is_cluster_healthy() -> boolean().
+is_cluster_healthy() ->
+    {_, {AppStatus, _}} = get_cluster_status(),
+    case AppStatus of
+        ok -> true;
+        _ -> false
+    end.

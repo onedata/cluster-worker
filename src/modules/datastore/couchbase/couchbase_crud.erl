@@ -159,6 +159,9 @@ get(Connection, Requests) ->
                         {Key, {ok, Cas, datastore_json:decode(Value)}}
                     catch
                         _:Reason:Stacktrace ->
+                            ?error_stacktrace("Cannot decode couchbase value for key ~p~nValue: ~p~nReason: ~p", [
+                                Key, Value, Reason
+                            ], Stacktrace),
                             {Key, {error, {Reason, Stacktrace}}}
                     end;
                 ({Key, {error, Reason}}) ->

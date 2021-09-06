@@ -54,7 +54,8 @@ traverse_base(Config, KeyEnd, RunsNum, CheckID) ->
     [Worker, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Num) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, run,
-            [?POOL, <<(integer_to_binary(Num))/binary, KeyEnd/binary>>, {self(), 1, Num}]))
+            [?POOL, <<(integer_to_binary(Num))/binary, KeyEnd/binary>>, {self(), 1, Num}])),
+        timer:sleep(1) % sleep to guarantee that all runs have different timestamps
     end, lists:seq(1, RunsNum)),
 
     {Expected0, Description} = traverse_test_pool:get_expected(),
@@ -87,10 +88,13 @@ traverse_restart_test(Config) ->
     [Worker, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"1traverse_restart_test">>, {self(), 1, 100}])),
+    timer:sleep(1), % sleep to guarantee that all runs have different timestamps
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"t_1traverse_restart_test">>, {self(), 1, 101}])),
+    timer:sleep(1), % sleep to guarantee that all runs have different timestamps
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"2traverse_restart_test">>, {self(), 1, 2}])),
+    timer:sleep(1), % sleep to guarantee that all runs have different timestamps
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"3traverse_restart_test">>, {self(), 1, 3}])),
 
