@@ -88,7 +88,7 @@ create(Ctx, Id, ConfigMap, Batch) ->
     try
         DocSplittingStrategies = create_doc_splitting_strategies(ConfigMap),
 
-        TimeSeries = maps:map(fun(TimeSeriesId, MetricsConfigs) ->
+        TimeSeriesPack = maps:map(fun(TimeSeriesId, MetricsConfigs) ->
             maps:map(fun(MetricsId, Config) ->
                  #metric{
                      config = Config,
@@ -97,7 +97,7 @@ create(Ctx, Id, ConfigMap, Batch) ->
             end, MetricsConfigs)
         end, ConfigMap),
 
-        PersistenceCtx = histogram_persistence:init_for_new_histogram(Ctx, Id, TimeSeries, Batch),
+        PersistenceCtx = histogram_persistence:init_for_new_histogram(Ctx, Id, TimeSeriesPack, Batch),
         {ok, histogram_persistence:finalize(PersistenceCtx)}
     catch
         _:{error, to_many_metrics} ->
