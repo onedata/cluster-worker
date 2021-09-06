@@ -6,7 +6,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This file contains metric config record definition.
+%%% This file contains metric config record definition used to configure
+%%% single histogram metric (see #metric{} in datastore_histogram.hrl)
 %%% @end
 %%%-------------------------------------------------------------------
 
@@ -15,8 +16,8 @@
 
 -record(metric_config, {
     legend = <<>> :: histogram_metric:legend(),
-    resolution :: non_neg_integer(), % TODO - zmienic na resolution
-    retention :: non_neg_integer(), % TODO - zmienic na retention
+    resolution :: non_neg_integer(),
+    retention :: non_neg_integer(),
     aggregator :: histogram_windows:aggregator()
 }).
 

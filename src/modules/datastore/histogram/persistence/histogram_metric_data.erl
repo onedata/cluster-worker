@@ -11,7 +11,8 @@
 %%% singe metric. Values that exceeds histogram hub capacity for particular
 %%% metric are stored in list of histogram metric data nodes
 %%% (capacity of single histogram metric data node is also limited so more
-%%% than one histogram metric data node may be needed).
+%%% than one histogram metric data node may be needed - see
+%%% histogram_persistence module).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(histogram_metric_data).
@@ -28,7 +29,7 @@
 
 -type record() :: #histogram_metric_data{}.
 
-% Context used only by datastore to initialize internal structure's.
+% Context used only by datastore to initialize internal structures.
 % Context provided via histogram_time_series module functions
 % overrides it in other cases.
 -define(CTX, #{

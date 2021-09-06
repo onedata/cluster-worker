@@ -16,7 +16,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include("modules/datastore/metric_config.hrl").
--include("modules/datastore/histogram_internal.hrl").
+-include("modules/datastore/datastore_histogram.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include("global_definitions.hrl").
 
@@ -77,19 +77,15 @@ single_metric_single_node() ->
 
     ExpectedGetAns = lists:reverse(lists:map(fun(N) -> {N, {10, 5 * N + 22.5}} end, lists:seq(10, 40, 10) ++ [60])),
     ?assertMatch(?GET_OK_ANS(ExpectedGetAns), ?GET(Id, {TimeSeriesId, MetricsId}, Batch2)),
-    ?assertMatch(?GET_OK_ANS(ExpectedGetAns),
-        ?GET(Id, {TimeSeriesId, MetricsId}, #{start => 1000}, Batch2)),
+    ?assertMatch(?GET_OK_ANS(ExpectedGetAns), ?GET(Id, {TimeSeriesId, MetricsId}, #{start => 1000}, Batch2)),
     ?assertMatch(?GET_OK_ANS([]), ?GET(Id, {TimeSeriesId, MetricsId}, #{start => 1}, Batch2)),
 
     ExpectedGetAns2 = lists:sublist(ExpectedGetAns, 2),
-    ?assertMatch(?GET_OK_ANS(ExpectedGetAns2),
-        ?GET(Id, {TimeSeriesId, MetricsId}, #{limit => 2}, Batch2)),
-    ?assertMatch(?GET_OK_ANS(ExpectedGetAns2),
-        ?GET(Id, {TimeSeriesId, MetricsId}, #{stop => 35}, Batch2)),
+    ?assertMatch(?GET_OK_ANS(ExpectedGetAns2), ?GET(Id, {TimeSeriesId, MetricsId}, #{limit => 2}, Batch2)),
+    ?assertMatch(?GET_OK_ANS(ExpectedGetAns2), ?GET(Id, {TimeSeriesId, MetricsId}, #{stop => 35}, Batch2)),
 
     ExpectedGetAns3 = lists:sublist(ExpectedGetAns, 2, 2),
-    ?assertMatch(?GET_OK_ANS(ExpectedGetAns3),
-        ?GET(Id, {TimeSeriesId, MetricsId}, #{start => 45, limit => 2}, Batch2)),
+    ?assertMatch(?GET_OK_ANS(ExpectedGetAns3), ?GET(Id, {TimeSeriesId, MetricsId}, #{start => 45, limit => 2}, Batch2)),
     GetAns = ?GET(Id, {TimeSeriesId, MetricsId}, #{start => 45, stop => 25}, Batch2),
     ?assertMatch(?GET_OK_ANS(ExpectedGetAns3), GetAns),
     {_, Batch3} = GetAns,
@@ -100,8 +96,7 @@ single_metric_single_node() ->
     ?assertMatch(?GET_OK_ANS(ExpectedGetAns4), GetAns2),
 
     Batch5 = update(Id, 1, 5, Batch4),
-    GetAns3 = ?GET(Id, {TimeSeriesId, MetricsId}, Batch5),
-    ?assertEqual(GetAns2, GetAns3),
+    ?assertEqual(GetAns2, ?GET(Id, {TimeSeriesId, MetricsId}, Batch5)),
 
     Batch6 = update(Id, 53, 5, Batch5),
     ExpectedGetAns5 = [{100, {1, 5}}] ++ lists:sublist(ExpectedGetAns, 1) ++
@@ -453,9 +448,9 @@ single_doc_splitting_strategies_create() ->
     Id = datastore_key:new(),
     Batch = datastore_doc_batch:init(),
     ConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0}}},
-    ?assertEqual({error, empty_metric}, histogram_time_series:create(#{}, Id, ConfigMap, Batch)),
+    ?assertEqual({{error, empty_metric}, Batch}, histogram_time_series:create(#{}, Id, ConfigMap, Batch)),
     ConfigMap2 = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = 0}}},
-    ?assertEqual({error, wrong_resolution}, histogram_time_series:create(#{}, Id, ConfigMap2, Batch)),
+    ?assertEqual({{error, wrong_resolution}, Batch}, histogram_time_series:create(#{}, Id, ConfigMap2, Batch)),
 
     single_doc_splitting_strategies_create_testcase(10, 10, 0, 1),
     single_doc_splitting_strategies_create_testcase(2000, 2000, 0, 1),
@@ -536,7 +531,7 @@ multiple_metrics_splitting_strategies_create() ->
     ConfigMap3 = #{<<"TS1">> => GetLargeTimeSeries(), <<"TS2">> => GetLargeTimeSeries()},
     Id = datastore_key:new(),
     Batch = datastore_doc_batch:init(),
-    ?assertEqual({error, to_many_metrics}, histogram_time_series:create(#{}, Id, ConfigMap3, Batch)).
+    ?assertEqual({{error, to_many_metrics}, Batch}, histogram_time_series:create(#{}, Id, ConfigMap3, Batch)).
 
 %%%===================================================================
 %%% Helper functions

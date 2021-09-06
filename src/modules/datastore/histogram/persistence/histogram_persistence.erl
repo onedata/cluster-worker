@@ -17,7 +17,7 @@
 %%% The module uses 2 helper records: histogram_hub that stores heads
 %%% of each metric and histogram_metric_data that stores windows of single
 %%% metrics if there are to many of them to store then all in head
-%%% (see histogram_time_series for head/tail description). Head of each metric contains
+%%% (see histogram_metric for head/tail description). Head of each metric contains
 %%% all windows or part of windows set (depending on windows count) as well as config 
 %%% and splitting strategy (see #metric{} record definition) while histogram_metric_data
 %%% stores only parts of windows sets. There is always exactly one 
@@ -31,7 +31,7 @@
 %%% |    metric{                metric{               metric{              |
 %%% |      data{                  data{                 data{              |
 %%% |        prev_record            prev_record           prev_record      |     Heads inside hub records
-%%% |      }    |                   =undefined          }    |             |
+%%% |      }    |                   = undefined         }    |             |
 %%% |    }      |                 }                   }      |             |
 %%% |           |               }                            |             |
 %%% |           |                                            |             |
@@ -44,7 +44,7 @@
 %%% |                     |                         |                     |
 %%% |    data{            |                         |    data{            |
 %%% |      prev_record    |                         |      prev_record    |     Rest of data inside
-%%% |    }      |         |                         |      =undefined     |     metric_data records
+%%% |    }      |         |                         |      = undefined    |     metric_data records
 %%% |           |         |                         |    }                |
 %%% +-----------+---------+                         +---------------------+
 %%%             |
@@ -55,18 +55,18 @@
 %%% |                     |
 %%% |    data{            |
 %%% |      prev_record    |
-%%% |      =undefined     |
+%%% |      = undefined    |
 %%% |    }                |
 %%% +---------------------+
 %%%
 %%% Key of histogram_hub document is equal to id of histogram while
-%%% histogram_metric_data documents have randomly  generated ids.
+%%% histogram_metric_data documents have randomly generated ids.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(histogram_persistence).
 -author("Michal Wrzeszcz").
 
--include("modules/datastore/histogram_internal.hrl").
+-include("modules/datastore/datastore_histogram.hrl").
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
@@ -81,7 +81,8 @@
                                   % (call via datastore_reader:histogram_get/3)
     hub :: doc(),
     is_hub_updated = false :: boolean(), % Field used to determine if hub should be saved by finalize/1 function
-    % Fields used to determine metric to update
+    % Fields representing metric currently being updated (single ctx can be used to update several metrics -
+    % active* fields have to be set before updating each one)
     active_time_series :: histogram_time_series:time_series_id() | undefined,
     active_metric :: histogram_metric:id() | undefined
 }).
@@ -98,14 +99,15 @@
 %%% API
 %%%===================================================================
 
--spec init_for_new_histogram(datastore_ctx(), histogram_time_series:id(), histogram_time_series:time_series_pack(), batch()) -> ctx().
+-spec init_for_new_histogram(datastore_ctx(), histogram_time_series:id(), histogram_time_series:time_series_pack(),
+    batch()) -> ctx().
 init_for_new_histogram(DatastoreCtx, Id, TimeSeriesPack, Batch) ->
     HistogramHub = #document{key = Id, value = histogram_hub:set_time_series_pack(TimeSeriesPack)},
-    {{ok, SavedHistogramHub}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, Id, HistogramHub, Batch),
     #ctx{
         datastore_ctx = DatastoreCtx,
-        batch = UpdatedBatch,
-        hub = SavedHistogramHub
+        batch = Batch,
+        hub = HistogramHub,
+        is_hub_updated = true
     }.
 
 

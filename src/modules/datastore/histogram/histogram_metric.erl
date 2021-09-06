@@ -16,13 +16,15 @@
 %%% NOTE: first record (head) of #data{} records linked list is unique as it
 %%% is stored inside #metric{} record and all #metric{} records are
 %%% persisted in single datastore document (see histogram_persistence).
-%%% Thus, capacity of head record and other #data{} records can differ.
+%%% Thus, capacity of head record and other (tail) #data{} records can differ.
+%%% Other records (tail) of #data{} records linked list are not wrapped
+%%% in #metric{} record.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(histogram_metric).
 -author("Michal Wrzeszcz").
 
--include("modules/datastore/histogram_internal.hrl").
+-include("modules/datastore/datastore_histogram.hrl").
 -include("modules/datastore/metric_config.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -91,6 +93,7 @@ update(
         max_docs_count = 1,
         max_windows_in_head_doc = MaxWindowsCount
     }, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx) ->
+    % All windows are stored in single record - update it
     UpdatedWindows = histogram_windows:aggregate(Windows, WindowToBeUpdated, NewValue, Aggregator),
     FinalWindows = histogram_windows:prune_overflowing_windows(UpdatedWindows, MaxWindowsCount),
     histogram_persistence:update(DataRecordKey, Data#data{windows = FinalWindows}, PersistenceCtx);
@@ -102,6 +105,7 @@ update(
     }, _DataRecordKey, _DataDocPosition,
     _DocSplittingStrategy, _Aggregator, WindowToBeUpdated, _NewValue, PersistenceCtx)
     when PrevRecordTimestamp =/= undefined andalso PrevRecordTimestamp >= WindowToBeUpdated ->
+    % There are too many newer windows - skip it
     PersistenceCtx;
 
 update(
@@ -110,8 +114,10 @@ update(
         windows = Windows
     } = Data, DataRecordKey, DataDocPosition,
     DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx) ->
+    % Updating last record
     UpdatedWindows = histogram_windows:aggregate(Windows, WindowToBeUpdated, NewValue, Aggregator),
-    {MaxWindowsCount, SplitPosition} = get_max_windows_and_split_position(DataRecordKey, DocSplittingStrategy, PersistenceCtx),
+    {MaxWindowsCount, SplitPosition} = get_max_windows_and_split_position(
+        DataRecordKey, DocSplittingStrategy, PersistenceCtx),
 
     case histogram_windows:should_reorganize_windows(UpdatedWindows, MaxWindowsCount) of
         true ->
@@ -131,6 +137,7 @@ update(
     }, _DataRecordKey, DataDocPosition,
     DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx)
     when PrevRecordTimestamp >= WindowToBeUpdated ->
+    % Window should be stored in one one previous records
     {PrevRecordData, UpdatedPersistenceCtx} = histogram_persistence:get(PrevRecordKey, PersistenceCtx),
     update(PrevRecordData, PrevRecordKey, DataDocPosition + 1,
         DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, UpdatedPersistenceCtx);
@@ -143,8 +150,10 @@ update(
     #splitting_strategy{
         max_windows_in_tail_doc = MaxWindowsInTail
     } = DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx) ->
+    % Updating record in the middles of records' list (prev_record is not undefined)
     WindowsWithAggregatedMeasurement = histogram_windows:aggregate(Windows, WindowToBeUpdated, NewValue, Aggregator),
-    {MaxWindowsCount, SplitPosition} = get_max_windows_and_split_position(DataRecordKey, DocSplittingStrategy, PersistenceCtx),
+    {MaxWindowsCount, SplitPosition} = get_max_windows_and_split_position(
+        DataRecordKey, DocSplittingStrategy, PersistenceCtx),
 
     case histogram_windows:should_reorganize_windows(WindowsWithAggregatedMeasurement, MaxWindowsCount) of
         true ->
@@ -167,7 +176,8 @@ update(
                         PrevRecordData#data{windows = UpdatedWindowsInPrevRecord}, TmpPersistenceCtx)
             end, UpdatedPersistenceCtx, Actions);
         false ->
-            histogram_persistence:update(DataRecordKey, Data#data{windows = WindowsWithAggregatedMeasurement}, PersistenceCtx)
+            histogram_persistence:update(
+                DataRecordKey, Data#data{windows = WindowsWithAggregatedMeasurement}, PersistenceCtx)
     end.
 
 
@@ -267,6 +277,7 @@ get_max_windows_and_split_position(
     {key() | undefined, data() | undefined, histogram_persistence:ctx()}.
 split_record(DataRecordKey, Data, Windows1, _Windows2, SplitTimestamp, MaxCount,
     #splitting_strategy{max_docs_count = MaxCount}, PersistenceCtx) ->
+    % Splitting last record - do not create new record for older windows as it would be deleted immediately
     UpdatedData = Data#data{windows = Windows1, prev_record_timestamp = SplitTimestamp},
     {undefined, undefined, histogram_persistence:update(DataRecordKey, UpdatedData, PersistenceCtx)};
 split_record(DataRecordKey, Data, Windows1, Windows2, SplitTimestamp, _DocumentNumber, _DocSplittingStrategy, PersistenceCtx) ->

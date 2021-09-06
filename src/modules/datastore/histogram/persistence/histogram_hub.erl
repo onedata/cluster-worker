@@ -27,7 +27,7 @@
 
 -type record() :: #histogram_hub{}.
 
-% Context used only by datastore to initialize internal structure's.
+% Context used only by datastore to initialize internal structures.
 % Context provided via histogram_time_series module functions
 % overrides it in other cases.
 -define(CTX, #{

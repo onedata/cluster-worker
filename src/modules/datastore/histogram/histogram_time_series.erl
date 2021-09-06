@@ -8,7 +8,7 @@
 %%% @doc
 %%% Internal datastore API used for operating on histograms.
 %%% Histogram consists of several time series. Each time series consists of
-%%% several metrics. Metrics is set of windows that aggregate multiple
+%%% several metrics. Metric is set of windows that aggregate multiple
 %%% measurements from particular period of time. E.g.,
 %%% MyHistogram = #{
 %%%    TimeSeries1 = #{
@@ -34,11 +34,10 @@
 %%% metrics while rest of records with windows are kept separately for each metric).
 %%% @end
 %%%-------------------------------------------------------------------
-% TODO zmienic nazwy wedlug: https://docs.google.com/document/d/1cd82L00f0YgZx_WVg8TzhJj_gPQPbPV-0Z5dnmmYiv8/edit
 -module(histogram_time_series).
 -author("Michal Wrzeszcz").
 
--include("modules/datastore/histogram_internal.hrl").
+-include("modules/datastore/datastore_histogram.hrl").
 -include("modules/datastore/metric_config.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -55,8 +54,9 @@
 -type time_series_pack() :: #{time_series_id() => time_series()}.
 -type time_series_config() :: #{time_series_id() => #{histogram_metric:id() => histogram_metric:config()}}.
 
-% Metrics are stored in hierarchical map when time_series_id is used to get map with #{histogram_metric:id() => histogram_metric:metric()}.
-% Other way of presentation is in flattened map using key {time_series_id(), histogram_metric:id()}. It is used
+% Metrics are stored in hierarchical map and time_series_id is used to get map
+% #{histogram_metric:id() => histogram_metric:metric()} for particular time series.
+% Other way of presentation is flattened map that uses keys {time_series_id(), histogram_metric:id()}. It is used
 % mainly to return requested data (get can return only chosen metrics so it does not return hierarchical map).
 -type full_metric_id() :: {time_series_id(), histogram_metric:id()}.
 -type windows_map() :: #{full_metric_id() => [histogram_windows:window()]}.
@@ -75,7 +75,8 @@
 -type ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
 
-% Warning: do not use this env in app.config. Use of env limited to tests.
+% Warning: do not use this env in app.config (setting it to very high value can result in creation of
+% datastore documents that are too big for couchbase). Use of env limited to tests.
 -define(MAX_VALUES_IN_DOC, application:get_env(?CLUSTER_WORKER_APP_NAME, histogram_max_doc_size, 50000)).
 
 %%%===================================================================
@@ -100,11 +101,11 @@ create(Ctx, Id, ConfigMap, Batch) ->
         {ok, histogram_persistence:finalize(PersistenceCtx)}
     catch
         _:{error, to_many_metrics} ->
-            {error, to_many_metrics};
+            {{error, to_many_metrics}, Batch};
         _:{error, empty_metric} ->
-            {error, empty_metric};
+            {{error, empty_metric}, Batch};
         _:{error, wrong_resolution} ->
-            {error, wrong_resolution};
+            {{error, wrong_resolution}, Batch};
         Error:Reason:Stacktrace ->
             ?error_stacktrace("Histogram ~p init error: ~p:~p~nConfig map: ~p",
                 [Id, Error, Reason, ConfigMap], Stacktrace),
@@ -112,6 +113,13 @@ create(Ctx, Id, ConfigMap, Batch) ->
     end.
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Puts metrics value for particular timestamp. It updates all metrics from all time series or only chosen subset
+%% of metrics depending on value of 4th function argument. In second case different measurement values can be specified
+%% (see update_range() type).
+%% @end
+%%--------------------------------------------------------------------
 -spec update(ctx(), id(), histogram_windows:timestamp(), histogram_windows:value() | update_range(), batch()) ->
     {ok | {error, term()}, batch()}.
 update(Ctx, Id, NewTimestamp, NewValue, Batch) when is_number(NewValue) ->
@@ -145,6 +153,11 @@ update(Ctx, Id, NewTimestamp, {MetricsToUpdate, NewValue}, Batch) ->
     update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch).
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Updates single metric.
+%% @end
+%%--------------------------------------------------------------------
 -spec update(ctx(), id(), histogram_windows:timestamp(), request_range() , histogram_windows:value(), batch()) ->
     {ok | {error, term()}, batch()}.
 update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
@@ -161,7 +174,12 @@ update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
     end.
 
 
-% TODO - opisac rozzne update'y - ten jest dla wydajnosci
+%%--------------------------------------------------------------------
+%% @doc
+%% Puts multiple measurements to all metrics from all time series.
+%% Usage of this function allows reduction of datastore overhead.
+%% @end
+%%--------------------------------------------------------------------
 -spec update_many(ctx(), id(), [{histogram_windows:timestamp(), histogram_windows:value()}], batch()) ->
     {ok | {error, term()}, batch()}.
 update_many(_Ctx, _Id, [], Batch) ->
@@ -173,6 +191,11 @@ update_many(Ctx, Id, [{NewTimestamp, NewValue} | Measurements], Batch) ->
     end.
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns windows for requested ranges. Windows for all metrics from all time series are included in answer.
+%% @end
+%%--------------------------------------------------------------------
 -spec get(ctx(), id(), histogram_windows:get_options(), batch() | undefined) ->
     {{ok, windows_map()} | {error, term()}, batch() | undefined}.
 get(Ctx, Id, Options, Batch) ->
@@ -324,8 +347,11 @@ get_internal(TimeSeriesPack, [TimeSeriesId | RequestedMetrics], Options, Persist
 get_internal(TimeSeriesPack, Request, Options, PersistenceCtx) ->
     {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesPack, [Request], Options, PersistenceCtx),
     case maps:is_key(Request, Ans) of
-        true -> {maps:get(Request, Ans), FinalPersistenceCtx};
-        false -> {Ans, FinalPersistenceCtx}
+        true ->
+            % Single key is requested - return value for the key instead of map
+            {maps:get(Request, Ans), FinalPersistenceCtx};
+        false ->
+            {Ans, FinalPersistenceCtx}
     end.
 
 
@@ -350,7 +376,8 @@ delete_metric([{_MetricId, Metric} | Tail], PersistenceCtx) ->
 %% Helper functions creating splitting strategy
 %%=====================================================================
 
--spec create_doc_splitting_strategies(time_series_config()) -> #{full_metric_id() => histogram_metric:splitting_strategy()}.
+-spec create_doc_splitting_strategies(time_series_config()) ->
+    #{full_metric_id() => histogram_metric:splitting_strategy()}.
 create_doc_splitting_strategies(ConfigMap) ->
     FlattenedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
         maps:fold(fun
@@ -372,7 +399,7 @@ create_doc_splitting_strategies(ConfigMap) ->
                 % All windows can be stored in head
                 {0, 1};
             _ ->
-                % It is guaranteed that each tail document used at least half of its capacity after split
+                % It is guaranteed that each tail document uses at least half of its capacity after split
                 % so windows count should be multiplied by 2 when calculating number of tail documents
                 % (head can be cleared to optimize upload so tail documents have to store required windows count).
                 case {Retention =< MaxValuesInDoc, Retention =< MaxValuesInDoc div 2} of

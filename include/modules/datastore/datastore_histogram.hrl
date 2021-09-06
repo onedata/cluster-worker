@@ -11,14 +11,14 @@
 %%% @end
 %%%-------------------------------------------------------------------
 
--ifndef(HISTOGRAM_INTERNAL_HRL).
--define(HISTOGRAM_INTERNAL_HRL, 1).
+-ifndef(DATASTORE_HISTOGRAM_HRL).
+-define(DATASTORE_HISTOGRAM_HRL, 1).
 
 
 % Record storing part of metric's windows. If windows count exceeds capacity of
 % of single record (see histogram_persistence), windows of each metric are
 % stored in linked list of #data{} records where newest windows are stored in
-% first record.
+% first record (head).
 -record(data, {
     windows = histogram_windows:init() :: histogram_windows:windows(),
     prev_record :: histogram_metric:key() | undefined,
