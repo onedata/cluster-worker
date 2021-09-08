@@ -6,29 +6,29 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Eunit tests for the histogram_time_series module.
+%%% Eunit tests for the time_series module.
 %%% @end
 %%%-------------------------------------------------------------------
--module(histogram_time_series_tests).
+-module(time_series_tests).
 -author("Michal Wrzeszcz").
 
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
--include("modules/datastore/metric_config.hrl").
--include("modules/datastore/datastore_histogram.hrl").
+-include("modules/datastore/ts_metric_config.hrl").
+-include("modules/datastore/datastore_time_series.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include("global_definitions.hrl").
 
 -define(GET(Id, Requested, Batch), ?GET(Id, Requested, #{}, Batch)).
--define(GET(Id, Requested, Options, Batch), histogram_time_series:get(#{}, Id, Requested, Options, Batch)).
+-define(GET(Id, Requested, Options, Batch), time_series:get(#{}, Id, Requested, Options, Batch)).
 -define(GET_OK_ANS(Expected), {{ok, Expected}, _}).
 
 %%%===================================================================
 %%% Setup and teardown
 %%%===================================================================
 
-histogram_test_() ->
+ts_test_() ->
     {foreach,
         fun setup/0,
         fun teardown/1,
@@ -47,7 +47,7 @@ histogram_test_() ->
 
 
 setup() ->
-    application:set_env(?CLUSTER_WORKER_APP_NAME, histogram_max_doc_size, 2000),
+    application:set_env(?CLUSTER_WORKER_APP_NAME, time_series_max_doc_size, 2000),
     meck:new([datastore_doc_batch, datastore_doc], [passthrough, no_history]),
     meck:expect(datastore_doc_batch, init, fun() -> #{} end),
     meck:expect(datastore_doc, save, fun(_Ctx, Key, Doc, Batch) -> {{ok, Doc}, Batch#{Key => Doc}} end),
@@ -70,7 +70,7 @@ single_metric_single_node() ->
     MetricsId = <<"M1">>,
     MetricsConfig = #metric_config{resolution = 10, retention = 5, aggregator = sum},
     ConfigMap = #{TimeSeriesId => #{MetricsId => MetricsConfig}},
-    Batch = init_histogram(Id, ConfigMap),
+    Batch = init(Id, ConfigMap),
 
     Measurements = lists:map(fun(I) -> {I, I/2} end, lists:seq(10, 49) ++ lists:seq(60, 69)),
     Batch2 = update_many(Id, Measurements, Batch),
@@ -112,7 +112,7 @@ single_metric_multiple_nodes() ->
     MetricsId = <<"M1">>,
     MetricsConfig = #metric_config{resolution = 1, retention = 4000, aggregator = max},
     ConfigMap = #{TimeSeriesId => #{MetricsId => MetricsConfig}},
-    Batch = init_histogram(Id, ConfigMap),
+    Batch = init(Id, ConfigMap),
 
     Measurements = lists:map(fun(I) -> {2 * I, 4 * I} end, lists:seq(1, 10000)),
     Batch2 = update_many(Id, Measurements, Batch),
@@ -136,13 +136,13 @@ single_metric_multiple_nodes() ->
 
     ?assertEqual(5, maps:size(Batch2)),
     DocsNums = lists:foldl(fun
-        (#document{value = {histogram_metric_data, #data{windows = Windows}}}, {HeadsCountAcc, TailsCountAcc}) ->
-            ?assertEqual(2000, histogram_windows:get_size(Windows)),
+        (#document{value = {ts_metric_data, #data{windows = Windows}}}, {HeadsCountAcc, TailsCountAcc}) ->
+            ?assertEqual(2000, ts_windows:get_size(Windows)),
             {HeadsCountAcc, TailsCountAcc + 1};
-        (#document{value = {histogram_hub, TimeSeries}}, {HeadsCountAcc, TailsCountAcc}) ->
+        (#document{value = {ts_hub, TimeSeries}}, {HeadsCountAcc, TailsCountAcc}) ->
             [Metrics] = maps:values(TimeSeries),
             [#metric{data = #data{windows = Windows}}] = maps:values(Metrics),
-            ?assertEqual(2000, histogram_windows:get_size(Windows)),
+            ?assertEqual(2000, ts_windows:get_size(Windows)),
             {HeadsCountAcc + 1, TailsCountAcc}
     end, {0, 0}, maps:values(Batch2)),
     ?assertEqual({1, 4}, DocsNums),
@@ -189,7 +189,7 @@ single_time_series_single_node() ->
         Acc#{<<"M", N>> => MetricsConfig}
     end, #{}, lists:seq(1, 5)),
     ConfigMap = #{TimeSeriesId => MetricsConfigs},
-    Batch = init_histogram(Id, ConfigMap),
+    Batch = init(Id, ConfigMap),
 
     MeasurementsCount = 1199,
     Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementsCount)),
@@ -244,7 +244,7 @@ single_time_series_multiple_nodes() ->
         Acc#{<<"M", N>> => MetricsConfig}
     end, #{}, lists:seq(1, 4)),
     ConfigMap = #{TimeSeriesId => MetricsConfigs},
-    Batch = init_histogram(Id, ConfigMap),
+    Batch = init(Id, ConfigMap),
 
     MeasurementsCount = 12500,
     Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
@@ -253,15 +253,15 @@ single_time_series_multiple_nodes() ->
     ?assertEqual(6, maps:size(Batch2)),
     TailSizes = [1500, 1500, 2000, 2000, 2000],
     RemainingTailSizes = lists:foldl(fun
-        (#document{value = {histogram_metric_data, #data{windows = Windows}}}, TmpTailSizes) ->
-            Size = histogram_windows:get_size(Windows),
+        (#document{value = {ts_metric_data, #data{windows = Windows}}}, TmpTailSizes) ->
+            Size = ts_windows:get_size(Windows),
             ?assert(lists:member(Size, TmpTailSizes)),
             TmpTailSizes -- [Size];
-        (#document{value = {histogram_hub, TimeSeries}}, TmpTailSizes) ->
+        (#document{value = {ts_hub, TimeSeries}}, TmpTailSizes) ->
             [MetricsMap] = maps:values(TimeSeries),
             ?assertEqual(4, maps:size(MetricsMap)),
             lists:foreach(fun(#metric{data = #data{windows = Windows}}) ->
-                ?assertEqual(500, histogram_windows:get_size(Windows))
+                ?assertEqual(500, ts_windows:get_size(Windows))
             end, maps:values(MetricsMap)),
             TmpTailSizes
     end, TailSizes, maps:values(Batch2)),
@@ -299,7 +299,7 @@ multiple_time_series_single_node() ->
         MetricsConfig = #metric_config{resolution = N, retention = 600 div N + 10, aggregator = sum},
         Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
     end, #{}, lists:seq(1, 5)),
-    Batch = init_histogram(Id, ConfigMap),
+    Batch = init(Id, ConfigMap),
 
     MeasurementsCount = 1199,
     Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementsCount)),
@@ -369,7 +369,7 @@ multiple_time_series_multiple_nodes() ->
         MetricsConfig = #metric_config{resolution = 1, retention = 400 * N, aggregator = last},
         Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
     end, #{}, lists:seq(1, 5)),
-    Batch = init_histogram(Id, ConfigMap),
+    Batch = init(Id, ConfigMap),
 
     MeasurementsCount = 24400,
     Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
@@ -378,18 +378,18 @@ multiple_time_series_multiple_nodes() ->
     ?assertEqual(8, maps:size(Batch2)),
     TailSizes = [1200, 1200, 1600, 1600, 1600, 2000, 2000],
     RemainingTailSizes = lists:foldl(fun
-        (#document{value = {histogram_metric_data, #data{windows = Windows}}}, TmpTailSizes) ->
-            Size = histogram_windows:get_size(Windows),
+        (#document{value = {ts_metric_data, #data{windows = Windows}}}, TmpTailSizes) ->
+            Size = ts_windows:get_size(Windows),
             ?assert(lists:member(Size, TmpTailSizes)),
             TmpTailSizes -- [Size];
-        (#document{value = {histogram_hub, TimeSeries}}, TmpTailSizes) ->
+        (#document{value = {ts_hub, TimeSeries}}, TmpTailSizes) ->
             ?assertEqual(2, maps:size(TimeSeries)),
             MetricsMap0 = maps:get(<<"TS", 0>>, TimeSeries),
             MetricsMap1 = maps:get(<<"TS", 1>>, TimeSeries),
             ?assertEqual(2, maps:size(MetricsMap0)),
             ?assertEqual(3, maps:size(MetricsMap1)),
             lists:foreach(fun(#metric{data = #data{windows = Windows}}) ->
-                ?assertEqual(400, histogram_windows:get_size(Windows))
+                ?assertEqual(400, ts_windows:get_size(Windows))
             end, maps:values(MetricsMap0) ++ maps:values(MetricsMap1)),
             TmpTailSizes
     end, TailSizes, maps:values(Batch2)),
@@ -421,7 +421,7 @@ update_subset() ->
         MetricsConfig = #metric_config{resolution = 1, retention = 1000, aggregator = max},
         Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
     end, #{}, lists:seq(1, 5)),
-    Batch = init_histogram(Id, ConfigMap),
+    Batch = init(Id, ConfigMap),
 
     Batch2 = update(Id, 0, <<"TS", 0>>, 0, Batch),
     Batch3 = update(Id, 0, <<"TS", 1>>, 1, Batch2),
@@ -448,9 +448,9 @@ single_doc_splitting_strategies_create() ->
     Id = datastore_key:new(),
     Batch = datastore_doc_batch:init(),
     ConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0}}},
-    ?assertEqual({{error, empty_metric}, Batch}, histogram_time_series:create(#{}, Id, ConfigMap, Batch)),
+    ?assertEqual({{error, empty_metric}, Batch}, time_series:create(#{}, Id, ConfigMap, Batch)),
     ConfigMap2 = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = 0}}},
-    ?assertEqual({{error, wrong_resolution}, Batch}, histogram_time_series:create(#{}, Id, ConfigMap2, Batch)),
+    ?assertEqual({{error, wrong_resolution}, Batch}, time_series:create(#{}, Id, ConfigMap2, Batch)),
 
     single_doc_splitting_strategies_create_testcase(10, 10, 0, 1),
     single_doc_splitting_strategies_create_testcase(2000, 2000, 0, 1),
@@ -498,7 +498,7 @@ multiple_metrics_splitting_strategies_create() ->
         {<<"TS1">>, <<"M3">>} => #splitting_strategy{
             max_docs_count = 7, max_windows_in_head_doc = 666, max_windows_in_tail_doc = 2000}
     },
-    ?assertEqual(ExpectedMap, histogram_time_series:create_doc_splitting_strategies(ConfigMap)),
+    ?assertEqual(ExpectedMap, time_series:create_doc_splitting_strategies(ConfigMap)),
 
     ConfigMap2 = #{
         <<"TS1">> => #{
@@ -523,7 +523,7 @@ multiple_metrics_splitting_strategies_create() ->
         {<<"TS2">>, <<"M2">>} => #splitting_strategy{
             max_docs_count = 11, max_windows_in_head_doc = 400, max_windows_in_tail_doc = 2000}
     },
-    ?assertEqual(ExpectedMap2, histogram_time_series:create_doc_splitting_strategies(ConfigMap2)),
+    ?assertEqual(ExpectedMap2, time_series:create_doc_splitting_strategies(ConfigMap2)),
 
     GetLargeTimeSeries = fun() -> maps:from_list(lists:map(fun(Seq) ->
         {<<(integer_to_binary(Seq))/binary>>, #metric_config{retention = Seq}}
@@ -531,7 +531,7 @@ multiple_metrics_splitting_strategies_create() ->
     ConfigMap3 = #{<<"TS1">> => GetLargeTimeSeries(), <<"TS2">> => GetLargeTimeSeries()},
     Id = datastore_key:new(),
     Batch = datastore_doc_batch:init(),
-    ?assertEqual({{error, to_many_metrics}, Batch}, histogram_time_series:create(#{}, Id, ConfigMap3, Batch)).
+    ?assertEqual({{error, to_many_metrics}, Batch}, time_series:create(#{}, Id, ConfigMap3, Batch)).
 
 %%%===================================================================
 %%% Helper functions
@@ -541,7 +541,7 @@ single_doc_splitting_strategies_create_testcase(Retention, WindowsInHead, Window
     ConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = Retention}}},
     ExpectedMap = #{{<<"TS1">>, <<"M1">>} => #splitting_strategy{
         max_docs_count = DocCount, max_windows_in_head_doc = WindowsInHead, max_windows_in_tail_doc = WindowsInTail}},
-    ?assertEqual(ExpectedMap, histogram_time_series:create_doc_splitting_strategies(ConfigMap)).
+    ?assertEqual(ExpectedMap, time_series:create_doc_splitting_strategies(ConfigMap)).
 
 
 multiple_metrics_splitting_strategies_create_testcase(Retention1, Retention2, Retention3,
@@ -556,26 +556,26 @@ multiple_metrics_splitting_strategies_create_testcase(Retention1, Retention2, Re
         {<<"TS1">>, <<"M2">>} => DocSplittingStrategy2,
         {<<"TS1">>, <<"M3">>} => DocSplittingStrategy3
     },
-    ?assertEqual(ExpectedMap, histogram_time_series:create_doc_splitting_strategies(ConfigMap)).
+    ?assertEqual(ExpectedMap, time_series:create_doc_splitting_strategies(ConfigMap)).
 
 
-init_histogram(Id, ConfigMap) ->
+init(Id, ConfigMap) ->
     Batch = datastore_doc_batch:init(),
-    InitAns = histogram_time_series:create(#{}, Id, ConfigMap, Batch),
+    InitAns = time_series:create(#{}, Id, ConfigMap, Batch),
     ?assertMatch({ok, _}, InitAns),
     {ok, Batch2} = InitAns,
     Batch2.
 
 
 update(Id, NewTimestamp, ValueOrUpdateRange, Batch) ->
-    UpdateAns = histogram_time_series:update(#{}, Id, NewTimestamp, ValueOrUpdateRange, Batch),
+    UpdateAns = time_series:update(#{}, Id, NewTimestamp, ValueOrUpdateRange, Batch),
     ?assertMatch({ok, _}, UpdateAns),
     {ok, Batch2} = UpdateAns,
     Batch2.
 
 
 update(Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
-    UpdateAns = histogram_time_series:update(#{}, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch),
+    UpdateAns = time_series:update(#{}, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch),
     ?assertMatch({ok, _}, UpdateAns),
     {ok, Batch2} = UpdateAns,
     Batch2.

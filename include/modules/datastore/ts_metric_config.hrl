@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This file contains metric config record definition used to configure
-%%% single histogram metric (see #metric{} in datastore_histogram.hrl)
+%%% single time series metric (see #metric{} in datastore_time_series.hrl)
 %%% @end
 %%%-------------------------------------------------------------------
 
@@ -15,10 +15,10 @@
 -define(METRIC_CONFIG_HRL, 1).
 
 -record(metric_config, {
-    legend = <<>> :: histogram_metric:legend(),
+    legend = <<>> :: ts_metric:legend(),
     resolution :: non_neg_integer(),
     retention :: non_neg_integer(),
-    aggregator :: histogram_windows:aggregator()
+    aggregator :: ts_windows:aggregator()
 }).
 
 -endif.

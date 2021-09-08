@@ -6,10 +6,10 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Helper module operating on histogram windows' set.
+%%% Helper module operating on time_series metric windows' set.
 %%% @end
 %%%-------------------------------------------------------------------
--module(histogram_windows).
+-module(ts_windows).
 -author("Michal Wrzeszcz").
 
 %% API

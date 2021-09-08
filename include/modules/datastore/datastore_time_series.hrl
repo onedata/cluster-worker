@@ -6,24 +6,24 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This file contains records definitions used by datastore histogram modules.
+%%% This file contains records definitions used by datastore time series modules.
 %%% Records defined in this hrl should not be used outside datastore.
 %%% @end
 %%%-------------------------------------------------------------------
 
--ifndef(DATASTORE_HISTOGRAM_HRL).
--define(DATASTORE_HISTOGRAM_HRL, 1).
+-ifndef(DATASTORE_TIME_SERIES_HRL).
+-define(DATASTORE_TIME_SERIES_HRL, 1).
 
 
 % Record storing part of metric's windows. If windows count exceeds capacity of
-% of single record (see histogram_persistence), windows of each metric are
+% of single record (see ts_persistence), windows of each metric are
 % stored in linked list of #data{} records where newest windows are stored in
 % first record (head).
 -record(data, {
-    windows = histogram_windows:init() :: histogram_windows:windows(),
-    prev_record :: histogram_metric:key() | undefined,
+    windows = ts_windows:init() :: ts_windows:windows(),
+    prev_record :: ts_metric:key() | undefined,
     % Timestamp of newest measurement in previous record
-    prev_record_timestamp :: histogram_windows:timestamp() | undefined
+    prev_record_timestamp :: ts_windows:timestamp() | undefined
 }).
 
 
@@ -40,11 +40,11 @@
 % Record describing single metric. It stores config, splitting_strategy (see above) and head of
 % list of #data{} records.
 -record(metric, {
-    config :: histogram_metric:config(),
+    config :: ts_metric:config(),
     % NOTE: splitting strategy may result in keeping more windows than required by config
     % (in order to optimize documents management)
-    splitting_strategy :: histogram_metric:splitting_strategy(),
-    data = #data{} :: histogram_metric:data()
+    splitting_strategy :: ts_metric:splitting_strategy(),
+    data = #data{} :: ts_metric:data()
 }).
 
 -endif.

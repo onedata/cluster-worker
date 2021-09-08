@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Module responsible for management of histogram documents
+%%% Module responsible for management of time series documents
 %%% (getting from and saving to datastore internal structures).
 %%%
 %%% The module bases on #ctx{} record that stores all data needed to
@@ -14,18 +14,18 @@
 %%% It has to be finalized with finalize/1 function after last usage to return
 %%% structure used by datastore to save all changes.
 %%%
-%%% The module uses 2 helper records: histogram_hub that stores heads
-%%% of each metric and histogram_metric_data that stores windows of single
+%%% The module uses 2 helper records: ts_hub that stores heads
+%%% of each metric and ts_metric_data that stores windows of single
 %%% metrics if there are to many of them to store then all in head
-%%% (see histogram_metric for head/tail description). Head of each metric contains
+%%% (see ts_metric for head/tail description). Head of each metric contains
 %%% all windows or part of windows set (depending on windows count) as well as config 
-%%% and splitting strategy (see #metric{} record definition) while histogram_metric_data
+%%% and splitting strategy (see #metric{} record definition) while ts_metric_data
 %%% stores only parts of windows sets. There is always exactly one 
-%%% histogram_hub document (storing heads of all metrics). histogram_metric_data
-%%% documents are created on demand and multiple histogram_metric_data documents
+%%% ts_hub document (storing heads of all metrics). ts_metric_data
+%%% documents are created on demand and multiple ts_metric_data documents
 %%% can be created for each metric. E.g.:
 %%%
-%%%                              histogram_hub
+%%%                                  ts_hub
 %%% +----------------------------------------------------------------------+
 %%% |                                                                      |
 %%% |    metric{                metric{               metric{              |
@@ -39,7 +39,7 @@
 %%%             |                                            |
 %%%             |                                            |
 %%%             v                                            v
-%%% histogram_metric_data                           histogram_metric_data
+%%%      ts_metric_data                                 ts_metric_data
 %%% +---------------------+                         +---------------------+
 %%% |                     |                         |                     |
 %%% |    data{            |                         |    data{            |
@@ -50,7 +50,7 @@
 %%%             |
 %%%             |
 %%%             v
-%%% histogram_metric_data
+%%%      ts_metric_data
 %%% +---------------------+
 %%% |                     |
 %%% |    data{            |
@@ -59,32 +59,32 @@
 %%% |    }                |
 %%% +---------------------+
 %%%
-%%% Key of histogram_hub document is equal to id of histogram while
-%%% histogram_metric_data documents have randomly generated ids.
+%%% Key of ts_hub document is equal to id of time series collection while
+%%% ts_metric_data documents have randomly generated ids.
 %%% @end
 %%%-------------------------------------------------------------------
--module(histogram_persistence).
+-module(ts_persistence).
 -author("Michal Wrzeszcz").
 
--include("modules/datastore/datastore_histogram.hrl").
+-include("modules/datastore/datastore_time_series.hrl").
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([init_for_new_histogram/4, init_for_existing_histogram/3, finalize/1,
+-export([init_for_new_collection/4, init_for_existing_collection/3, finalize/1,
     set_active_time_series/2, set_active_metric/2,
-    get_histogram_id/1, is_hub_key/2,
+    get_time_series_collection_id/1, is_hub_key/2,
     get/2, create/2, update/3, delete/2, delete_hub/1]).
 
 -record(ctx, {
     datastore_ctx :: datastore_ctx(),
-    batch :: batch() | undefined, % Undefined when histogram is used outside tp process
-                                  % (call via datastore_reader:histogram_get/3)
+    batch :: batch() | undefined, % Undefined when time series collection is used outside tp process
+                                  % (call via datastore_reader:time_series_get/3)
     hub :: doc(),
     is_hub_updated = false :: boolean(), % Field used to determine if hub should be saved by finalize/1 function
     % Fields representing metric currently being updated (single ctx can be used to update several metrics -
     % active* fields have to be set before updating each one)
-    active_time_series :: histogram_time_series:time_series_id() | undefined,
-    active_metric :: histogram_metric:id() | undefined
+    active_time_series :: time_series:time_series_id() | undefined,
+    active_metric :: ts_metric:id() | undefined
 }).
 
 -type ctx() :: #ctx{}.
@@ -99,29 +99,29 @@
 %%% API
 %%%===================================================================
 
--spec init_for_new_histogram(datastore_ctx(), histogram_time_series:id(), histogram_time_series:time_series_pack(),
+-spec init_for_new_collection(datastore_ctx(), time_series:collection_id(), time_series:collection(),
     batch()) -> ctx().
-init_for_new_histogram(DatastoreCtx, Id, TimeSeriesPack, Batch) ->
-    HistogramHub = #document{key = Id, value = histogram_hub:set_time_series_pack(TimeSeriesPack)},
+init_for_new_collection(DatastoreCtx, Id, TimeSeriesCollection, Batch) ->
+    TSHub = #document{key = Id, value = ts_hub:set_time_series_collection(TimeSeriesCollection)},
     #ctx{
         datastore_ctx = DatastoreCtx,
         batch = Batch,
-        hub = HistogramHub,
+        hub = TSHub,
         is_hub_updated = true
     }.
 
 
--spec init_for_existing_histogram(datastore_ctx(), histogram_time_series:id(), batch() | undefined) ->
-    {histogram_time_series:time_series_pack(), ctx()}.
-init_for_existing_histogram(DatastoreCtx, Id, Batch) ->
-    {{ok, #document{value = HistogramHubRecord} = HistogramHub}, UpdatedBatch} =
+-spec init_for_existing_collection(datastore_ctx(), time_series:collection_id(), batch() | undefined) ->
+    {time_series:collection(), ctx()}.
+init_for_existing_collection(DatastoreCtx, Id, Batch) ->
+    {{ok, #document{value = TSHubRecord} = TSHub}, UpdatedBatch} =
         datastore_doc:fetch(DatastoreCtx, Id, Batch),
     {
-        histogram_hub:get_time_series_pack(HistogramHubRecord),
+        ts_hub:get_time_series_collection(TSHubRecord),
         #ctx{
             datastore_ctx = DatastoreCtx,
             batch = UpdatedBatch,
-            hub = HistogramHub
+            hub = TSHub
         }
     }.
 
@@ -140,19 +140,19 @@ finalize(#ctx{
     UpdatedBatch.
 
 
--spec set_active_time_series(histogram_time_series:time_series_id(), ctx()) -> ctx().
+-spec set_active_time_series(time_series:time_series_id(), ctx()) -> ctx().
 set_active_time_series(TimeSeriesId, Ctx) ->
     Ctx#ctx{active_time_series = TimeSeriesId}.
 
 
--spec set_active_metric(histogram_metric:id(), ctx()) -> ctx().
+-spec set_active_metric(ts_metric:id(), ctx()) -> ctx().
 set_active_metric(MetricsId, Ctx) ->
     Ctx#ctx{active_metric = MetricsId}.
 
 
--spec get_histogram_id(ctx()) -> key().
-get_histogram_id(#ctx{hub = #document{key = HubKey}}) ->
-    HubKey. % Hub key is always equal to histogram id
+-spec get_time_series_collection_id(ctx()) -> key().
+get_time_series_collection_id(#ctx{hub = #document{key = HubKey}}) ->
+    HubKey. % Hub key is always equal to time series collection id
 
 
 -spec is_hub_key(key(), ctx()) -> boolean().
@@ -160,35 +160,35 @@ is_hub_key(Key, #ctx{hub = #document{key = HubKey}}) ->
     Key =:= HubKey.
 
 
--spec get(key(), ctx()) -> {histogram_metric:data(), ctx()}.
+-spec get(key(), ctx()) -> {ts_metric:data(), ctx()}.
 get(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
-    {{ok, #document{value = HistogramRecord}}, UpdatedBatch} = datastore_doc:fetch(DatastoreCtx, Key, Batch),
-    {histogram_metric_data:get_data(HistogramRecord), Ctx#ctx{batch = UpdatedBatch}}.
+    {{ok, #document{value = Record}}, UpdatedBatch} = datastore_doc:fetch(DatastoreCtx, Key, Batch),
+    {ts_metric_data:get_data(Record), Ctx#ctx{batch = UpdatedBatch}}.
 
 
--spec create(histogram_metric:data(), ctx()) -> {key(), ctx()}.
+-spec create(ts_metric:data(), ctx()) -> {key(), ctx()}.
 create(DataToCreate, #ctx{hub = #document{key = HubKey}, datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     NewDocKey = datastore_key:new_adjacent_to(HubKey),
-    Doc = #document{key = NewDocKey, value = histogram_metric_data:set_data(DataToCreate)},
+    Doc = #document{key = NewDocKey, value = ts_metric_data:set_data(DataToCreate)},
     {{ok, _}, UpdatedBatch} = datastore_doc:save(DatastoreCtx#{generated_key => true}, NewDocKey, Doc, Batch),
     {NewDocKey, Ctx#ctx{batch = UpdatedBatch}}.
 
 
--spec update(key(), histogram_metric:data(), ctx()) -> ctx().
+-spec update(key(), ts_metric:data(), ctx()) -> ctx().
 update(HubKey, Data, #ctx{
-    hub = #document{key = HubKey, value = HistogramRecord} = HubDoc,
+    hub = #document{key = HubKey, value = Record} = HubDoc,
     active_time_series = TimeSeriesId,
     active_metric = MetricsId
 } = Ctx) ->
-    TimeSeriesPack = histogram_hub:get_time_series_pack(HistogramRecord),
-    TimeSeries = maps:get(TimeSeriesId, TimeSeriesPack),
+    TimeSeriesCollection = ts_hub:get_time_series_collection(Record),
+    TimeSeries = maps:get(TimeSeriesId, TimeSeriesCollection),
     Metrics = maps:get(MetricsId, TimeSeries),
-    UpdatedTimeSeries = TimeSeriesPack#{TimeSeriesId => TimeSeries#{MetricsId => Metrics#metric{data = Data}}},
-    UpdatedDoc = HubDoc#document{value = histogram_hub:set_time_series_pack(UpdatedTimeSeries)},
+    UpdatedTimeSeries = TimeSeriesCollection#{TimeSeriesId => TimeSeries#{MetricsId => Metrics#metric{data = Data}}},
+    UpdatedDoc = HubDoc#document{value = ts_hub:set_time_series_collection(UpdatedTimeSeries)},
     Ctx#ctx{hub = UpdatedDoc, is_hub_updated = true};
 
 update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
-    Doc = #document{key = DataDocKey, value = histogram_metric_data:set_data(Data)},
+    Doc = #document{key = DataDocKey, value = ts_metric_data:set_data(Data)},
     {{ok, _}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, DataDocKey, Doc, Batch),
     Ctx#ctx{batch = UpdatedBatch}.
 

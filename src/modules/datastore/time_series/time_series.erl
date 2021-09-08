@@ -6,11 +6,11 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Internal datastore API used for operating on histograms.
-%%% Histogram consists of several time series. Each time series consists of
+%%% Internal datastore API used for operating on time_series collections.
+%%% Time series collection consists of several time series. Each time series consists of
 %%% several metrics. Metric is set of windows that aggregate multiple
 %%% measurements from particular period of time. E.g.,
-%%% MyHistogram = #{
+%%% MyTimeSeriesCollection = #{
 %%%    TimeSeries1 = #{
 %%%       Metric1 = [Window1, Window2, ...],
 %%%       Metric2 = ...
@@ -18,27 +18,27 @@
 %%%    TimeSeries2 = ...
 %%% }
 %%% Window = {Timestamp, aggregator(Measurement1Value, Measurement2Value, ...)}
-%%% See histogram_windows:aggregate/3 to see possible aggregation functions.
+%%% See ts_windows:aggregate/3 to see possible aggregation functions.
 %%%
-%%% The module delegates operations on single metric to histogram_metric module
+%%% The module delegates operations on single metric to ts_metric module
 %%% that is able to handle infinite number of windows inside single metric splitting
 %%% windows set to subsets stored in multiple records that are saved to multiple
-%%% datastore documents by histogram_persistence helper module.
+%%% datastore documents by ts_persistence helper module.
 %%%
 %%% All metrics from all time series are kept together. If any metric windows count
 %%% is so high that it cannot be stored in single datastore document, the metric's
-%%% windows set is divided into several records by histogram_metric module and then
-%%% persisted as several datastore documents by histogram_persistence module. Thus,
+%%% windows set is divided into several records by ts_metric module and then
+%%% persisted as several datastore documents by ts_persistence module. Thus,
 %%% windows of each metric form linked list of records storing parts of windows set,
 %%% with head of the list treated exceptionally (heads are kept together for all
 %%% metrics while rest of records with windows are kept separately for each metric).
 %%% @end
 %%%-------------------------------------------------------------------
--module(histogram_time_series).
+-module(time_series).
 -author("Michal Wrzeszcz").
 
--include("modules/datastore/datastore_histogram.hrl").
--include("modules/datastore/metric_config.hrl").
+-include("modules/datastore/datastore_time_series.hrl").
+-include("modules/datastore/ts_metric_config.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -47,29 +47,29 @@
 %% Test API
 -export([create_doc_splitting_strategies/1]).
 
--type id() :: binary(). % Id of histogram
 -type time_series_id() :: binary().
+-type collection_id() :: binary().
 
--type time_series() :: #{histogram_metric:id() => histogram_metric:metric()}.
--type time_series_pack() :: #{time_series_id() => time_series()}.
--type time_series_config() :: #{time_series_id() => #{histogram_metric:id() => histogram_metric:config()}}.
+-type time_series() :: #{ts_metric:id() => ts_metric:metric()}.
+-type collection() :: #{time_series_id() => time_series()}.
+-type collection_config() :: #{time_series_id() => #{ts_metric:id() => ts_metric:config()}}.
 
 % Metrics are stored in hierarchical map and time_series_id is used to get map
-% #{histogram_metric:id() => histogram_metric:metric()} for particular time series.
-% Other way of presentation is flattened map that uses keys {time_series_id(), histogram_metric:id()}. It is used
+% #{ts_metric:id() => ts_metric:metric()} for particular time series.
+% Other way of presentation is flattened map that uses keys {time_series_id(), ts_metric:id()}. It is used
 % mainly to return requested data (get can return only chosen metrics so it does not return hierarchical map).
--type full_metric_id() :: {time_series_id(), histogram_metric:id()}.
--type windows_map() :: #{full_metric_id() => [histogram_windows:window()]}.
--type flat_config_map() :: #{full_metric_id() => histogram_metric:config()}.
+-type full_metric_id() :: {time_series_id(), ts_metric:id()}.
+-type windows_map() :: #{full_metric_id() => [ts_windows:window()]}.
+-type flat_config_map() :: #{full_metric_id() => ts_metric:config()}.
 -type windows_count_map() :: #{full_metric_id() => non_neg_integer()}.
 
 -type time_series_range() :: time_series_id() | [time_series_id()].
--type metrics_range() :: histogram_metric:id() | [histogram_metric:id()].
+-type metrics_range() :: ts_metric:id() | [ts_metric:id()].
 -type range() :: time_series_id() | {time_series_range(), metrics_range()}.
 -type request_range() :: range() | [range()].
--type update_range() :: {request_range(), histogram_windows:value()} | [{request_range(), histogram_windows:value()}].
+-type update_range() :: {request_range(), ts_windows:value()} | [{request_range(), ts_windows:value()}].
 
--export_type([id/0, time_series_pack/0, time_series_config/0, time_series_id/0, full_metric_id/0,
+-export_type([collection_id/0, collection/0, collection_config/0, time_series_id/0, full_metric_id/0,
     request_range/0, update_range/0, windows_map/0]).
 
 -type ctx() :: datastore:ctx().
@@ -77,18 +77,18 @@
 
 % Warning: do not use this env in app.config (setting it to very high value can result in creation of
 % datastore documents that are too big for couchbase). Use of env limited to tests.
--define(MAX_VALUES_IN_DOC, application:get_env(?CLUSTER_WORKER_APP_NAME, histogram_max_doc_size, 50000)).
+-define(MAX_VALUES_IN_DOC, application:get_env(?CLUSTER_WORKER_APP_NAME, time_series_max_doc_size, 50000)).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
--spec create(ctx(), id(), time_series_config(), batch()) -> {ok | {error, term()}, batch()}.
+-spec create(ctx(), collection_id(), collection_config(), batch()) -> {ok | {error, term()}, batch()}.
 create(Ctx, Id, ConfigMap, Batch) ->
     try
         DocSplittingStrategies = create_doc_splitting_strategies(ConfigMap),
 
-        TimeSeriesPack = maps:map(fun(TimeSeriesId, MetricsConfigs) ->
+        TimeSeriesCollection = maps:map(fun(TimeSeriesId, MetricsConfigs) ->
             maps:map(fun(MetricsId, Config) ->
                  #metric{
                      config = Config,
@@ -97,8 +97,8 @@ create(Ctx, Id, ConfigMap, Batch) ->
             end, MetricsConfigs)
         end, ConfigMap),
 
-        PersistenceCtx = histogram_persistence:init_for_new_histogram(Ctx, Id, TimeSeriesPack, Batch),
-        {ok, histogram_persistence:finalize(PersistenceCtx)}
+        PersistenceCtx = ts_persistence:init_for_new_collection(Ctx, Id, TimeSeriesCollection, Batch),
+        {ok, ts_persistence:finalize(PersistenceCtx)}
     catch
         _:{error, to_many_metrics} ->
             {{error, to_many_metrics}, Batch};
@@ -107,9 +107,9 @@ create(Ctx, Id, ConfigMap, Batch) ->
         _:{error, wrong_resolution} ->
             {{error, wrong_resolution}, Batch};
         Error:Reason:Stacktrace ->
-            ?error_stacktrace("Histogram ~p init error: ~p:~p~nConfig map: ~p",
+            ?error_stacktrace("Time series collection ~p init error: ~p:~p~nConfig map: ~p",
                 [Id, Error, Reason, ConfigMap], Stacktrace),
-            {{error, histogram_create_failed}, Batch}
+            {{error, create_failed}, Batch}
     end.
 
 
@@ -120,33 +120,33 @@ create(Ctx, Id, ConfigMap, Batch) ->
 %% (see update_range() type).
 %% @end
 %%--------------------------------------------------------------------
--spec update(ctx(), id(), histogram_windows:timestamp(), histogram_windows:value() | update_range(), batch()) ->
+-spec update(ctx(), collection_id(), ts_windows:timestamp(), ts_windows:value() | update_range(), batch()) ->
     {ok | {error, term()}, batch()}.
 update(Ctx, Id, NewTimestamp, NewValue, Batch) when is_number(NewValue) ->
     try
-        {TimeSeriesPack, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
-        FinalPersistenceCtx = update_time_series(maps:to_list(TimeSeriesPack), NewTimestamp, NewValue, PersistenceCtx),
-        {ok, histogram_persistence:finalize(FinalPersistenceCtx)}
+        {TimeSeriesCollection, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+        FinalPersistenceCtx = update_time_series(maps:to_list(TimeSeriesCollection), NewTimestamp, NewValue, PersistenceCtx),
+        {ok, ts_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace ->
-            ?error_stacktrace("Histogram ~p update error: ~p:~p~nFailed to update measurement {~p, ~p}",
+            ?error_stacktrace("Time series collection ~p update error: ~p:~p~nFailed to update measurement {~p, ~p}",
                 [Id, Error, Reason, NewTimestamp, NewValue], Stacktrace),
-            {{error, histogram_update_failed}, Batch}
+            {{error, update_failed}, Batch}
     end;
 
 update(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch) when is_list(MetricsToUpdateWithValues) ->
     try
-        {TimeSeriesPack, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
+        {TimeSeriesCollection, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
         FinalPersistenceCtx = lists:foldl(fun({MetricsToUpdate, NewValue}, Acc) ->
-            FilteredTimeSeries = filter_time_series_pack(TimeSeriesPack, MetricsToUpdate),
+            FilteredTimeSeries = filter_collection(TimeSeriesCollection, MetricsToUpdate),
             update_time_series(maps:to_list(FilteredTimeSeries), NewTimestamp, NewValue, Acc)
         end, PersistenceCtx, MetricsToUpdateWithValues),
-        {ok, histogram_persistence:finalize(FinalPersistenceCtx)}
+        {ok, ts_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace ->
-            ?error_stacktrace("Histogram ~p update error: ~p:~p~nFailed to update values ~p for timestamp ~p",
+            ?error_stacktrace("Time series collection ~p update error: ~p:~p~nFailed to update values ~p for timestamp ~p",
                 [Id, Error, Reason, MetricsToUpdateWithValues, NewTimestamp], Stacktrace),
-            {{error, histogram_update_failed}, Batch}
+            {{error, update_failed}, Batch}
     end;
 
 update(Ctx, Id, NewTimestamp, {MetricsToUpdate, NewValue}, Batch) ->
@@ -158,19 +158,19 @@ update(Ctx, Id, NewTimestamp, {MetricsToUpdate, NewValue}, Batch) ->
 %% Updates single metric.
 %% @end
 %%--------------------------------------------------------------------
--spec update(ctx(), id(), histogram_windows:timestamp(), request_range() , histogram_windows:value(), batch()) ->
+-spec update(ctx(), collection_id(), ts_windows:timestamp(), request_range() , ts_windows:value(), batch()) ->
     {ok | {error, term()}, batch()}.
 update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
     try
-        {TimeSeriesPack, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
-        FilteredTimeSeries = filter_time_series_pack(TimeSeriesPack, MetricsToUpdate),
+        {TimeSeriesCollection, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+        FilteredTimeSeries = filter_collection(TimeSeriesCollection, MetricsToUpdate),
         FinalPersistenceCtx = update_time_series(maps:to_list(FilteredTimeSeries), NewTimestamp, NewValue, PersistenceCtx),
-        {ok, histogram_persistence:finalize(FinalPersistenceCtx)}
+        {ok, ts_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace ->
-            ?error_stacktrace("Histogram ~p update error: ~p:~p~nFailed to update measurement {~p, ~p} for metrics ~p",
+            ?error_stacktrace("Time series collection ~p update error: ~p:~p~nFailed to update measurement {~p, ~p} for metrics ~p",
                 [Id, Error, Reason, NewTimestamp, NewValue, MetricsToUpdate], Stacktrace),
-            {{error, histogram_update_failed}, Batch}
+            {{error, update_failed}, Batch}
     end.
 
 
@@ -180,7 +180,7 @@ update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
 %% Usage of this function allows reduction of datastore overhead.
 %% @end
 %%--------------------------------------------------------------------
--spec update_many(ctx(), id(), [{histogram_windows:timestamp(), histogram_windows:value()}], batch()) ->
+-spec update_many(ctx(), collection_id(), [{ts_windows:timestamp(), ts_windows:value()}], batch()) ->
     {ok | {error, term()}, batch()}.
 update_many(_Ctx, _Id, [], Batch) ->
     {ok, Batch};
@@ -196,23 +196,23 @@ update_many(Ctx, Id, [{NewTimestamp, NewValue} | Measurements], Batch) ->
 %% Returns windows for requested ranges. Windows for all metrics from all time series are included in answer.
 %% @end
 %%--------------------------------------------------------------------
--spec get(ctx(), id(), histogram_windows:get_options(), batch() | undefined) ->
+-spec get(ctx(), collection_id(), ts_windows:get_options(), batch() | undefined) ->
     {{ok, windows_map()} | {error, term()}, batch() | undefined}.
 get(Ctx, Id, Options, Batch) ->
     try
-        {TimeSeriesPack, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
+        {TimeSeriesCollection, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
         FillMetricsIds = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
             maps:fold(fun(MetricsId, _Config, InternalAcc) ->
                 [{TimeSeriesId, MetricsId} | InternalAcc]
             end, Acc, MetricsConfigs)
-        end, [], TimeSeriesPack),
-        {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesPack, FillMetricsIds, Options, PersistenceCtx),
-        {{ok, Ans}, histogram_persistence:finalize(FinalPersistenceCtx)}
+        end, [], TimeSeriesCollection),
+        {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesCollection, FillMetricsIds, Options, PersistenceCtx),
+        {{ok, Ans}, ts_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace when Reason =/= {fetch_error, not_found} ->
-            ?error_stacktrace("Histogram ~p get error: ~p:~p~nOptions: ~p",
+            ?error_stacktrace("Time series collection ~p get error: ~p:~p~nOptions: ~p",
                 [Id, Error, Reason, Options], Stacktrace),
-            {{error, histogram_get_failed}, Batch}
+            {{error, get_failed}, Batch}
     end.
 
 
@@ -222,31 +222,31 @@ get(Ctx, Id, Options, Batch) ->
 %% Otherwise, map containing list of windows for each requested metric is returned.
 %% @end
 %%--------------------------------------------------------------------
--spec get(ctx(), id(), request_range(), histogram_windows:get_options(), batch() | undefined) ->
-    {{ok, [histogram_windows:window()] | windows_map()} | {error, term()}, batch() | undefined}.
+-spec get(ctx(), collection_id(), request_range(), ts_windows:get_options(), batch() | undefined) ->
+    {{ok, [ts_windows:window()] | windows_map()} | {error, term()}, batch() | undefined}.
 get(Ctx, Id, RequestedMetrics, Options, Batch) ->
     try
-        {TimeSeriesPack, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
-        {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesPack, RequestedMetrics, Options, PersistenceCtx),
-        {{ok, Ans}, histogram_persistence:finalize(FinalPersistenceCtx)}
+        {TimeSeriesCollection, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+        {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesCollection, RequestedMetrics, Options, PersistenceCtx),
+        {{ok, Ans}, ts_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace when Reason =/= {fetch_error, not_found} ->
-            ?error_stacktrace("Histogram ~p get error: ~p:~p~nRequested metrics: ~p~nOptions: ~p",
+            ?error_stacktrace("Time series collection ~p get error: ~p:~p~nRequested metrics: ~p~nOptions: ~p",
                 [Id, Error, Reason, RequestedMetrics, Options], Stacktrace),
-            {{error, histogram_get_failed}, Batch}
+            {{error, get_failed}, Batch}
     end.
 
 
--spec delete(ctx(), id(), batch() ) -> {ok | {error, term()}, batch()}.
+-spec delete(ctx(), collection_id(), batch() ) -> {ok | {error, term()}, batch()}.
 delete(Ctx, Id, Batch) ->
     try
-        {TimeSeriesPack, PersistenceCtx} = histogram_persistence:init_for_existing_histogram(Ctx, Id, Batch),
-        FinalPersistenceCtx = delete(maps:to_list(TimeSeriesPack), PersistenceCtx),
-        {ok, histogram_persistence:finalize(FinalPersistenceCtx)}
+        {TimeSeriesCollection, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+        FinalPersistenceCtx = delete(maps:to_list(TimeSeriesCollection), PersistenceCtx),
+        {ok, ts_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace when Reason =/= {fetch_error, not_found} ->
-            ?error_stacktrace("Histogram ~p delete error: ~p:~p", [Id, Error, Reason], Stacktrace),
-            {{error, histogram_delete_failed}, Batch}
+            ?error_stacktrace("Time series collection ~p delete error: ~p:~p", [Id, Error, Reason], Stacktrace),
+            {{error, delete_failed}, Batch}
     end.
 
 
@@ -254,13 +254,13 @@ delete(Ctx, Id, Batch) ->
 %% Internal functions
 %%=====================================================================
 
--spec filter_time_series_pack(time_series_pack(), request_range()) -> time_series_pack().
-filter_time_series_pack(_TimeSeriesPack, []) ->
+-spec filter_collection(collection(), request_range()) -> collection().
+filter_collection(_TimeSeriesCollection, []) ->
     #{};
 
-filter_time_series_pack(TimeSeriesPack, [{TimeSeriesId, MetricIds} | Tail]) ->
-    Ans = filter_time_series_pack(TimeSeriesPack, Tail),
-    case maps:get(TimeSeriesId, TimeSeriesPack, undefined) of
+filter_collection(TimeSeriesCollection, [{TimeSeriesId, MetricIds} | Tail]) ->
+    Ans = filter_collection(TimeSeriesCollection, Tail),
+    case maps:get(TimeSeriesId, TimeSeriesCollection, undefined) of
         undefined ->
             Ans;
         TimeSeries ->
@@ -277,75 +277,74 @@ filter_time_series_pack(TimeSeriesPack, [{TimeSeriesId, MetricIds} | Tail]) ->
             end
     end;
 
-filter_time_series_pack(TimeSeriesPack, [TimeSeriesId | Tail]) ->
-    Ans = filter_time_series_pack(TimeSeriesPack, Tail),
-    case maps:get(TimeSeriesId, TimeSeriesPack, undefined) of
+filter_collection(TimeSeriesCollection, [TimeSeriesId | Tail]) ->
+    Ans = filter_collection(TimeSeriesCollection, Tail),
+    case maps:get(TimeSeriesId, TimeSeriesCollection, undefined) of
         undefined -> Ans;
         TimeSeries -> maps:put(TimeSeriesId, TimeSeries, Ans)
     end;
 
-filter_time_series_pack(TimeSeriesPack, ToBeIncluded) ->
-    filter_time_series_pack(TimeSeriesPack, [ToBeIncluded]).
+filter_collection(TimeSeriesCollection, ToBeIncluded) ->
+    filter_collection(TimeSeriesCollection, [ToBeIncluded]).
 
 
--spec update_time_series([{time_series_id(), time_series()}], histogram_windows:timestamp(), 
-    histogram_windows:value(), histogram_persistence:ctx()) -> histogram_persistence:ctx().
+-spec update_time_series([{time_series_id(), time_series()}], ts_windows:timestamp(),
+    ts_windows:value(), ts_persistence:ctx()) -> ts_persistence:ctx().
 update_time_series([], _NewTimestamp, _NewValue, PersistenceCtx) ->
     PersistenceCtx;
 
 update_time_series([{TimeSeriesId, TimeSeries} | Tail], NewTimestamp, NewValue, PersistenceCtx) ->
-    PersistenceCtxWithIdSet = histogram_persistence:set_active_time_series(TimeSeriesId, PersistenceCtx),
+    PersistenceCtxWithIdSet = ts_persistence:set_active_time_series(TimeSeriesId, PersistenceCtx),
     UpdatedPersistenceCtx = update_metrics(maps:to_list(TimeSeries), NewTimestamp, NewValue, PersistenceCtxWithIdSet),
     update_time_series(Tail, NewTimestamp, NewValue, UpdatedPersistenceCtx).
 
 
--spec update_metrics([{histogram_metric:id(), histogram_metric:metric()}], histogram_windows:timestamp(),
-    histogram_windows:value(), histogram_persistence:ctx()) -> histogram_persistence:ctx().
+-spec update_metrics([{ts_metric:id(), ts_metric:metric()}], ts_windows:timestamp(),
+    ts_windows:value(), ts_persistence:ctx()) -> ts_persistence:ctx().
 update_metrics([], _NewTimestamp, _NewValue, PersistenceCtx) ->
     PersistenceCtx;
 update_metrics([{MetricId, Metric} | Tail], NewTimestamp, NewValue, PersistenceCtx) ->
-    UpdatedPersistenceCtx = histogram_persistence:set_active_metric(MetricId, PersistenceCtx),
-    FinalPersistenceCtx = histogram_metric:update(Metric, NewTimestamp, NewValue, UpdatedPersistenceCtx),
+    UpdatedPersistenceCtx = ts_persistence:set_active_metric(MetricId, PersistenceCtx),
+    FinalPersistenceCtx = ts_metric:update(Metric, NewTimestamp, NewValue, UpdatedPersistenceCtx),
     update_metrics(Tail, NewTimestamp, NewValue, FinalPersistenceCtx).
 
 
--spec get_internal(time_series_pack(), request_range(),
-    histogram_windows:get_options(), histogram_persistence:ctx()) ->
-    {[histogram_windows:window()] | windows_map(), histogram_persistence:ctx()}.
-get_internal(_TimeSeriesPack, [], _Options, PersistenceCtx) ->
+-spec get_internal(collection(), request_range(), ts_windows:get_options(), ts_persistence:ctx()) ->
+    {[ts_windows:window()] | windows_map(), ts_persistence:ctx()}.
+get_internal(_TimeSeriesCollection, [], _Options, PersistenceCtx) ->
     {#{}, PersistenceCtx};
 
-get_internal(TimeSeriesPack, [{TimeSeriesIds, MetricIds} | RequestedMetrics], Options, PersistenceCtx) ->
+get_internal(TimeSeriesCollection, [{TimeSeriesIds, MetricIds} | RequestedMetrics], Options, PersistenceCtx) ->
     {Ans, UpdatedPersistenceCtx} = lists:foldl(fun(TimeSeriesId, Acc) ->
-        MetricsMap = maps:get(TimeSeriesId, TimeSeriesPack, #{}),
+        MetricsMap = maps:get(TimeSeriesId, TimeSeriesCollection, #{}),
         lists:foldl(fun(MetricId, {TmpAns, TmpPersistenceCtx}) ->
             {Values, UpdatedTmpPersistenceCtx} = case maps:get(MetricId, MetricsMap, undefined) of
                 undefined -> {undefined, TmpPersistenceCtx};
-                Metric -> histogram_metric:get(Metric, Options, TmpPersistenceCtx)
+                Metric -> ts_metric:get(Metric, Options, TmpPersistenceCtx)
             end,
             {TmpAns#{{TimeSeriesId, MetricId} => Values}, UpdatedTmpPersistenceCtx}
         end, Acc, utils:ensure_list(MetricIds))
     end, {#{}, PersistenceCtx}, utils:ensure_list(TimeSeriesIds)),
 
-    {Ans2, FinalPersistenceCtx} = get_internal(TimeSeriesPack, RequestedMetrics, Options, UpdatedPersistenceCtx),
+    {Ans2, FinalPersistenceCtx} = get_internal(TimeSeriesCollection, RequestedMetrics, Options, UpdatedPersistenceCtx),
     {maps:merge(Ans, Ans2), FinalPersistenceCtx};
 
-get_internal(TimeSeriesPack, [TimeSeriesId | RequestedMetrics], Options, PersistenceCtx) ->
-    {Ans, UpdatedPersistenceCtx} = case maps:get(TimeSeriesId, TimeSeriesPack, undefined) of
+get_internal(TimeSeriesCollection, [TimeSeriesId | RequestedMetrics], Options, PersistenceCtx) ->
+    {Ans, UpdatedPersistenceCtx} = case maps:get(TimeSeriesId, TimeSeriesCollection, undefined) of
         undefined ->
             {#{TimeSeriesId => undefined}, PersistenceCtx};
         MetricsMap ->
             lists:foldl(fun({MetricId, Metric}, {TmpAns, TmpPersistenceCtx}) ->
-                {Values, UpdatedTmpPersistenceCtx} = histogram_metric:get(Metric, Options, TmpPersistenceCtx),
+                {Values, UpdatedTmpPersistenceCtx} = ts_metric:get(Metric, Options, TmpPersistenceCtx),
                 {TmpAns#{{TimeSeriesId, MetricId} => Values}, UpdatedTmpPersistenceCtx}
             end, {#{}, PersistenceCtx}, maps:to_list(MetricsMap))
     end,
 
-    {Ans2, FinalPersistenceCtx} = get_internal(TimeSeriesPack, RequestedMetrics, Options, UpdatedPersistenceCtx),
+    {Ans2, FinalPersistenceCtx} = get_internal(TimeSeriesCollection, RequestedMetrics, Options, UpdatedPersistenceCtx),
     {maps:merge(Ans, Ans2), FinalPersistenceCtx};
 
-get_internal(TimeSeriesPack, Request, Options, PersistenceCtx) ->
-    {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesPack, [Request], Options, PersistenceCtx),
+get_internal(TimeSeriesCollection, Request, Options, PersistenceCtx) ->
+    {Ans, FinalPersistenceCtx} = get_internal(TimeSeriesCollection, [Request], Options, PersistenceCtx),
     case maps:is_key(Request, Ans) of
         true ->
             % Single key is requested - return value for the key instead of map
@@ -355,20 +354,20 @@ get_internal(TimeSeriesPack, Request, Options, PersistenceCtx) ->
     end.
 
 
--spec delete([{time_series_id(), time_series()}], histogram_persistence:ctx()) -> histogram_persistence:ctx().
+-spec delete([{time_series_id(), time_series()}], ts_persistence:ctx()) -> ts_persistence:ctx().
 delete([], PersistenceCtx) ->
-    histogram_persistence:delete_hub(PersistenceCtx);
+    ts_persistence:delete_hub(PersistenceCtx);
 delete([{_TimeSeriesId, TimeSeries} | Tail], PersistenceCtx) ->
     UpdatedPersistenceCtx = delete_metric(maps:to_list(TimeSeries), PersistenceCtx),
     delete(Tail, UpdatedPersistenceCtx).
 
 
--spec delete_metric([{histogram_metric:id(), histogram_metric:metric()}], histogram_persistence:ctx()) ->
-    histogram_persistence:ctx().
+-spec delete_metric([{ts_metric:id(), ts_metric:metric()}], ts_persistence:ctx()) ->
+    ts_persistence:ctx().
 delete_metric([], PersistenceCtx) ->
     PersistenceCtx;
 delete_metric([{_MetricId, Metric} | Tail], PersistenceCtx) ->
-    UpdatedPersistenceCtx = histogram_metric:delete(Metric, PersistenceCtx),
+    UpdatedPersistenceCtx = ts_metric:delete(Metric, PersistenceCtx),
     delete_metric(Tail, UpdatedPersistenceCtx).
 
 
@@ -376,8 +375,7 @@ delete_metric([{_MetricId, Metric} | Tail], PersistenceCtx) ->
 %% Helper functions creating splitting strategy
 %%=====================================================================
 
--spec create_doc_splitting_strategies(time_series_config()) ->
-    #{full_metric_id() => histogram_metric:splitting_strategy()}.
+-spec create_doc_splitting_strategies(collection_config()) -> #{full_metric_id() => ts_metric:splitting_strategy()}.
 create_doc_splitting_strategies(ConfigMap) ->
     FlattenedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
         maps:fold(fun

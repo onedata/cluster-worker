@@ -6,29 +6,30 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Helper module to histogram_persistence operating on histogram
-%%% hub node that stores heads of each metric's #data{} records linked list
-%%% (see histogram_persistence module).
+%%% Helper module to ts_persistence operating on time series
+%%% metric data node. Each time series metric data node is connected with
+%%% singe metric. Values that exceeds time series hub capacity for particular
+%%% metric are stored in list of time series metric data nodes
+%%% (capacity of single time series metric data node is also limited so more
+%%% than one time series metric data node may be needed - see ts_persistence module).
 %%% @end
 %%%-------------------------------------------------------------------
--module(histogram_hub).
+-module(ts_metric_data).
 -author("Michal Wrzeszcz").
 
--include("modules/datastore/metric_config.hrl").
-
 %% API
--export([set_time_series_pack/1, get_time_series_pack/1]).
+-export([set_data/1, get_data/1]).
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
 
--record(histogram_hub, {
-    time_series_pack :: histogram_time_series:time_series_pack()
+-record(ts_metric_data, {
+    data :: ts_metric:data()
 }).
 
--type record() :: #histogram_hub{}.
+-type record() :: #ts_metric_data{}.
 
 % Context used only by datastore to initialize internal structures.
-% Context provided via histogram_time_series module functions
+% Context provided via time_series module functions
 % overrides it in other cases.
 -define(CTX, #{
     model => ?MODULE,
@@ -40,13 +41,13 @@
 %%% API
 %%%===================================================================
 
--spec set_time_series_pack(histogram_time_series:time_series_pack()) -> record().
-set_time_series_pack(TimeSeriesPack) ->
-    #histogram_hub{time_series_pack = TimeSeriesPack}.
+-spec set_data(ts_metric:data()) -> record().
+set_data(Data) ->
+    #ts_metric_data{data = Data}.
 
--spec get_time_series_pack(record()) -> histogram_time_series:time_series_pack().
-get_time_series_pack(#histogram_hub{time_series_pack = TimeSeriesPack}) ->
-    TimeSeriesPack.
+-spec get_data(record()) -> ts_metric:data().
+get_data(#ts_metric_data{data = Data}) ->
+    Data.
 
 %%%===================================================================
 %%% datastore_model callbacks
@@ -65,20 +66,10 @@ get_ctx() ->
 -spec get_record_struct(datastore_model:record_version()) ->
     datastore_model:record_struct().
 get_record_struct(1) ->
-    {record, [DataRecordStruct]} = histogram_metric_data:get_record_struct(1),
     {record, [
-        {time_series, #{string => #{string => {record, [
-            {config, {record, [
-                {legend, binary},
-                {resolution, integer},
-                {retention, integer},
-                {aggregator, atom}
-            ]}},
-            {splitting_strategy, {record, [
-                {max_docs_count, integer},
-                {max_windows_in_head_doc, integer},
-                {max_windows_in_tail_doc, integer}
-            ]}},
-            DataRecordStruct
-        ]}}}}
+        {data, {record, [
+            {windows, {custom, json, {ts_windows, encode, decode}}},
+            {prev_record, string},
+            {prev_record_timestamp, integer}
+        ]}}
     ]}.

@@ -158,33 +158,33 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_infinite_log:set_ttl(Ctx, Key, Ttl)
         end},
-        {histogram_create, fun(Id, ConfigMap) ->
+        {time_series_create, fun(Id, ConfigMap) ->
             Ctx = get_ctx(Model),
-            datastore_histogram:create(Ctx, Id, ConfigMap)
+            datastore_time_series:create(Ctx, Id, ConfigMap)
         end},
-        {histogram_update, fun(Id, NewTimestamp, ValueOrUpdateRange) ->
+        {time_series_update, fun(Id, NewTimestamp, ValueOrUpdateRange) ->
             Ctx = get_ctx(Model),
-            datastore_histogram:update(Ctx, Id, NewTimestamp, ValueOrUpdateRange)
+            datastore_time_series:update(Ctx, Id, NewTimestamp, ValueOrUpdateRange)
         end},
-        {histogram_update, fun(Id, NewTimestamp, MetricsToUpdate, NewValue) ->
+        {time_series_update, fun(Id, NewTimestamp, MetricsToUpdate, NewValue) ->
             Ctx = get_ctx(Model),
-            datastore_histogram:update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue)
+            datastore_time_series:update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue)
         end},
-        {histogram_update_many, fun(Id, Measurements) ->
+        {time_series_update_many, fun(Id, Measurements) ->
             Ctx = get_ctx(Model),
-            datastore_histogram:update_many(Ctx, Id, Measurements)
+            datastore_time_series:update_many(Ctx, Id, Measurements)
         end},
-        {histogram_get, fun(Id, Options) ->
+        {time_series_get, fun(Id, Options) ->
             Ctx = get_ctx(Model),
-            datastore_histogram:get(Ctx, Id, Options)
+            datastore_time_series:get(Ctx, Id, Options)
         end},
-        {histogram_get, fun(Id, RequestedMetrics, Options) ->
+        {time_series_get, fun(Id, RequestedMetrics, Options) ->
             Ctx = get_ctx(Model),
-            datastore_histogram:get(Ctx, Id, RequestedMetrics, Options)
+            datastore_time_series:get(Ctx, Id, RequestedMetrics, Options)
         end},
-        {histogram_delete, fun(Id) ->
+        {time_series_delete, fun(Id) ->
             Ctx = get_ctx(Model),
-            datastore_histogram:delete(Ctx, Id)
+            datastore_time_series:delete(Ctx, Id)
         end}
     ]).
 
