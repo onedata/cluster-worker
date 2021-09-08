@@ -39,9 +39,7 @@ ts_test_() ->
             {timeout, 300, fun single_time_series_multiple_nodes/0},
             fun multiple_time_series_single_node/0,
             {timeout, 300, fun multiple_time_series_multiple_nodes/0},
-            fun update_subset/0,
-            fun single_doc_splitting_strategies_create/0,
-            fun multiple_metrics_splitting_strategies_create/0
+            fun update_subset/0
         ]
     }.
 
@@ -444,120 +442,9 @@ update_subset() ->
     ?assertMatch(?GET_OK_ANS(GetAllExpected), ?GET(Id, GetAllArg, Batch10)).
 
 
-single_doc_splitting_strategies_create() ->
-    Id = datastore_key:new(),
-    Batch = datastore_doc_batch:init(),
-    ConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0}}},
-    ?assertEqual({{error, empty_metric}, Batch}, time_series:create(#{}, Id, ConfigMap, Batch)),
-    ConfigMap2 = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = 0}}},
-    ?assertEqual({{error, wrong_resolution}, Batch}, time_series:create(#{}, Id, ConfigMap2, Batch)),
-
-    single_doc_splitting_strategies_create_testcase(10, 10, 0, 1),
-    single_doc_splitting_strategies_create_testcase(2000, 2000, 0, 1),
-    single_doc_splitting_strategies_create_testcase(2100, 2000, 2000, 4),
-    single_doc_splitting_strategies_create_testcase(3100, 2000, 2000, 5),
-    single_doc_splitting_strategies_create_testcase(6500, 2000, 2000, 8).
-
-
-multiple_metrics_splitting_strategies_create() ->
-    multiple_metrics_splitting_strategies_create_testcase(10, 20, 30,
-        #splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 10, max_windows_in_tail_doc = 0},
-        #splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 20, max_windows_in_tail_doc = 0},
-        #splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 30, max_windows_in_tail_doc = 0}),
-
-    multiple_metrics_splitting_strategies_create_testcase(10, 2000, 30,
-        #splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 10, max_windows_in_tail_doc = 0},
-        #splitting_strategy{max_docs_count = 3, max_windows_in_head_doc = 1960, max_windows_in_tail_doc = 2000},
-        #splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 30, max_windows_in_tail_doc = 0}),
-
-    multiple_metrics_splitting_strategies_create_testcase(10, 6000, 30,
-        #splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 10, max_windows_in_tail_doc = 0},
-        #splitting_strategy{max_docs_count = 7, max_windows_in_head_doc = 1960, max_windows_in_tail_doc = 2000},
-        #splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 30, max_windows_in_tail_doc = 0}),
-
-    multiple_metrics_splitting_strategies_create_testcase(1000, 1000, 30,
-        #splitting_strategy{max_docs_count = 2, max_windows_in_head_doc = 985, max_windows_in_tail_doc = 2000},
-        #splitting_strategy{max_docs_count = 2, max_windows_in_head_doc = 985, max_windows_in_tail_doc = 2000},
-        #splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 30, max_windows_in_tail_doc = 0}),
-
-    multiple_metrics_splitting_strategies_create_testcase(900, 1500, 300,
-        #splitting_strategy{max_docs_count = 2, max_windows_in_head_doc = 850, max_windows_in_tail_doc = 1800},
-        #splitting_strategy{max_docs_count = 3, max_windows_in_head_doc = 850, max_windows_in_tail_doc = 1500},
-        #splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 300, max_windows_in_tail_doc = 0}),
-
-    ConfigMap = #{<<"TS1">> => #{
-        <<"M1">> => #metric_config{retention = 3000},
-        <<"M2">> => #metric_config{retention = 4000},
-        <<"M3">> => #metric_config{retention = 5500}
-    }},
-    ExpectedMap = #{
-        {<<"TS1">>, <<"M1">>} => #splitting_strategy{
-            max_docs_count = 4, max_windows_in_head_doc = 667, max_windows_in_tail_doc = 2000},
-        {<<"TS1">>, <<"M2">>} => #splitting_strategy{
-            max_docs_count = 5, max_windows_in_head_doc = 667, max_windows_in_tail_doc = 2000},
-        {<<"TS1">>, <<"M3">>} => #splitting_strategy{
-            max_docs_count = 7, max_windows_in_head_doc = 666, max_windows_in_tail_doc = 2000}
-    },
-    ?assertEqual(ExpectedMap, time_series:create_doc_splitting_strategies(ConfigMap)),
-
-    ConfigMap2 = #{
-        <<"TS1">> => #{
-            <<"M1">> => #metric_config{retention = 3500},
-            <<"M2">> => #metric_config{retention = 4000},
-            <<"M3">> => #metric_config{retention = 5000}
-        },
-        <<"TS2">> => #{
-            <<"M1">> => #metric_config{retention = 3000},
-            <<"M2">> => #metric_config{retention = 10000}
-        }
-    },
-    ExpectedMap2 = #{
-        {<<"TS1">>, <<"M1">>} => #splitting_strategy{
-            max_docs_count = 5, max_windows_in_head_doc = 400, max_windows_in_tail_doc = 2000},
-        {<<"TS1">>, <<"M2">>} => #splitting_strategy{
-            max_docs_count = 5, max_windows_in_head_doc = 400, max_windows_in_tail_doc = 2000},
-        {<<"TS1">>, <<"M3">>} => #splitting_strategy{
-            max_docs_count = 6, max_windows_in_head_doc = 400, max_windows_in_tail_doc = 2000},
-        {<<"TS2">>, <<"M1">>} => #splitting_strategy{
-            max_docs_count = 4, max_windows_in_head_doc = 400, max_windows_in_tail_doc = 2000},
-        {<<"TS2">>, <<"M2">>} => #splitting_strategy{
-            max_docs_count = 11, max_windows_in_head_doc = 400, max_windows_in_tail_doc = 2000}
-    },
-    ?assertEqual(ExpectedMap2, time_series:create_doc_splitting_strategies(ConfigMap2)),
-
-    GetLargeTimeSeries = fun() -> maps:from_list(lists:map(fun(Seq) ->
-        {<<(integer_to_binary(Seq))/binary>>, #metric_config{retention = Seq}}
-    end, lists:seq(1, 1500))) end,
-    ConfigMap3 = #{<<"TS1">> => GetLargeTimeSeries(), <<"TS2">> => GetLargeTimeSeries()},
-    Id = datastore_key:new(),
-    Batch = datastore_doc_batch:init(),
-    ?assertEqual({{error, to_many_metrics}, Batch}, time_series:create(#{}, Id, ConfigMap3, Batch)).
-
 %%%===================================================================
 %%% Helper functions
 %%%===================================================================
-
-single_doc_splitting_strategies_create_testcase(Retention, WindowsInHead, WindowsInTail, DocCount) ->
-    ConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = Retention}}},
-    ExpectedMap = #{{<<"TS1">>, <<"M1">>} => #splitting_strategy{
-        max_docs_count = DocCount, max_windows_in_head_doc = WindowsInHead, max_windows_in_tail_doc = WindowsInTail}},
-    ?assertEqual(ExpectedMap, time_series:create_doc_splitting_strategies(ConfigMap)).
-
-
-multiple_metrics_splitting_strategies_create_testcase(Retention1, Retention2, Retention3,
-    DocSplittingStrategy1, DocSplittingStrategy2, DocSplittingStrategy3) ->
-    ConfigMap = #{<<"TS1">> => #{
-        <<"M1">> => #metric_config{retention = Retention1},
-        <<"M2">> => #metric_config{retention = Retention2},
-        <<"M3">> => #metric_config{retention = Retention3}
-    }},
-    ExpectedMap = #{
-        {<<"TS1">>, <<"M1">>} => DocSplittingStrategy1,
-        {<<"TS1">>, <<"M2">>} => DocSplittingStrategy2,
-        {<<"TS1">>, <<"M3">>} => DocSplittingStrategy3
-    },
-    ?assertEqual(ExpectedMap, time_series:create_doc_splitting_strategies(ConfigMap)).
-
 
 init(Id, ConfigMap) ->
     Batch = datastore_doc_batch:init(),
