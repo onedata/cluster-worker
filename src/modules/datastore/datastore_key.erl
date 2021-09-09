@@ -238,11 +238,13 @@ digest(DigestComponents) ->
     str_utils:md5_digest(DigestComponents).
 
 
+%% @private
 -spec concatenate_chash_label(key(), chash_label()) -> key().
 concatenate_chash_label(BasicKey, CHashLabel) ->
     <<BasicKey/binary, ?CHASH_LABEL_SEPARATOR, CHashLabel/binary>>.
 
 
+%% @private
 -spec to_basic_key_and_chash_label(key()) -> {key(), undefined | chash_label()}.
 to_basic_key_and_chash_label(Key) ->
     BasicKeyLength = byte_size(Key) - ?CHASH_LABEL_SEPARATOR_SIZE - ?CHASH_LABEL_CHARS,

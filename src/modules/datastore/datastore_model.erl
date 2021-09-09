@@ -95,7 +95,7 @@ init(Ctx) ->
 get_unique_key(Model, Key) ->
     datastore_key:build_adjacent(atom_to_binary(Model, utf8), Key).
 
--spec get_generic_key(model(), key()) -> key().
+-spec get_generic_key(model(), key()) -> key() | undefined.
 get_generic_key(Model, Key) ->
     datastore_key:remove_extension(atom_to_binary(Model, utf8), Key).
 
