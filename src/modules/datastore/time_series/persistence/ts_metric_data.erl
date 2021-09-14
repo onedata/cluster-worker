@@ -8,7 +8,7 @@
 %%% @doc
 %%% Helper module to ts_persistence operating on time series
 %%% metric data node. Each time series metric data node is connected with
-%%% singe metric. Values that exceeds time series hub capacity for particular
+%%% singe metric. Values that exceed time series hub capacity for particular
 %%% metric are stored in list of time series metric data nodes
 %%% (capacity of single time series metric data node is also limited so more
 %%% than one time series metric data node may be needed - see ts_persistence module).
@@ -18,15 +18,18 @@
 -author("Michal Wrzeszcz").
 
 %% API
--export([set_data/1, get_data/1]).
+-export([set/1, get/1]).
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
 
 -record(ts_metric_data, {
-    data :: ts_metric:data()
+    value :: ts_metric:data()
 }).
 
 -type record() :: #ts_metric_data{}.
+-type key() :: datastore:key().
+
+-export_type([key/0]).
 
 % Context used only by datastore to initialize internal structures.
 % Context provided via time_series module functions
@@ -41,12 +44,12 @@
 %%% API
 %%%===================================================================
 
--spec set_data(ts_metric:data()) -> record().
-set_data(Data) ->
-    #ts_metric_data{data = Data}.
+-spec set(ts_metric:data()) -> record().
+set(Data) ->
+    #ts_metric_data{value = Data}.
 
--spec get_data(record()) -> ts_metric:data().
-get_data(#ts_metric_data{data = Data}) ->
+-spec get(record()) -> ts_metric:data().
+get(#ts_metric_data{value = Data}) ->
     Data.
 
 %%%===================================================================
@@ -67,7 +70,7 @@ get_ctx() ->
     datastore_model:record_struct().
 get_record_struct(1) ->
     {record, [
-        {data, {record, [
+        {value, {record, [
             {windows, {custom, json, {ts_windows, encode, decode}}},
             {prev_record, string},
             {prev_record_timestamp, integer}

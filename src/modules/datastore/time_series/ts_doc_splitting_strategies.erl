@@ -83,7 +83,7 @@ calculate_windows_in_head_doc_count(FlattenedMap) ->
     MaxValuesInHead = ?MAX_VALUES_IN_DOC,
     case maps:size(FlattenedMap) > MaxValuesInHead of
         true ->
-            throw({error, to_many_metrics});
+            throw({error, too_many_metrics});
         false ->
             NotFullyStoredInHead = maps:map(fun(_, _) -> 0 end, FlattenedMap),
             calculate_windows_in_head_doc_count(#{}, NotFullyStoredInHead, MaxValuesInHead, FlattenedMap)

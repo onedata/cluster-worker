@@ -16,7 +16,7 @@
 
 -export([get/3, exists/3]).
 -export([get_links/5, get_links_trees/3]).
--export([time_series_get/3, infinite_log_operation/4]).
+-export([time_series_list/3, infinite_log_operation/4]).
 
 -type tree_id() :: datastore_links:tree_id().
 -type link() :: datastore_links:link().
@@ -102,17 +102,17 @@ get_links_trees(FetchNode, Ctx, Key) ->
     end.
 
 
--spec time_series_get(node(), datastore_doc:ctx(), list()) ->
+-spec time_series_list(node(), datastore_doc:ctx(), list()) ->
     ok | {ok, [ts_windows:window()] | time_series:windows_map()} | {error, term()}.
-time_series_get(FetchNode, Ctx, Args) ->
+time_series_list(FetchNode, Ctx, Args) ->
     try
-        GetResult = case Args of
+        ListResult = case Args of
             [Id, Options] ->
-                time_series:get(set_direct_access_ctx(FetchNode, Ctx), Id, Options, undefined);
+                time_series:list(set_direct_access_ctx(FetchNode, Ctx), Id, Options, undefined);
             [Id, RequestedMetrics, Options] ->
-                time_series:get(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined)
+                time_series:list(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined)
         end,
-        case GetResult of
+        case ListResult of
             {{ok, Result}, _} ->
                 {ok, Result};
             {{error, Reason}, _} ->
@@ -120,7 +120,7 @@ time_series_get(FetchNode, Ctx, Args) ->
         end
     catch
         throw:{fetch_error, not_found} ->
-            datastore_router:execute_on_node(FetchNode, datastore_writer, time_series_operation, [Ctx, get, Args])
+            datastore_router:execute_on_node(FetchNode, datastore_writer, time_series_operation, [Ctx, list, Args])
     end.
 
 

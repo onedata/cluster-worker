@@ -1072,15 +1072,10 @@ infinite_log_age_pruning_test(Config) ->
 time_series_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
-        Id = datastore_key:new(),
-        ConfigMap = lists:foldl(fun(N, Acc) ->
-            TimeSeries = <<"TS", (N rem 2)>>,
-            MetricsMap = maps:get(TimeSeries, Acc, #{}),
-            MetricsConfig = #metric_config{resolution = N, retention = 600 div N + 10, aggregator = sum},
-            Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
-        end, #{}, lists:seq(1, 5)),
-        ?assertEqual(ok, rpc:call(Worker, Model, time_series_create, [Id, ConfigMap])),
+        {Id, ConfigMap} = create_time_series(Worker, Model,
+            fun(N) -> #metric_config{resolution = N, retention = 600 div N + 10, aggregator = sum} end),
 
+        % Prepare time series collection to be used if tests
         MeasurementsCount = 1199,
         Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementsCount)),
 
@@ -1092,6 +1087,8 @@ time_series_test(Config) ->
                 ?assertEqual(ok, rpc:call(Worker, Model, time_series_update, [Id, NewTimestamp, <<"TS", 1>>, NewValue]))
         end, Measurements),
 
+        % Prepare expected answer (measurements are arithmetic sequence so values of windows
+        % are calculated using formula for the sum of an arithmetic sequence)
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
             maps:fold(fun(MetricsId, #metric_config{resolution = Resolution, retention = Retention}, InternalAcc) ->
                 InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(lists:reverse(lists:map(fun(N) ->
@@ -1099,8 +1096,10 @@ time_series_test(Config) ->
                 end, lists:seq(0, MeasurementsCount, Resolution))), Retention)}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
-        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_get, [Id, #{}])),
-        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_get, [Id, maps:keys(ExpectedMap), #{}]))
+
+        % Test getting all metrics
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_list, [Id, #{}])),
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_list, [Id, maps:keys(ExpectedMap), #{}]))
     end, ?TEST_MODELS).
 
 
@@ -1108,19 +1107,15 @@ multinode_time_series_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         InitialKeys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)),
-        Id = datastore_key:new(),
-        ConfigMap = lists:foldl(fun(N, Acc) ->
-            TimeSeries = <<"TS", (N rem 2)>>,
-            MetricsMap = maps:get(TimeSeries, Acc, #{}),
-            MetricsConfig = #metric_config{resolution = 1, retention = 10000 * N, aggregator = last},
-            Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
-        end, #{}, lists:seq(1, 5)),
-        ?assertEqual(ok, rpc:call(Worker, Model, time_series_create, [Id, ConfigMap])),
+        {Id, ConfigMap} = create_time_series(Worker, Model,
+            fun(N) -> #metric_config{resolution = 1, retention = 10000 * N, aggregator = last} end),
 
+        % Prepare time series collection to be used if tests
         MeasurementsCount = 610000,
         Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
         ?assertEqual(ok, rpc:call(Worker, Model, time_series_update_many, [Id, Measurements])),
 
+        % Prepare expected answer
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
             maps:fold(fun(MetricsId, #metric_config{retention = Retention}, InternalAcc) ->
@@ -1128,9 +1123,12 @@ multinode_time_series_test(Config) ->
                     lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
-        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_get, [Id, #{}])),
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_list, [Id, #{}])),
 
+        % Test getting all metrics
         Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
+
+        % Verify if delete clears all documents from datastore
         ?assertMatch(ok, rpc:call(Worker, Model, time_series_delete, [Id])),
         lists:foreach(fun(Key) ->
             assert_key_not_in_memory(Worker, Model, Key)
@@ -1142,22 +1140,20 @@ time_series_document_fetch_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         InitialKeys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)),
-        Id = datastore_key:new(),
-        ConfigMap = lists:foldl(fun(N, Acc) ->
-            TimeSeries = <<"TS", (N rem 2)>>,
-            MetricsMap = maps:get(TimeSeries, Acc, #{}),
+        {Id, ConfigMap} = create_time_series(Worker, Model, fun(N) ->
             ApplyFun = case N of
                 5 -> sum;
                 _ -> last
             end,
-            MetricsConfig = #metric_config{resolution = 1, retention = 10000 * N, aggregator = ApplyFun},
-            Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
-        end, #{}, lists:seq(1, 5)),
-        ?assertEqual(ok, rpc:call(Worker, Model, time_series_create, [Id, ConfigMap])),
+            #metric_config{resolution = 1, retention = 10000 * N, aggregator = ApplyFun}
+        end),
 
+        % Prepare time series collection to be used if tests
         MeasurementsCount = 610000,
         Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
+        ?assertEqual(ok, rpc:call(Worker, Model, time_series_update_many, [Id, Measurements])),
 
+        % Prepare expected answer
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
             maps:fold(fun
@@ -1171,20 +1167,21 @@ time_series_document_fetch_test(Config) ->
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
 
-        ?assertEqual(ok, rpc:call(Worker, Model, time_series_update_many, [Id, Measurements])),
+        % Test getting all metrics
         Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
 
+        % Test if documents deleted from disc are fetched when needed
         lists:foreach(fun(Key) ->
             assert_key_on_disc(Worker, Model, Key, false),
             MemCtx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
 
             ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
             assert_key_not_in_memory(Worker, Model, Key),
-            ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_get, [Id, #{}])),
+            ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_list, [Id, #{}])),
 
             ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
             assert_key_not_in_memory(Worker, Model, Key),
-            ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_get, [Id, maps:keys(ExpectedMap), #{}]))
+            ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_list, [Id, maps:keys(ExpectedMap), #{}]))
         end, Keys)
     end, ?TEST_CACHED_MODELS).
 
@@ -2148,3 +2145,16 @@ measure_execution_time(Fun) ->
     Stopwatch = stopwatch:start(),
     Ans = Fun(),
     {Ans, stopwatch:read_millis(Stopwatch)}.
+
+
+%% @private
+create_time_series(Worker, Model, CreateMetricConfigFun) ->
+    Id = datastore_key:new(),
+    ConfigMap = lists:foldl(fun(N, Acc) ->
+        TimeSeries = <<"TS", (N rem 2)>>,
+        MetricsMap = maps:get(TimeSeries, Acc, #{}),
+        MetricsConfig = CreateMetricConfigFun(N),
+        Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
+    end, #{}, lists:seq(1, 5)),
+    ?assertEqual(ok, rpc:call(Worker, Model, time_series_create, [Id, ConfigMap])),
+    {Id, ConfigMap}.

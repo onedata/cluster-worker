@@ -80,8 +80,8 @@ route(Function, [Ctx | Args] = OriginalArgs) ->
     end.
 
 -spec route_time_series_operation(atom(), list()) -> term().
-route_time_series_operation(get, [Ctx | Args]) ->
-    route_internal(datastore_reader, time_series_get, Ctx, [Args]);
+route_time_series_operation(list, [Ctx | Args]) ->
+    route_internal(datastore_reader, time_series_list, Ctx, [Args]);
 route_time_series_operation(Function, [Ctx | Args]) ->
     route_internal(datastore_writer, time_series_operation, Ctx, [Function, Args]).
 

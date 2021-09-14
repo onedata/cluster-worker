@@ -21,7 +21,7 @@
 % first record (head).
 -record(data, {
     windows = ts_windows:init() :: ts_windows:windows(),
-    prev_record :: ts_metric:key() | undefined,
+    prev_record :: ts_metric_data:key() | undefined,
     % Timestamp of newest measurement in previous record
     prev_record_timestamp :: ts_windows:timestamp() | undefined
 }).
@@ -37,14 +37,14 @@
 }).
 
 
-% Record describing single metric. It stores config, splitting_strategy (see above) and head of
-% list of #data{} records.
+% Record describing single metric that is part of time series (see time_series.erl).
+% It stores config, splitting_strategy (see above) and head of list of #data{} records.
 -record(metric, {
     config :: ts_metric:config(),
     % NOTE: splitting strategy may result in keeping more windows than required by config
     % (in order to optimize documents management)
     splitting_strategy :: ts_metric:splitting_strategy(),
-    data = #data{} :: ts_metric:data()
+    head_data = #data{} :: ts_metric:data()
 }).
 
 -endif.

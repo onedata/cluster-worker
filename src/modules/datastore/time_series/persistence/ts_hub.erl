@@ -17,15 +17,19 @@
 -include("modules/datastore/ts_metric_config.hrl").
 
 %% API
--export([set_time_series_collection/1, get_time_series_collection/1]).
+-export([set_time_series_heads/1, get_time_series_heads/1]).
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
 
 -record(ts_hub, {
-    time_series_collection :: time_series:collection()
+    time_series_heads :: time_series_heads_collection()
 }).
 
 -type record() :: #ts_hub{}.
+-type time_series_heads() :: #{ts_metric:id() => ts_metric:metric()}.
+-type time_series_heads_collection() :: #{time_series:time_series_id() => time_series_heads()}.
+
+-export_type([time_series_heads/0, time_series_heads_collection/0]).
 
 % Context used only by datastore to initialize internal structures.
 % Context provided via time_series module functions
@@ -40,13 +44,13 @@
 %%% API
 %%%===================================================================
 
--spec set_time_series_collection(time_series:collection()) -> record().
-set_time_series_collection(TimeSeriesCollection) ->
-    #ts_hub{time_series_collection = TimeSeriesCollection}.
+-spec set_time_series_heads(time_series_heads_collection()) -> record().
+set_time_series_heads(TimeSeriesHeadsCollection) ->
+    #ts_hub{time_series_heads = TimeSeriesHeadsCollection}.
 
--spec get_time_series_collection(record()) -> time_series:collection().
-get_time_series_collection(#ts_hub{time_series_collection = TimeSeriesCollection}) ->
-    TimeSeriesCollection.
+-spec get_time_series_heads(record()) -> time_series_heads_collection().
+get_time_series_heads(#ts_hub{time_series_heads = TimeSeriesHeadsCollection}) ->
+    TimeSeriesHeadsCollection.
 
 %%%===================================================================
 %%% datastore_model callbacks
@@ -67,7 +71,7 @@ get_ctx() ->
 get_record_struct(1) ->
     {record, [DataRecordStruct]} = ts_metric_data:get_record_struct(1),
     {record, [
-        {time_series, #{string => #{string => {record, [
+        {time_series_heads, #{string => #{string => {record, [
             {config, {record, [
                 {legend, binary},
                 {resolution, integer},

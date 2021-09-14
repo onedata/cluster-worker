@@ -14,7 +14,7 @@
 -author("Michal Wrzeszcz").
 
 %% API
--export([create/3, update/4, update/5, update_many/3, get/3, get/4, delete/2]).
+-export([create/3, update/4, update/5, update_many/3, list/3, list/4, delete/2]).
 
 -type ctx() :: datastore_model:ctx().
 
@@ -67,22 +67,22 @@ update_many(Ctx, Id, Measurements) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns windows for requested ranges. Windows for all metrics from all time series are included in
-%% answer - see time_series:get/4.
+%% answer - see time_series:list/4.
 %% @end
 %%--------------------------------------------------------------------
--spec get(ctx(), time_series:collection_id(), ts_windows:get_options()) -> ok | {error, term()}.
-get(Ctx, Id, Options) ->
+-spec list(ctx(), time_series:collection_id(), ts_windows:list_options()) -> ok | {error, term()}.
+list(Ctx, Id, Options) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_operation/4, [?FUNCTION_NAME, [Options]]).
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns windows for requested ranges for chosen metrics - see time_series:get/5.
+%% Returns windows for requested ranges for chosen metrics - see time_series:list/5.
 %% @end
 %%--------------------------------------------------------------------
--spec get(ctx(), time_series:collection_id(), time_series:request_range(),
-    ts_windows:get_options()) -> ok | {error, term()}.
-get(Ctx, Id, RequestedMetrics, Options) ->
+-spec list(ctx(), time_series:collection_id(), time_series:request_range(),
+    ts_windows:list_options()) -> ok | {error, term()}.
+list(Ctx, Id, RequestedMetrics, Options) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_operation/4,
         [?FUNCTION_NAME, [RequestedMetrics, Options]]).
 
