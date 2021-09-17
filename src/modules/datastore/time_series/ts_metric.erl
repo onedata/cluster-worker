@@ -6,18 +6,18 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Helper module for time_series module operating on single metric.
-%%% Metric is described by #metric{} record containing among others
-%%% #data{} records that stores windows. If there are too many windows
-%%% to store in single #data{} record, further #data{} records are added
+%%% Helper module for time_series_collection module operating on single
+%%% metric. Metric is described by #metric{} record containing among others
+%%% #data_node{} records that stores windows. If there are too many windows
+%%% to store in single #data_node{} record, further #data_node{} records are added
 %%% forming linked list of records. ts_persistence module is then
-%%% responsible for persisting #metric{} and #data{} records into datastore.
+%%% responsible for persisting #metric{} and #data_node{} records into datastore.
 %%%
-%%% NOTE: first record (head) of #data{} records linked list is unique as it
+%%% NOTE: first record (head) of #data_node{} records linked list is unique as it
 %%% is stored inside #metric{} record and all #metric{} records are
 %%% persisted in single datastore document (see ts_persistence).
-%%% Thus, capacity of head record and other (tail) #data{} records can differ.
-%%% Other records (tail) of #data{} records linked list are not wrapped
+%%% Thus, capacity of head record and other (tail) #data_node{} records can differ.
+%%% Other records (tail) of #data_node{} records linked list are not wrapped
 %%% in #metric{} record.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -37,9 +37,9 @@
 -type legend() :: binary().
 -type config() :: #metric_config{}.
 -type splitting_strategy() :: #splitting_strategy{}.
--type data() :: #data{}.
+-type data_node() :: #data_node{}.
 
--export_type([id/0, metric/0, legend/0, config/0, splitting_strategy/0, data/0]).
+-export_type([id/0, metric/0, legend/0, config/0, splitting_strategy/0, data_node/0]).
 
 %%%===================================================================
 %%% API
@@ -52,7 +52,7 @@ update(#metric{
     splitting_strategy = DocSplittingStrategy,
     head_data = Data
 }, NewTimestamp, NewValue, PersistenceCtx) ->
-    WindowToBeUpdated = get_window(NewTimestamp, Config),
+    WindowToBeUpdated = get_window_id(NewTimestamp, Config),
     DataRecordKey = ts_persistence:get_time_series_collection_id(PersistenceCtx),
     update(Data, DataRecordKey, 1, DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx).
 
@@ -62,16 +62,16 @@ list(#metric{
     head_data = Data,
     config = Config
 }, Options, PersistenceCtx) ->
-    Window = get_window(maps:get(start, Options, undefined), Config),
+    Window = get_window_id(maps:get(start, Options, undefined), Config),
     list(Data, Window, Options, PersistenceCtx).
 
 
 -spec delete(metric(), ts_persistence:ctx()) -> ts_persistence:ctx().
 delete(#metric{splitting_strategy = #splitting_strategy{max_docs_count = 1}}, PersistenceCtx) ->
     PersistenceCtx;
-delete(#metric{head_data = #data{prev_record = undefined}}, PersistenceCtx) ->
+delete(#metric{head_data = #data_node{prev_record = undefined}}, PersistenceCtx) ->
     PersistenceCtx;
-delete(#metric{head_data = #data{prev_record = PrevRecordKey}}, PersistenceCtx) ->
+delete(#metric{head_data = #data_node{prev_record = PrevRecordKey}}, PersistenceCtx) ->
     {PrevRecordData, UpdatedPersistenceCtx} = ts_persistence:get(PrevRecordKey, PersistenceCtx),
     delete(PrevRecordKey, PrevRecordData, UpdatedPersistenceCtx).
 
@@ -80,10 +80,10 @@ delete(#metric{head_data = #data{prev_record = PrevRecordKey}}, PersistenceCtx) 
 %% Internal functions
 %%=====================================================================
 
--spec update(data(), ts_metric_data:key(), non_neg_integer(), splitting_strategy(), ts_windows:aggregator(),
-    ts_windows:timestamp(), ts_windows:value(), ts_persistence:ctx()) -> ts_persistence:ctx().
+-spec update(data_node(), ts_metric_data_node:key(), non_neg_integer(), splitting_strategy(), ts_windows:aggregator(),
+    ts_windows:window_id(), ts_windows:value(), ts_persistence:ctx()) -> ts_persistence:ctx().
 update(
-    #data{
+    #data_node{
         windows = Windows
     } = Data, DataRecordKey, _DataDocPosition,
     #splitting_strategy{
@@ -93,10 +93,10 @@ update(
     % All windows are stored in single record - update it
     UpdatedWindows = ts_windows:aggregate(Windows, WindowToBeUpdated, NewValue, Aggregator),
     FinalWindows = ts_windows:prune_overflowing(UpdatedWindows, MaxWindowsCount),
-    ts_persistence:update(DataRecordKey, Data#data{windows = FinalWindows}, PersistenceCtx);
+    ts_persistence:update(DataRecordKey, Data#data_node{windows = FinalWindows}, PersistenceCtx);
 
 update(
-    #data{
+    #data_node{
         prev_record = undefined,
         prev_record_timestamp = PrevRecordTimestamp
     }, _DataRecordKey, _DataDocPosition,
@@ -106,7 +106,7 @@ update(
     PersistenceCtx;
 
 update(
-    #data{
+    #data_node{
         prev_record = undefined,
         windows = Windows
     } = Data, DataRecordKey, DataDocPosition,
@@ -124,11 +124,11 @@ update(
                 Windows1, Windows2, SplitTimestamp, DataDocPosition, DocSplittingStrategy, PersistenceCtx),
             UpdatedPersistenceCtx;
         false ->
-            ts_persistence:update(DataRecordKey, Data#data{windows = UpdatedWindows}, PersistenceCtx)
+            ts_persistence:update(DataRecordKey, Data#data_node{windows = UpdatedWindows}, PersistenceCtx)
     end;
 
 update(
-    #data{
+    #data_node{
         prev_record = PrevRecordKey,
         prev_record_timestamp = PrevRecordTimestamp
     }, _DataRecordKey, DataDocPosition,
@@ -140,7 +140,7 @@ update(
         DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, UpdatedPersistenceCtx);
 
 update(
-    #data{
+    #data_node{
         windows = Windows,
         prev_record = PrevRecordKey
     } = Data, DataRecordKey, DataDocPosition,
@@ -154,7 +154,7 @@ update(
 
     case ts_windows:is_size_exceeded(WindowsWithAggregatedMeasurement, MaxWindowsCount) of
         true ->
-            {#data{windows = WindowsInPrevRecord} = PrevRecordData, UpdatedPersistenceCtx} =
+            {#data_node{windows = WindowsInPrevRecord} = PrevRecordData, UpdatedPersistenceCtx} =
                 ts_persistence:get(PrevRecordKey, PersistenceCtx),
             % Window size is exceeded - split record or move part of windows to prev record
             % (reorganize_windows will analyse records and decide if record should be spited or windows moved)
@@ -163,7 +163,7 @@ update(
 
             lists:foldl(fun
                 ({update_current_record, UpdatedPrevRecordTimestamp, UpdatedWindows}, TmpPersistenceCtx) ->
-                    ts_persistence:update(DataRecordKey, Data#data{windows = UpdatedWindows,
+                    ts_persistence:update(DataRecordKey, Data#data_node{windows = UpdatedWindows,
                         prev_record_timestamp = UpdatedPrevRecordTimestamp}, TmpPersistenceCtx);
                 ({split_current_record, {Windows1, Windows2, SplitTimestamp}}, TmpPersistenceCtx) ->
                     {CreatedRecordKey, CreatedRecord, UpdatedTmpPersistenceCtx} = split_record(DataRecordKey, Data,
@@ -172,19 +172,19 @@ update(
                         DocSplittingStrategy, DataDocPosition + 2, UpdatedTmpPersistenceCtx);
                 ({update_previous_record, UpdatedWindowsInPrevRecord}, TmpPersistenceCtx) ->
                     ts_persistence:update(PrevRecordKey,
-                        PrevRecordData#data{windows = UpdatedWindowsInPrevRecord}, TmpPersistenceCtx)
+                        PrevRecordData#data_node{windows = UpdatedWindowsInPrevRecord}, TmpPersistenceCtx)
             end, UpdatedPersistenceCtx, Actions);
         false ->
             ts_persistence:update(
-                DataRecordKey, Data#data{windows = WindowsWithAggregatedMeasurement}, PersistenceCtx)
+                DataRecordKey, Data#data_node{windows = WindowsWithAggregatedMeasurement}, PersistenceCtx)
     end.
 
 
--spec prune_overflowing_record(ts_metric_data:key(), data(), ts_metric_data:key(), data() | undefined,
+-spec prune_overflowing_record(ts_metric_data_node:key(), data_node(), ts_metric_data_node:key(), data_node() | undefined,
     splitting_strategy(), non_neg_integer(), ts_persistence:ctx()) -> ts_persistence:ctx().
 prune_overflowing_record(NextRecordKey, NextRecordData, Key, _Data,
     #splitting_strategy{max_docs_count = MaxCount}, DocumentNumber, PersistenceCtx) when DocumentNumber > MaxCount ->
-    UpdatedNextRecordData = NextRecordData#data{prev_record = undefined},
+    UpdatedNextRecordData = NextRecordData#data_node{prev_record = undefined},
     UpdatedPersistenceCtx = ts_persistence:update(NextRecordKey, UpdatedNextRecordData, PersistenceCtx),
     ts_persistence:delete(Key, UpdatedPersistenceCtx);
 prune_overflowing_record(NextRecordKey, NextRecordData, Key, undefined,
@@ -192,18 +192,18 @@ prune_overflowing_record(NextRecordKey, NextRecordData, Key, undefined,
     {Data, UpdatedPersistenceCtx} = ts_persistence:get(Key, PersistenceCtx),
     prune_overflowing_record(NextRecordKey, NextRecordData, Key, Data,
         DocSplittingStrategy, DocumentNumber, UpdatedPersistenceCtx);
-prune_overflowing_record(_NextRecordKey, _NextRecordData, _Key, #data{prev_record = undefined},
+prune_overflowing_record(_NextRecordKey, _NextRecordData, _Key, #data_node{prev_record = undefined},
     _DocSplittingStrategy, _DocumentNumber, PersistenceCtx) ->
     PersistenceCtx;
-prune_overflowing_record(_NextRecordKey, _NextRecordData, Key, #data{prev_record = PrevRecordKey} = Data,
+prune_overflowing_record(_NextRecordKey, _NextRecordData, Key, #data_node{prev_record = PrevRecordKey} = Data,
     DocSplittingStrategy, DocumentNumber, PersistenceCtx) ->
     prune_overflowing_record(Key, Data, PrevRecordKey, undefined, DocSplittingStrategy, DocumentNumber + 1, PersistenceCtx).
 
 
--spec list(data(), ts_windows:timestamp() | undefined, ts_windows:list_options(),
+-spec list(data_node(), ts_windows:window_id() | undefined, ts_windows:list_options(),
     ts_persistence:ctx()) -> {[ts_windows:window()], ts_persistence:ctx()}.
 list(
-    #data{
+    #data_node{
         windows = Windows,
         prev_record = undefined
     }, Window, Options, PersistenceCtx) ->
@@ -211,7 +211,7 @@ list(
     {WindowsToReturn, PersistenceCtx};
 
 list(
-    #data{
+    #data_node{
         prev_record = PrevRecordKey,
         prev_record_timestamp = PrevRecordTimestamp
     }, Window, Options, PersistenceCtx)
@@ -220,7 +220,7 @@ list(
     list(PrevRecordData, Window, Options, UpdatedPersistenceCtx);
 
 list(
-    #data{
+    #data_node{
         windows = Windows,
         prev_record = PrevRecordKey
     }, Window, Options, PersistenceCtx) ->
@@ -235,23 +235,23 @@ list(
     end.
 
 
--spec delete(ts_metric_data:key(), data(), ts_persistence:ctx()) -> ts_persistence:ctx().
-delete(DataRecordKey, #data{prev_record = undefined}, PersistenceCtx) ->
+-spec delete(ts_metric_data_node:key(), data_node(), ts_persistence:ctx()) -> ts_persistence:ctx().
+delete(DataRecordKey, #data_node{prev_record = undefined}, PersistenceCtx) ->
     ts_persistence:delete(DataRecordKey, PersistenceCtx);
-delete(DataRecordKey, #data{prev_record = PrevRecordKey}, PersistenceCtx) ->
+delete(DataRecordKey, #data_node{prev_record = PrevRecordKey}, PersistenceCtx) ->
     {PrevRecordData, UpdatedPersistenceCtx} = ts_persistence:get(PrevRecordKey, PersistenceCtx),
     UpdatedPersistenceCtx2 = ts_persistence:delete(DataRecordKey, UpdatedPersistenceCtx),
     delete(PrevRecordKey, PrevRecordData, UpdatedPersistenceCtx2).
 
 
--spec get_window(ts_windows:timestamp() | undefined, config()) -> ts_windows:timestamp() | undefined.
-get_window(undefined, _) ->
+-spec get_window_id(ts_windows:timestamp() | undefined, config()) -> ts_windows:window_id() | undefined.
+get_window_id(undefined, _) ->
     undefined;
-get_window(Time, #metric_config{resolution = Resolution}) ->
+get_window_id(Time, #metric_config{resolution = Resolution}) ->
     Time - Time rem Resolution.
 
 
--spec get_max_windows_and_split_position(ts_metric_data:key(), splitting_strategy(), ts_persistence:ctx()) ->
+-spec get_max_windows_and_split_position(ts_metric_data_node:key(), splitting_strategy(), ts_persistence:ctx()) ->
     {non_neg_integer(), non_neg_integer()}.
 get_max_windows_and_split_position(
     DataRecordKey,
@@ -271,16 +271,16 @@ get_max_windows_and_split_position(
     end.
 
 
--spec split_record(ts_metric_data:key(), data(), ts_windows:windows(), ts_windows:windows(),
+-spec split_record(ts_metric_data_node:key(), data_node(), ts_windows:windows(), ts_windows:windows(),
     ts_windows:timestamp(), non_neg_integer(), splitting_strategy(), ts_persistence:ctx()) ->
-    {ts_metric_data:key() | undefined, data() | undefined, ts_persistence:ctx()}.
+    {ts_metric_data_node:key() | undefined, data_node() | undefined, ts_persistence:ctx()}.
 split_record(DataRecordKey, Data, Windows1, _Windows2, SplitTimestamp, MaxCount,
     #splitting_strategy{max_docs_count = MaxCount}, PersistenceCtx) ->
     % Splitting last record - do not create new record for older windows as it would be deleted immediately
-    UpdatedData = Data#data{windows = Windows1, prev_record_timestamp = SplitTimestamp},
+    UpdatedData = Data#data_node{windows = Windows1, prev_record_timestamp = SplitTimestamp},
     {undefined, undefined, ts_persistence:update(DataRecordKey, UpdatedData, PersistenceCtx)};
 split_record(DataRecordKey, Data, Windows1, Windows2, SplitTimestamp, _DocumentNumber, _DocSplittingStrategy, PersistenceCtx) ->
-    DataToCreate = Data#data{windows = Windows2},
+    DataToCreate = Data#data_node{windows = Windows2},
     {CreatedRecordKey, UpdatedPersistenceCtx} = ts_persistence:create(DataToCreate, PersistenceCtx),
-    UpdatedData = Data#data{windows = Windows1, prev_record = CreatedRecordKey, prev_record_timestamp = SplitTimestamp},
+    UpdatedData = Data#data_node{windows = Windows1, prev_record = CreatedRecordKey, prev_record_timestamp = SplitTimestamp},
     {CreatedRecordKey, DataToCreate, ts_persistence:update(DataRecordKey, UpdatedData, UpdatedPersistenceCtx)}.

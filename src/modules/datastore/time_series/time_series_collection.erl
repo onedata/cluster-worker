@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Internal datastore API used for operating on time_series collections.
+%%% Internal datastore API used for operating on time series collections.
 %%% Time series collection consists of several time series. Each time series consists of
 %%% several metrics. Metric is set of windows that aggregate multiple
 %%% measurements from particular period of time. E.g.,
@@ -36,7 +36,7 @@
 %%% metrics while rest of records with windows are kept separately for each metric).
 %%% @end
 %%%-------------------------------------------------------------------
--module(time_series).
+-module(time_series_collection).
 -author("Michal Wrzeszcz").
 
 -include("modules/datastore/datastore_time_series.hrl").
@@ -69,7 +69,7 @@
 -type ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
 
--define(CATCH_EXCEPT_FETCH_ERROR(Expr, ErrorLog, ErrorLogArgs, ErrorReturnValue),
+-define(CATCH_UNEXPECTED_ERRORS(Expr, ErrorLog, ErrorLogArgs, ErrorReturnValue),
     try
         Expr
     catch
@@ -90,7 +90,7 @@ create(Ctx, Id, ConfigMap, Batch) ->
     try
         DocSplittingStrategies = ts_doc_splitting_strategies:calculate(ConfigMap),
 
-        TimeSeriesHeadsCollection = maps:map(fun(TimeSeriesId, MetricsConfigs) ->
+        TimeSeriesCollectionHeads = maps:map(fun(TimeSeriesId, MetricsConfigs) ->
             maps:map(fun(MetricsId, Config) ->
                  #metric{
                      config = Config,
@@ -99,7 +99,7 @@ create(Ctx, Id, ConfigMap, Batch) ->
             end, MetricsConfigs)
         end, ConfigMap),
 
-        PersistenceCtx = ts_persistence:init_for_new_collection(Ctx, Id, TimeSeriesHeadsCollection, Batch),
+        PersistenceCtx = ts_persistence:init_for_new_collection(Ctx, Id, TimeSeriesCollectionHeads, Batch),
         {ok, ts_persistence:finalize(PersistenceCtx)}
     catch
         _:{error, too_many_metrics} ->
@@ -126,9 +126,9 @@ create(Ctx, Id, ConfigMap, Batch) ->
     {ok | {error, term()}, batch()}.
 update(Ctx, Id, NewTimestamp, NewValue, Batch) when is_number(NewValue) ->
     try
-        {TimeSeriesHeadsCollection, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+        {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
         FinalPersistenceCtx = update_time_series(
-            maps:to_list(TimeSeriesHeadsCollection), NewTimestamp, NewValue, PersistenceCtx),
+            maps:to_list(TimeSeriesCollectionHeads), NewTimestamp, NewValue, PersistenceCtx),
         {ok, ts_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace ->
@@ -139,9 +139,9 @@ update(Ctx, Id, NewTimestamp, NewValue, Batch) when is_number(NewValue) ->
 
 update(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch) when is_list(MetricsToUpdateWithValues) ->
     try
-        {TimeSeriesHeadsCollection, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+        {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
         FinalPersistenceCtx = lists:foldl(fun({MetricsToUpdate, NewValue}, Acc) ->
-            SelectedHeads = select_heads(TimeSeriesHeadsCollection, MetricsToUpdate),
+            SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToUpdate),
             update_time_series(maps:to_list(SelectedHeads), NewTimestamp, NewValue, Acc)
         end, PersistenceCtx, MetricsToUpdateWithValues),
         {ok, ts_persistence:finalize(FinalPersistenceCtx)}
@@ -165,8 +165,8 @@ update(Ctx, Id, NewTimestamp, {MetricsToUpdate, NewValue}, Batch) ->
     {ok | {error, term()}, batch()}.
 update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
     try
-        {TimeSeriesHeadsCollection, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-        SelectedHeads = select_heads(TimeSeriesHeadsCollection, MetricsToUpdate),
+        {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+        SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToUpdate),
         FinalPersistenceCtx = update_time_series(maps:to_list(SelectedHeads), NewTimestamp, NewValue, PersistenceCtx),
         {ok, ts_persistence:finalize(FinalPersistenceCtx)}
     catch
@@ -203,16 +203,16 @@ update_many(Ctx, Id, [{NewTimestamp, NewValue} | Measurements], Batch) ->
 -spec list(ctx(), collection_id(), ts_windows:list_options(), batch() | undefined) ->
     {{ok, windows_map()} | {error, term()}, batch() | undefined}.
 list(Ctx, Id, Options, Batch) ->
-    ?CATCH_EXCEPT_FETCH_ERROR(
+    ?CATCH_UNEXPECTED_ERRORS(
         begin
-            {TimeSeriesHeadsCollection, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+            {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
             FillMetricsIds = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
                 maps:fold(fun(MetricsId, _Config, InternalAcc) ->
                     [{TimeSeriesId, MetricsId} | InternalAcc]
                 end, Acc, MetricsConfigs)
-            end, [], TimeSeriesHeadsCollection),
+            end, [], TimeSeriesCollectionHeads),
             {Ans, FinalPersistenceCtx} = list_time_series(
-                TimeSeriesHeadsCollection, FillMetricsIds, Options, PersistenceCtx),
+                TimeSeriesCollectionHeads, FillMetricsIds, Options, PersistenceCtx),
             {{ok, Ans}, ts_persistence:finalize(FinalPersistenceCtx)}
         end,
         "Time series collection ~p list error~nOptions: ~p", [Id, Options], {{error, list_failed}, Batch}
@@ -229,11 +229,11 @@ list(Ctx, Id, Options, Batch) ->
 -spec list(ctx(), collection_id(), request_range(), ts_windows:list_options(), batch() | undefined) ->
     {{ok, [ts_windows:window()] | windows_map()} | {error, term()}, batch() | undefined}.
 list(Ctx, Id, RequestedMetrics, Options, Batch) ->
-    ?CATCH_EXCEPT_FETCH_ERROR(
+    ?CATCH_UNEXPECTED_ERRORS(
         begin
-            {TimeSeriesHeadsCollection, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+            {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
             {Ans, FinalPersistenceCtx} = list_time_series(
-                TimeSeriesHeadsCollection, RequestedMetrics, Options, PersistenceCtx),
+                TimeSeriesCollectionHeads, RequestedMetrics, Options, PersistenceCtx),
             {{ok, Ans}, ts_persistence:finalize(FinalPersistenceCtx)}
         end,
         "Time series collection ~p list error~nRequested metrics: ~p~nOptions: ~p",
@@ -243,10 +243,10 @@ list(Ctx, Id, RequestedMetrics, Options, Batch) ->
 
 -spec delete(ctx(), collection_id(), batch() ) -> {ok | {error, term()}, batch()}.
 delete(Ctx, Id, Batch) ->
-    ?CATCH_EXCEPT_FETCH_ERROR(
+    ?CATCH_UNEXPECTED_ERRORS(
         begin
-            {TimeSeriesHeadsCollection, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-            FinalPersistenceCtx = delete_time_series(maps:to_list(TimeSeriesHeadsCollection), PersistenceCtx),
+            {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+            FinalPersistenceCtx = delete_time_series(maps:to_list(TimeSeriesCollectionHeads), PersistenceCtx),
             {ok, ts_persistence:finalize(FinalPersistenceCtx)}
         end,
         "Time series collection ~p delete error", [Id], {{error, delete_failed}, Batch}
@@ -257,14 +257,14 @@ delete(Ctx, Id, Batch) ->
 %% Internal functions
 %%=====================================================================
 
--spec select_heads(ts_hub:time_series_heads_collection(), request_range()) ->
-    ts_hub:time_series_heads_collection().
-select_heads(_TimeSeriesHeadsCollection, []) ->
+-spec select_heads(ts_hub:time_series_collection_heads(), request_range()) ->
+    ts_hub:time_series_collection_heads().
+select_heads(_TimeSeriesCollectionHeads, []) ->
     #{};
 
-select_heads(TimeSeriesHeadsCollection, [{TimeSeriesId, MetricIds} | Tail]) ->
-    Ans = select_heads(TimeSeriesHeadsCollection, Tail),
-    case maps:get(TimeSeriesId, TimeSeriesHeadsCollection, undefined) of
+select_heads(TimeSeriesCollectionHeads, [{TimeSeriesId, MetricIds} | Tail]) ->
+    Ans = select_heads(TimeSeriesCollectionHeads, Tail),
+    case maps:get(TimeSeriesId, TimeSeriesCollectionHeads, undefined) of
         undefined ->
             Ans;
         TimeSeries ->
@@ -281,15 +281,15 @@ select_heads(TimeSeriesHeadsCollection, [{TimeSeriesId, MetricIds} | Tail]) ->
             end
     end;
 
-select_heads(TimeSeriesHeadsCollection, [TimeSeriesId | Tail]) ->
-    Ans = select_heads(TimeSeriesHeadsCollection, Tail),
-    case maps:get(TimeSeriesId, TimeSeriesHeadsCollection, undefined) of
+select_heads(TimeSeriesCollectionHeads, [TimeSeriesId | Tail]) ->
+    Ans = select_heads(TimeSeriesCollectionHeads, Tail),
+    case maps:get(TimeSeriesId, TimeSeriesCollectionHeads, undefined) of
         undefined -> Ans;
         TimeSeries -> maps:put(TimeSeriesId, TimeSeries, Ans)
     end;
 
-select_heads(TimeSeriesHeadsCollection, ToBeIncluded) ->
-    select_heads(TimeSeriesHeadsCollection, [ToBeIncluded]).
+select_heads(TimeSeriesCollectionHeads, ToBeIncluded) ->
+    select_heads(TimeSeriesCollectionHeads, [ToBeIncluded]).
 
 
 -spec update_time_series([{time_series_id(), ts_hub:time_series_heads()}], ts_windows:timestamp(),
@@ -313,14 +313,14 @@ update_metrics([{MetricId, Metric} | Tail], NewTimestamp, NewValue, PersistenceC
     update_metrics(Tail, NewTimestamp, NewValue, FinalPersistenceCtx).
 
 
--spec list_time_series(ts_hub:time_series_heads_collection(), request_range(), ts_windows:list_options(),
+-spec list_time_series(ts_hub:time_series_collection_heads(), request_range(), ts_windows:list_options(),
     ts_persistence:ctx()) -> {[ts_windows:window()] | windows_map(), ts_persistence:ctx()}.
-list_time_series(_TimeSeriesHeadsCollection, [], _Options, PersistenceCtx) ->
+list_time_series(_TimeSeriesCollectionHeads, [], _Options, PersistenceCtx) ->
     {#{}, PersistenceCtx};
 
-list_time_series(TimeSeriesHeadsCollection, [{TimeSeriesIds, MetricIds} | RequestedMetrics], Options, PersistenceCtx) ->
+list_time_series(TimeSeriesCollectionHeads, [{TimeSeriesIds, MetricIds} | RequestedMetrics], Options, PersistenceCtx) ->
     {Ans, UpdatedPersistenceCtx} = lists:foldl(fun(TimeSeriesId, Acc) ->
-        MetricsMap = maps:get(TimeSeriesId, TimeSeriesHeadsCollection, #{}),
+        MetricsMap = maps:get(TimeSeriesId, TimeSeriesCollectionHeads, #{}),
         lists:foldl(fun(MetricId, {TmpAns, TmpPersistenceCtx}) ->
             {Values, UpdatedTmpPersistenceCtx} = case maps:get(MetricId, MetricsMap, undefined) of
                 undefined -> {undefined, TmpPersistenceCtx};
@@ -331,11 +331,11 @@ list_time_series(TimeSeriesHeadsCollection, [{TimeSeriesIds, MetricIds} | Reques
     end, {#{}, PersistenceCtx}, utils:ensure_list(TimeSeriesIds)),
 
     {Ans2, FinalPersistenceCtx} = list_time_series(
-        TimeSeriesHeadsCollection, RequestedMetrics, Options, UpdatedPersistenceCtx),
+        TimeSeriesCollectionHeads, RequestedMetrics, Options, UpdatedPersistenceCtx),
     {maps:merge(Ans, Ans2), FinalPersistenceCtx};
 
-list_time_series(TimeSeriesHeadsCollection, [TimeSeriesId | RequestedMetrics], Options, PersistenceCtx) ->
-    {Ans, UpdatedPersistenceCtx} = case maps:get(TimeSeriesId, TimeSeriesHeadsCollection, undefined) of
+list_time_series(TimeSeriesCollectionHeads, [TimeSeriesId | RequestedMetrics], Options, PersistenceCtx) ->
+    {Ans, UpdatedPersistenceCtx} = case maps:get(TimeSeriesId, TimeSeriesCollectionHeads, undefined) of
         undefined ->
             {#{TimeSeriesId => undefined}, PersistenceCtx};
         MetricsMap ->
@@ -345,11 +345,11 @@ list_time_series(TimeSeriesHeadsCollection, [TimeSeriesId | RequestedMetrics], O
             end, {#{}, PersistenceCtx}, maps:to_list(MetricsMap))
     end,
 
-    {Ans2, FinalPersistenceCtx} = list_time_series(TimeSeriesHeadsCollection, RequestedMetrics, Options, UpdatedPersistenceCtx),
+    {Ans2, FinalPersistenceCtx} = list_time_series(TimeSeriesCollectionHeads, RequestedMetrics, Options, UpdatedPersistenceCtx),
     {maps:merge(Ans, Ans2), FinalPersistenceCtx};
 
-list_time_series(TimeSeriesHeadsCollection, Request, Options, PersistenceCtx) ->
-    {Ans, FinalPersistenceCtx} = list_time_series(TimeSeriesHeadsCollection, [Request], Options, PersistenceCtx),
+list_time_series(TimeSeriesCollectionHeads, Request, Options, PersistenceCtx) ->
+    {Ans, FinalPersistenceCtx} = list_time_series(TimeSeriesCollectionHeads, [Request], Options, PersistenceCtx),
     case maps:is_key(Request, Ans) of
         true ->
             % Single key is requested - return value for the key instead of map

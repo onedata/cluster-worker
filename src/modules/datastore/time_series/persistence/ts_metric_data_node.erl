@@ -9,12 +9,12 @@
 %%% Helper module to ts_persistence operating on time series
 %%% metric data node. Each time series metric data node is connected with
 %%% singe metric. Values that exceed time series hub capacity for particular
-%%% metric are stored in list of time series metric data nodes
-%%% (capacity of single time series metric data node is also limited so more
+%%% metric (ie. metric's head capacity) are stored in list of time series metric
+%%% data nodes (capacity of single time series metric data node is also limited so more
 %%% than one time series metric data node may be needed - see ts_persistence module).
 %%% @end
 %%%-------------------------------------------------------------------
--module(ts_metric_data).
+-module(ts_metric_data_node).
 -author("Michal Wrzeszcz").
 
 %% API
@@ -22,17 +22,17 @@
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
 
--record(ts_metric_data, {
-    value :: ts_metric:data()
+-record(ts_metric_data_node, {
+    value :: ts_metric:data_node()
 }).
 
--type record() :: #ts_metric_data{}.
+-type record() :: #ts_metric_data_node{}.
 -type key() :: datastore:key().
 
 -export_type([key/0]).
 
 % Context used only by datastore to initialize internal structures.
-% Context provided via time_series module functions
+% Context provided via time_series_collection module functions
 % overrides it in other cases.
 -define(CTX, #{
     model => ?MODULE,
@@ -44,12 +44,12 @@
 %%% API
 %%%===================================================================
 
--spec set(ts_metric:data()) -> record().
+-spec set(ts_metric:data_node()) -> record().
 set(Data) ->
-    #ts_metric_data{value = Data}.
+    #ts_metric_data_node{value = Data}.
 
--spec get(record()) -> ts_metric:data().
-get(#ts_metric_data{value = Data}) ->
+-spec get(record()) -> ts_metric:data_node().
+get(#ts_metric_data_node{value = Data}) ->
     Data.
 
 %%%===================================================================

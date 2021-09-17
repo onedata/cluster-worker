@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Helper module operating on time_series metric windows' set.
+%%% Helper module operating on time_series_collection metric windows' set.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ts_windows).
@@ -21,6 +21,7 @@
 
 -type timestamp() :: time:seconds().
 -type value() :: number().
+-type window_id() :: timestamp().
 -type window_value() :: value() | {ValuesCount :: non_neg_integer(), ValuesSum :: value()}.
 -type window() :: {timestamp(), window_value()}.
 -type windows() :: gb_trees:tree(timestamp(), window_value()).
@@ -32,7 +33,7 @@
     limit => non_neg_integer()
 }.
 
--export_type([timestamp/0, value/0, window_value/0, window/0, windows/0, aggregator/0, list_options/0]).
+-export_type([timestamp/0, value/0, window_id/0, window_value/0, window/0, windows/0, aggregator/0, list_options/0]).
 
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
 

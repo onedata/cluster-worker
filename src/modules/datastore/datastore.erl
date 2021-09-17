@@ -20,7 +20,7 @@
 -export([delete/3, delete_all/2]).
 -export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, get_links_trees/2]).
--export([time_series_operation/4, infinite_log_operation/4]).
+-export([time_series_collection_operation/4, infinite_log_operation/4]).
 
 -type ctx() :: #{model := datastore_model:model(),
                  mutator => datastore_doc:mutator(),
@@ -310,10 +310,10 @@ get_links_trees(Ctx, Key) ->
     end).
 
 
--spec time_series_operation(ctx(), key(), atom(), [term()]) ->
-    ok | {ok, [ts_windows:window()] | time_series:windows_map()} | {error, term()}.
-time_series_operation(Ctx, Key, Function, Args) ->
-    datastore_hooks:wrap(Ctx, Key, Function, Args, fun datastore_router:route_time_series_operation/2).
+-spec time_series_collection_operation(ctx(), key(), atom(), [term()]) ->
+    ok | {ok, [ts_windows:window()] | time_series_collection:windows_map()} | {error, term()}.
+time_series_collection_operation(Ctx, Key, Function, Args) ->
+    datastore_hooks:wrap(Ctx, Key, Function, Args, fun datastore_router:route_time_series_collection_operation/2).
 
 
 -spec infinite_log_operation(ctx(), key(), atom(), [term()]) ->

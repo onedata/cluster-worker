@@ -26,7 +26,7 @@
 -export([create/3, save/3, update/3, update/4, create_backup/2, fetch/2, delete/3]).
 -export([add_links/4, check_and_add_links/5, fetch_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, fetch_links_trees/2]).
--export([time_series_operation/3, infinite_log_operation/3]).
+-export([time_series_collection_operation/3, infinite_log_operation/3]).
 -export([generic_call/2, call_if_alive/2]).
 %% For ct tests
 -export([call/4, call_async/5, wait/2]).
@@ -227,10 +227,10 @@ fetch_links_trees(Ctx, Key) ->
     call(Ctx, get_key(Ctx, Key, links), fetch_links_trees, [Key]).
 
 
--spec time_series_operation(ctx(), atom(), list()) ->
-    ok | {ok, [ts_windows:window()] | time_series:windows_map()} | {error, term()}.
-time_series_operation(Ctx, Function, [Key | ArgsTail]) ->
-    call(Ctx, get_key(Ctx, Key, time_series), time_series, Function, [Key | ArgsTail]).
+-spec time_series_collection_operation(ctx(), atom(), list()) ->
+    ok | {ok, [ts_windows:window()] | time_series_collection:windows_map()} | {error, term()}.
+time_series_collection_operation(Ctx, Function, [Key | ArgsTail]) ->
+    call(Ctx, get_key(Ctx, Key, time_series), time_series_collection, Function, [Key | ArgsTail]).
 
 
 -spec infinite_log_operation(ctx(), atom(), list()) ->

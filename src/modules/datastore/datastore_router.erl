@@ -19,7 +19,7 @@
 -include_lib("ctool/include/hashing/consistent_hashing.hrl").
 
 %% API
--export([route/2, route_time_series_operation/2, route_infinite_log_operation/2, execute_on_node/4]).
+-export([route/2, route_time_series_collection_operation/2, route_infinite_log_operation/2, execute_on_node/4]).
 -export([init_counters/0, init_report/0]).
 -export([get_routing_key/2]).
 %% Internal RPC API
@@ -79,11 +79,11 @@ route(Function, [Ctx | Args] = OriginalArgs) ->
         Ans -> Ans
     end.
 
--spec route_time_series_operation(atom(), list()) -> term().
-route_time_series_operation(list, [Ctx | Args]) ->
-    route_internal(datastore_reader, time_series_list, Ctx, [Args]);
-route_time_series_operation(Function, [Ctx | Args]) ->
-    route_internal(datastore_writer, time_series_operation, Ctx, [Function, Args]).
+-spec route_time_series_collection_operation(atom(), list()) -> term().
+route_time_series_collection_operation(list, [Ctx | Args]) ->
+    route_internal(datastore_reader, time_series_collection_list, Ctx, [Args]);
+route_time_series_collection_operation(Function, [Ctx | Args]) ->
+    route_internal(datastore_writer, time_series_collection_operation, Ctx, [Function, Args]).
 
 -spec route_infinite_log_operation(atom(), list()) -> term().
 route_infinite_log_operation(list, [Ctx | Args]) ->

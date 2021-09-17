@@ -15,14 +15,14 @@
 %%% structure used by datastore to save all changes.
 %%%
 %%% The module uses 2 helper records: ts_hub that stores heads
-%%% of each metric and ts_metric_data that stores windows of single
+%%% of each metric and ts_metric_data_node that stores windows of single
 %%% metrics if there are too many windows to be stored in head
 %%% (see ts_metric for head/tail description). Head of each metric contains
 %%% all windows or part of windows set (depending on windows count) as well as config 
-%%% and splitting strategy (see #metric{} record definition) while ts_metric_data
+%%% and splitting strategy (see #metric{} record definition) while ts_metric_data_node
 %%% stores only parts of windows sets. There is always exactly one 
-%%% ts_hub document (storing heads of all metrics). ts_metric_data
-%%% documents are created on demand and multiple ts_metric_data documents
+%%% ts_hub document (storing heads of all metrics). ts_metric_data_node
+%%% documents are created on demand and multiple ts_metric_data_node documents
 %%% can be created for each metric. E.g.:
 %%%
 %%%                                  ts_hub
@@ -39,7 +39,7 @@
 %%%             |                                            |
 %%%             |                                            |
 %%%             v                                            v
-%%%      ts_metric_data                                 ts_metric_data
+%%%   ts_metric_data_node                             ts_metric_data_node
 %%% +---------------------+                         +---------------------+
 %%% |                     |                         |                     |
 %%% |    data{            |                         |    data{            |
@@ -50,7 +50,7 @@
 %%%             |
 %%%             |
 %%%             v
-%%%      ts_metric_data
+%%%   ts_metric_data_node
 %%% +---------------------+
 %%% |                     |
 %%% |    data{            |
@@ -60,7 +60,7 @@
 %%% +---------------------+
 %%%
 %%% Key of ts_hub document is equal to id of time series collection while
-%%% ts_metric_data documents have randomly generated ids.
+%%% ts_metric_data_node documents have randomly generated ids.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ts_persistence).
@@ -78,11 +78,11 @@
 -record(ctx, {
     datastore_ctx :: datastore_ctx(),
     batch :: batch() | undefined, % Undefined when time series collection is used outside tp process
-                                  % (call via datastore_reader:time_series_get/3)
+                                  % (call via datastore_reader:time_series_collection_list/3)
     hub :: doc(),
     is_hub_updated = false :: boolean(), % Field used to determine if hub should be saved by finalize/1 function
     % Fields representing metric currently being updated (single ctx can be used to update several metrics)
-    currently_processed_time_series :: time_series:time_series_id() | undefined,
+    currently_processed_time_series :: time_series_collection:time_series_id() | undefined,
     currently_processed_metric :: ts_metric:id() | undefined
 }).
 
@@ -98,10 +98,10 @@
 %%% API
 %%%===================================================================
 
--spec init_for_new_collection(datastore_ctx(), time_series:collection_id(), ts_hub:time_series_heads_collection(),
+-spec init_for_new_collection(datastore_ctx(), time_series_collection:collection_id(), ts_hub:time_series_collection_heads(),
     batch()) -> ctx().
 init_for_new_collection(DatastoreCtx, Id, TimeSeriesHeads, Batch) ->
-    TSHub = #document{key = Id, value = ts_hub:set_time_series_heads(TimeSeriesHeads)},
+    TSHub = #document{key = Id, value = ts_hub:set_time_series_collection_heads(TimeSeriesHeads)},
     #ctx{
         datastore_ctx = DatastoreCtx,
         batch = Batch,
@@ -110,13 +110,13 @@ init_for_new_collection(DatastoreCtx, Id, TimeSeriesHeads, Batch) ->
     }.
 
 
--spec init_for_existing_collection(datastore_ctx(), time_series:collection_id(), batch() | undefined) ->
-    {ts_hub:time_series_heads_collection(), ctx()}.
+-spec init_for_existing_collection(datastore_ctx(), time_series_collection:collection_id(), batch() | undefined) ->
+    {ts_hub:time_series_collection_heads(), ctx()}.
 init_for_existing_collection(DatastoreCtx, Id, Batch) ->
     {{ok, #document{value = TSHubRecord} = TSHub}, UpdatedBatch} =
         datastore_doc:fetch(DatastoreCtx, Id, Batch),
     {
-        ts_hub:get_time_series_heads(TSHubRecord),
+        ts_hub:get_time_series_collection_heads(TSHubRecord),
         #ctx{
             datastore_ctx = DatastoreCtx,
             batch = UpdatedBatch,
@@ -139,7 +139,7 @@ finalize(#ctx{
     UpdatedBatch.
 
 
--spec set_currently_processed_time_series(time_series:time_series_id(), ctx()) -> ctx().
+-spec set_currently_processed_time_series(time_series_collection:time_series_id(), ctx()) -> ctx().
 set_currently_processed_time_series(TimeSeriesId, Ctx) ->
     Ctx#ctx{currently_processed_time_series = TimeSeriesId}.
 
@@ -159,35 +159,35 @@ is_hub_key(Key, #ctx{hub = #document{key = HubKey}}) ->
     Key =:= HubKey.
 
 
--spec get(key(), ctx()) -> {ts_metric:data(), ctx()}.
+-spec get(key(), ctx()) -> {ts_metric:data_node(), ctx()}.
 get(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     {{ok, #document{value = Record}}, UpdatedBatch} = datastore_doc:fetch(DatastoreCtx, Key, Batch),
-    {ts_metric_data:get(Record), Ctx#ctx{batch = UpdatedBatch}}.
+    {ts_metric_data_node:get(Record), Ctx#ctx{batch = UpdatedBatch}}.
 
 
--spec create(ts_metric:data(), ctx()) -> {key(), ctx()}.
+-spec create(ts_metric:data_node(), ctx()) -> {key(), ctx()}.
 create(DataToCreate, #ctx{hub = #document{key = HubKey}, datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     NewDocKey = datastore_key:new_adjacent_to(HubKey),
-    Doc = #document{key = NewDocKey, value = ts_metric_data:set(DataToCreate)},
+    Doc = #document{key = NewDocKey, value = ts_metric_data_node:set(DataToCreate)},
     {{ok, _}, UpdatedBatch} = datastore_doc:save(DatastoreCtx#{generated_key => true}, NewDocKey, Doc, Batch),
     {NewDocKey, Ctx#ctx{batch = UpdatedBatch}}.
 
 
--spec update(key(), ts_metric:data(), ctx()) -> ctx().
+-spec update(key(), ts_metric:data_node(), ctx()) -> ctx().
 update(HubKey, Data, #ctx{
     hub = #document{key = HubKey, value = Record} = HubDoc,
     currently_processed_time_series = TimeSeriesId,
     currently_processed_metric = MetricsId
 } = Ctx) ->
-    TimeSeriesHeads = ts_hub:get_time_series_heads(Record),
+    TimeSeriesHeads = ts_hub:get_time_series_collection_heads(Record),
     TimeSeries = maps:get(TimeSeriesId, TimeSeriesHeads),
     Metrics = maps:get(MetricsId, TimeSeries),
     UpdatedTimeSeriesHeads = TimeSeriesHeads#{TimeSeriesId => TimeSeries#{MetricsId => Metrics#metric{head_data = Data}}},
-    UpdatedDoc = HubDoc#document{value = ts_hub:set_time_series_heads(UpdatedTimeSeriesHeads)},
+    UpdatedDoc = HubDoc#document{value = ts_hub:set_time_series_collection_heads(UpdatedTimeSeriesHeads)},
     Ctx#ctx{hub = UpdatedDoc, is_hub_updated = true};
 
 update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
-    Doc = #document{key = DataDocKey, value = ts_metric_data:set(Data)},
+    Doc = #document{key = DataDocKey, value = ts_metric_data_node:set(Data)},
     {{ok, _}, UpdatedBatch} = datastore_doc:save(DatastoreCtx, DataDocKey, Doc, Batch),
     Ctx#ctx{batch = UpdatedBatch}.
 

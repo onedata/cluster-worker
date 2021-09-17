@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Helper module to ts_persistence operating on time series hub node
-%%% that stores heads of each metric's #data{} records linked list
+%%% that stores heads of each metric's #data_node{} records linked list
 %%% (see ts_persistence module).
 %%% @end
 %%%-------------------------------------------------------------------
@@ -17,22 +17,22 @@
 -include("modules/datastore/ts_metric_config.hrl").
 
 %% API
--export([set_time_series_heads/1, get_time_series_heads/1]).
+-export([set_time_series_collection_heads/1, get_time_series_collection_heads/1]).
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
 
 -record(ts_hub, {
-    time_series_heads :: time_series_heads_collection()
+    time_series_collection_heads :: time_series_collection_heads()
 }).
 
 -type record() :: #ts_hub{}.
 -type time_series_heads() :: #{ts_metric:id() => ts_metric:metric()}.
--type time_series_heads_collection() :: #{time_series:time_series_id() => time_series_heads()}.
+-type time_series_collection_heads() :: #{time_series_collection:time_series_id() => time_series_heads()}.
 
--export_type([time_series_heads/0, time_series_heads_collection/0]).
+-export_type([time_series_heads/0, time_series_collection_heads/0]).
 
 % Context used only by datastore to initialize internal structures.
-% Context provided via time_series module functions
+% Context provided via time_series_collection module functions
 % overrides it in other cases.
 -define(CTX, #{
     model => ?MODULE,
@@ -44,13 +44,13 @@
 %%% API
 %%%===================================================================
 
--spec set_time_series_heads(time_series_heads_collection()) -> record().
-set_time_series_heads(TimeSeriesHeadsCollection) ->
-    #ts_hub{time_series_heads = TimeSeriesHeadsCollection}.
+-spec set_time_series_collection_heads(time_series_collection_heads()) -> record().
+set_time_series_collection_heads(TimeSeriesCollectionHeads) ->
+    #ts_hub{time_series_collection_heads = TimeSeriesCollectionHeads}.
 
--spec get_time_series_heads(record()) -> time_series_heads_collection().
-get_time_series_heads(#ts_hub{time_series_heads = TimeSeriesHeadsCollection}) ->
-    TimeSeriesHeadsCollection.
+-spec get_time_series_collection_heads(record()) -> time_series_collection_heads().
+get_time_series_collection_heads(#ts_hub{time_series_collection_heads = TimeSeriesCollectionHeads}) ->
+    TimeSeriesCollectionHeads.
 
 %%%===================================================================
 %%% datastore_model callbacks
@@ -69,9 +69,9 @@ get_ctx() ->
 -spec get_record_struct(datastore_model:record_version()) ->
     datastore_model:record_struct().
 get_record_struct(1) ->
-    {record, [DataRecordStruct]} = ts_metric_data:get_record_struct(1),
+    {record, [DataRecordStruct]} = ts_metric_data_node:get_record_struct(1),
     {record, [
-        {time_series_heads, #{string => #{string => {record, [
+        {time_series_collection_heads, #{string => #{string => {record, [
             {config, {record, [
                 {legend, binary},
                 {resolution, integer},

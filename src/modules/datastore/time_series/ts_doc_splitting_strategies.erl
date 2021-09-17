@@ -6,9 +6,9 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Helper module for time_series module calculating strategy of documents
-%%% splitting when any metric has too many windows to be stored in single
-%%% datastore document (see #splitting_strategy{} record definition).
+%%% Helper module for time_series_collection module calculating strategy of
+%%% documents splitting when any metric has too many windows to be stored in
+%%% single datastore document (see #splitting_strategy{} record definition).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ts_doc_splitting_strategies).
@@ -21,8 +21,8 @@
 %% API
 -export([calculate/1]).
 
--type flat_config_map() :: #{time_series:full_metric_id() => ts_metric:config()}.
--type windows_count_map() :: #{time_series:full_metric_id() => non_neg_integer()}.
+-type flat_config_map() :: #{time_series_collection:full_metric_id() => ts_metric:config()}.
+-type windows_count_map() :: #{time_series_collection:full_metric_id() => non_neg_integer()}.
 
 % Warning: do not use this env in app.config (setting it to very high value can result in creation of
 % datastore documents that are too big for couchbase). Use of env limited to tests.
@@ -32,7 +32,7 @@
 %% API
 %%=====================================================================
 
--spec calculate(time_series:collection_config()) -> #{time_series:full_metric_id() => ts_metric:splitting_strategy()}.
+-spec calculate(time_series_collection:collection_config()) -> #{time_series_collection:full_metric_id() => ts_metric:splitting_strategy()}.
 calculate(ConfigMap) ->
     FlattenedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
         maps:fold(fun
@@ -109,7 +109,7 @@ calculate_windows_in_head_doc_count(FullyStoredInHead, NotFullyStoredInHead, Rem
     end.
 
 
--spec update_windows_in_head_doc_count([time_series:full_metric_id()], windows_count_map(),
+-spec update_windows_in_head_doc_count([time_series_collection:full_metric_id()], windows_count_map(),
     windows_count_map(), flat_config_map(), non_neg_integer(), non_neg_integer()) ->
     {windows_count_map(), windows_count_map(), non_neg_integer()}.
 update_windows_in_head_doc_count(_MetricsKeys, FullyStoredInHead, NotFullyStoredInHead, _FlattenedMap, _LimitUpdate, 0) ->

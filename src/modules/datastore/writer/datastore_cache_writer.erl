@@ -532,7 +532,7 @@ batch_requests([#datastore_internal_request{pid = Pid, ref = Ref, request = Requ
 -spec batch_request(term(), batch(), cached_token_map()) ->
     {term(), batch()} | {term(), batch(), cached_token_map()}.
 batch_request(#datastore_request{module = Module, function = Function, ctx = Ctx, args = Args}, Batch, _LinkTokens)
-    when Module =:= infinite_log orelse Module =:= time_series ->
+    when Module =:= infinite_log orelse Module =:= time_series_collection ->
     batch_apply(Batch, fun(Batch2) ->
         erlang:apply(Module, Function, [set_mutator_pid(Ctx) | Args] ++ [Batch2])
     end);

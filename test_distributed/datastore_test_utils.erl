@@ -158,33 +158,33 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_infinite_log:set_ttl(Ctx, Key, Ttl)
         end},
-        {time_series_create, fun(Id, ConfigMap) ->
+        {time_series_collection_create, fun(Id, ConfigMap) ->
             Ctx = get_ctx(Model),
-            datastore_time_series:create(Ctx, Id, ConfigMap)
+            datastore_time_series_collection:create(Ctx, Id, ConfigMap)
         end},
-        {time_series_update, fun(Id, NewTimestamp, ValueOrUpdateRange) ->
+        {time_series_collection_update, fun(Id, NewTimestamp, ValueOrUpdateRange) ->
             Ctx = get_ctx(Model),
-            datastore_time_series:update(Ctx, Id, NewTimestamp, ValueOrUpdateRange)
+            datastore_time_series_collection:update(Ctx, Id, NewTimestamp, ValueOrUpdateRange)
         end},
-        {time_series_update, fun(Id, NewTimestamp, MetricsToUpdate, NewValue) ->
+        {time_series_collection_update, fun(Id, NewTimestamp, MetricsToUpdate, NewValue) ->
             Ctx = get_ctx(Model),
-            datastore_time_series:update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue)
+            datastore_time_series_collection:update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue)
         end},
-        {time_series_update_many, fun(Id, Measurements) ->
+        {time_series_collection_update_many, fun(Id, Measurements) ->
             Ctx = get_ctx(Model),
-            datastore_time_series:update_many(Ctx, Id, Measurements)
+            datastore_time_series_collection:update_many(Ctx, Id, Measurements)
         end},
-        {time_series_list, fun(Id, Options) ->
+        {time_series_collection_list, fun(Id, Options) ->
             Ctx = get_ctx(Model),
-            datastore_time_series:list(Ctx, Id, Options)
+            datastore_time_series_collection:list(Ctx, Id, Options)
         end},
-        {time_series_list, fun(Id, RequestedMetrics, Options) ->
+        {time_series_collection_list, fun(Id, RequestedMetrics, Options) ->
             Ctx = get_ctx(Model),
-            datastore_time_series:list(Ctx, Id, RequestedMetrics, Options)
+            datastore_time_series_collection:list(Ctx, Id, RequestedMetrics, Options)
         end},
-        {time_series_delete, fun(Id) ->
+        {time_series_collection_delete, fun(Id) ->
             Ctx = get_ctx(Model),
-            datastore_time_series:delete(Ctx, Id)
+            datastore_time_series_collection:delete(Ctx, Id)
         end}
     ]).
 

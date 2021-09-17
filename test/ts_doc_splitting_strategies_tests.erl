@@ -26,9 +26,9 @@ single_doc_splitting_strategies_create_test() ->
     Id = datastore_key:new(),
     Batch = datastore_doc_batch:init(),
     ConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0}}},
-    ?assertEqual({{error, empty_metric}, Batch}, time_series:create(#{}, Id, ConfigMap, Batch)),
+    ?assertEqual({{error, empty_metric}, Batch}, time_series_collection:create(#{}, Id, ConfigMap, Batch)),
     ConfigMap2 = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = 0}}},
-    ?assertEqual({{error, wrong_resolution}, Batch}, time_series:create(#{}, Id, ConfigMap2, Batch)),
+    ?assertEqual({{error, wrong_resolution}, Batch}, time_series_collection:create(#{}, Id, ConfigMap2, Batch)),
 
     single_doc_splitting_strategies_create_testcase(10, #splitting_strategy{
         max_windows_in_head_doc = 10, max_windows_in_tail_doc = 0, max_docs_count = 1}),
@@ -114,7 +114,7 @@ multiple_metrics_splitting_strategies_create_test() ->
     ConfigMap3 = #{<<"TS1">> => GetLargeTimeSeries(), <<"TS2">> => GetLargeTimeSeries()},
     Id = datastore_key:new(),
     Batch = datastore_doc_batch:init(),
-    ?assertEqual({{error, too_many_metrics}, Batch}, time_series:create(#{}, Id, ConfigMap3, Batch)).
+    ?assertEqual({{error, too_many_metrics}, Batch}, time_series_collection:create(#{}, Id, ConfigMap3, Batch)).
 
 
 %%%===================================================================

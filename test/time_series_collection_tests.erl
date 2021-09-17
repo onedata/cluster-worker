@@ -6,10 +6,10 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Eunit tests for the time_series module.
+%%% Eunit tests for the time_series_collection module.
 %%% @end
 %%%-------------------------------------------------------------------
--module(time_series_tests).
+-module(time_series_collection_tests).
 -author("Michal Wrzeszcz").
 
 -ifdef(TEST).
@@ -21,7 +21,7 @@
 -include("global_definitions.hrl").
 
 -define(LIST(Id, Requested, Batch), ?LIST(Id, Requested, #{}, Batch)).
--define(LIST(Id, Requested, Options, Batch), time_series:list(#{}, Id, Requested, Options, Batch)).
+-define(LIST(Id, Requested, Options, Batch), time_series_collection:list(#{}, Id, Requested, Options, Batch)).
 -define(LIST_OK_ANS(Expected), {{ok, Expected}, _}).
 
 %%%===================================================================
@@ -70,7 +70,7 @@ single_metric_single_node() ->
     ConfigMap = #{TimeSeriesId => #{MetricsId => MetricsConfig}},
     Batch = init(Id, ConfigMap),
 
-    % Prepare time series collection to be used if tests (batch stores collection)
+    % Prepare time series collection to be used in tests (batch stores collection)
     Measurements = lists:map(fun(I) -> {I, I/2} end, lists:seq(10, 49) ++ lists:seq(60, 69)),
     Batch2 = update_many(Id, Measurements, Batch),
 
@@ -121,7 +121,7 @@ single_metric_multiple_nodes() ->
     ConfigMap = #{TimeSeriesId => #{MetricsId => MetricsConfig}},
     Batch = init(Id, ConfigMap),
 
-    % Prepare time series collection to be used if tests (batch stores collection)
+    % Prepare time series collection to be used in tests (batch stores collection)
     Measurements = lists:map(fun(I) -> {2 * I, 4 * I} end, lists:seq(1, 10000)),
     Batch2 = update_many(Id, Measurements, Batch),
 
@@ -147,12 +147,12 @@ single_metric_multiple_nodes() ->
     % Verify if windows are stored using multiple datastore documents
     ?assertEqual(5, maps:size(Batch2)),
     DocsNums = lists:foldl(fun
-        (#document{value = {ts_metric_data, #data{windows = Windows}}}, {HeadsCountAcc, TailsCountAcc}) ->
+        (#document{value = {ts_metric_data_node, #data_node{windows = Windows}}}, {HeadsCountAcc, TailsCountAcc}) ->
             ?assertEqual(2000, ts_windows:get_size(Windows)),
             {HeadsCountAcc, TailsCountAcc + 1};
         (#document{value = {ts_hub, TimeSeries}}, {HeadsCountAcc, TailsCountAcc}) ->
             [Metrics] = maps:values(TimeSeries),
-            [#metric{head_data = #data{windows = Windows}}] = maps:values(Metrics),
+            [#metric{head_data = #data_node{windows = Windows}}] = maps:values(Metrics),
             ?assertEqual(2000, ts_windows:get_size(Windows)),
             {HeadsCountAcc + 1, TailsCountAcc}
     end, {0, 0}, maps:values(Batch2)),
@@ -209,7 +209,7 @@ single_time_series_single_node() ->
     ConfigMap = #{TimeSeriesId => MetricsConfigs},
     Batch = init(Id, ConfigMap),
 
-    % Prepare time series collection to be used if tests (batch stores collection)
+    % Prepare time series collection to be used in tests (batch stores collection)
     MeasurementsCount = 1199,
     Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementsCount)),
     Batch2 = update_many(Id, Measurements, Batch),
@@ -269,7 +269,7 @@ single_time_series_multiple_nodes() ->
     ConfigMap = #{TimeSeriesId => MetricsConfigs},
     Batch = init(Id, ConfigMap),
 
-    % Prepare time series collection to be used if tests (batch stores collection)
+    % Prepare time series collection to be used in tests (batch stores collection)
     MeasurementsCount = 12500,
     Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
     Batch2 = update_many(Id, Measurements, Batch),
@@ -278,14 +278,14 @@ single_time_series_multiple_nodes() ->
     ?assertEqual(6, maps:size(Batch2)),
     TailSizes = [1500, 1500, 2000, 2000, 2000],
     RemainingTailSizes = lists:foldl(fun
-        (#document{value = {ts_metric_data, #data{windows = Windows}}}, TmpTailSizes) ->
+        (#document{value = {ts_metric_data_node, #data_node{windows = Windows}}}, TmpTailSizes) ->
             Size = ts_windows:get_size(Windows),
             ?assert(lists:member(Size, TmpTailSizes)),
             TmpTailSizes -- [Size];
         (#document{value = {ts_hub, TimeSeries}}, TmpTailSizes) ->
             [MetricsMap] = maps:values(TimeSeries),
             ?assertEqual(4, maps:size(MetricsMap)),
-            lists:foreach(fun(#metric{head_data = #data{windows = Windows}}) ->
+            lists:foreach(fun(#metric{head_data = #data_node{windows = Windows}}) ->
                 ?assertEqual(500, ts_windows:get_size(Windows))
             end, maps:values(MetricsMap)),
             TmpTailSizes
@@ -327,7 +327,7 @@ multiple_time_series_single_node() ->
     end, #{}, lists:seq(1, 5)),
     Batch = init(Id, ConfigMap),
 
-    % Prepare time series collection to be used if tests (batch stores collection)
+    % Prepare time series collection to be used in tests (batch stores collection)
     MeasurementsCount = 1199,
     Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementsCount)),
     Batch2 = update_many(Id, Measurements, Batch),
@@ -403,7 +403,7 @@ multiple_time_series_multiple_nodes() ->
     end, #{}, lists:seq(1, 5)),
     Batch = init(Id, ConfigMap),
 
-    % Prepare time series collection to be used if tests (batch stores collection)
+    % Prepare time series collection to be used in tests (batch stores collection)
     MeasurementsCount = 24400,
     Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
     Batch2 = update_many(Id, Measurements, Batch),
@@ -412,7 +412,7 @@ multiple_time_series_multiple_nodes() ->
     ?assertEqual(8, maps:size(Batch2)),
     TailSizes = [1200, 1200, 1600, 1600, 1600, 2000, 2000],
     RemainingTailSizes = lists:foldl(fun
-        (#document{value = {ts_metric_data, #data{windows = Windows}}}, TmpTailSizes) ->
+        (#document{value = {ts_metric_data_node, #data_node{windows = Windows}}}, TmpTailSizes) ->
             Size = ts_windows:get_size(Windows),
             ?assert(lists:member(Size, TmpTailSizes)),
             TmpTailSizes -- [Size];
@@ -422,7 +422,7 @@ multiple_time_series_multiple_nodes() ->
             MetricsMap1 = maps:get(<<"TS", 1>>, TimeSeries),
             ?assertEqual(2, maps:size(MetricsMap0)),
             ?assertEqual(3, maps:size(MetricsMap1)),
-            lists:foreach(fun(#metric{head_data = #data{windows = Windows}}) ->
+            lists:foreach(fun(#metric{head_data = #data_node{windows = Windows}}) ->
                 ?assertEqual(400, ts_windows:get_size(Windows))
             end, maps:values(MetricsMap0) ++ maps:values(MetricsMap1)),
             TmpTailSizes
@@ -487,21 +487,21 @@ update_subset() ->
 
 init(Id, ConfigMap) ->
     Batch = datastore_doc_batch:init(),
-    InitAns = time_series:create(#{}, Id, ConfigMap, Batch),
+    InitAns = time_series_collection:create(#{}, Id, ConfigMap, Batch),
     ?assertMatch({ok, _}, InitAns),
     {ok, Batch2} = InitAns,
     Batch2.
 
 
 update(Id, NewTimestamp, ValueOrUpdateRange, Batch) ->
-    UpdateAns = time_series:update(#{}, Id, NewTimestamp, ValueOrUpdateRange, Batch),
+    UpdateAns = time_series_collection:update(#{}, Id, NewTimestamp, ValueOrUpdateRange, Batch),
     ?assertMatch({ok, _}, UpdateAns),
     {ok, Batch2} = UpdateAns,
     Batch2.
 
 
 update(Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
-    UpdateAns = time_series:update(#{}, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch),
+    UpdateAns = time_series_collection:update(#{}, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch),
     ?assertMatch({ok, _}, UpdateAns),
     {ok, Batch2} = UpdateAns,
     Batch2.
