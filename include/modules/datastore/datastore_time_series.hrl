@@ -21,9 +21,9 @@
 % first record (head).
 -record(data_node, {
     windows = ts_windows:init() :: ts_windows:windows(),
-    prev_record :: ts_metric_data_node:key() | undefined,
-    % Timestamp of newest measurement in previous record
-    prev_record_timestamp :: ts_windows:timestamp() | undefined
+    older_node_key :: ts_metric_data_node:key() | undefined,
+    % Timestamp of newest measurement in older data node
+    older_node_timestamp :: ts_windows:timestamp() | undefined
 }).
 
 

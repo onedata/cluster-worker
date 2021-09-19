@@ -72,7 +72,7 @@ get_record_struct(1) ->
     {record, [
         {value, {record, [
             {windows, {custom, json, {ts_windows, encode, decode}}},
-            {prev_record, string},
-            {prev_record_timestamp, integer}
+            {older_node_key, string},
+            {older_node_timestamp, integer}
         ]}}
     ]}.

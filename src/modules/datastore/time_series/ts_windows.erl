@@ -80,35 +80,35 @@ is_size_exceeded(Windows, MaxWindowsCount) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Reorganizes two sets of windows (from current and previous record). The functions is used when capacity of
-%% current record is exceeded. If previous record is not full, the function migrates windows from current record
-%% to previous record to decrease number of windows in current record. Otherwise, the function splits windows set
-%% stored in current record.
+%% Reorganizes two sets of windows (from current and older data node). The functions is used when capacity of
+%% current data node is exceeded. If older data node is not full, the function migrates windows from current data node
+%% to older data node to decrease number of windows in current data node. Otherwise, the function splits windows set
+%% stored in current data node.
 %% @end
 %%--------------------------------------------------------------------
 -spec reorganize(windows(), windows(), non_neg_integer(), non_neg_integer()) ->
-    ActionsToApplyOnRecords :: [{update_previous_record, windows()} | {update_current_record, timestamp(), windows()} |
-        {split_current_record, {windows(), windows(), timestamp()}}].
-reorganize(WindowsInPrevRecord, WindowsInCurrentRecord, MaxWindowsInPrevRecord, SplitPosition) ->
-    WindowsInPrevRecordSize = get_size(WindowsInPrevRecord),
-    WindowsInCurrentRecordSize = get_size(WindowsInCurrentRecord),
+    ActionsToApplyOnDataNodes :: [{update_previous_data_node, windows()} | {update_current_data_node, timestamp(), windows()} |
+        {split_current_data_node, {windows(), windows(), timestamp()}}].
+reorganize(WindowsInOlderDataNode, WindowsInCurrentDataNode, MaxWindowsInOlderDataNode, SplitPosition) ->
+    WindowsInOlderDataNodeCount = get_size(WindowsInOlderDataNode),
+    WindowsInCurrentDataNodeCount = get_size(WindowsInCurrentDataNode),
 
-    case WindowsInPrevRecordSize of
-        MaxWindowsInPrevRecord ->
-            [{split_current_record, split_internal(WindowsInCurrentRecord, SplitPosition)}];
+    case WindowsInOlderDataNodeCount of
+        MaxWindowsInOlderDataNode ->
+            [{split_current_data_node, split_internal(WindowsInCurrentDataNode, SplitPosition)}];
         _ ->
-            case WindowsInPrevRecordSize + WindowsInCurrentRecordSize > MaxWindowsInPrevRecord of
+            case WindowsInOlderDataNodeCount + WindowsInCurrentDataNodeCount > MaxWindowsInOlderDataNode of
                 true ->
-                    {WindowsInCurrentRecordPart1, WindowsInCurrentRecordPart2, SplitTimestamp} =
-                        split_internal(WindowsInCurrentRecord,
-                            WindowsInCurrentRecordSize - (MaxWindowsInPrevRecord - WindowsInPrevRecordSize)),
-                    UpdatedWindowsInPrevRecord = merge(WindowsInCurrentRecordPart2, WindowsInPrevRecord),
-                    [{update_previous_record, UpdatedWindowsInPrevRecord},
-                        {update_current_record, SplitTimestamp, WindowsInCurrentRecordPart1}];
+                    {WindowsInCurrentDataNodePart1, WindowsInCurrentDataNodePart2, SplitTimestamp} =
+                        split_internal(WindowsInCurrentDataNode,
+                            WindowsInCurrentDataNodeCount - (MaxWindowsInOlderDataNode - WindowsInOlderDataNodeCount)),
+                    UpdatedWindowsInOlderDataNode = merge(WindowsInCurrentDataNodePart2, WindowsInOlderDataNode),
+                    [{update_previous_data_node, UpdatedWindowsInOlderDataNode},
+                        {update_current_data_node, SplitTimestamp, WindowsInCurrentDataNodePart1}];
                 false ->
-                    TimestampToUpdate = get_first_timestamp(WindowsInCurrentRecord),
-                    [{update_previous_record, merge(WindowsInCurrentRecord, WindowsInPrevRecord)},
-                        {update_current_record, TimestampToUpdate, init_windows_set()}]
+                    TimestampToUpdate = get_first_timestamp(WindowsInCurrentDataNode),
+                    [{update_previous_data_node, merge(WindowsInCurrentDataNode, WindowsInOlderDataNode)},
+                        {update_current_data_node, TimestampToUpdate, init_windows_set()}]
             end
     end.
 

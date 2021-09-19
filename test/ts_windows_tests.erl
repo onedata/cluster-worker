@@ -169,19 +169,19 @@ reorganization_test() ->
     ?assertEqual(false, ts_windows:is_size_exceeded(Windows1, MeasurementsCount + 1)),
 
     Test1 = ts_windows:reorganize(Windows1, Windows2, 10, 1),
-    ?assertMatch([{split_current_record, {_, _, 29}}], Test1),
+    ?assertMatch([{split_current_data_node, {_, _, 29}}], Test1),
     [{_, {Test1Split1, Test1Split2, _}}] = Test1,
     ?assertEqual(?LIST_ALL_RESULT(lists:sublist(ReversedMeasurements2, 1)), ?LIST_ALL(Test1Split1)),
     ?assertEqual(?LIST_ALL_RESULT(lists:sublist(ReversedMeasurements2, 2, MeasurementsCount - 1)), ?LIST_ALL(Test1Split2)),
 
     Test2 = ts_windows:reorganize(Windows1, Windows2, 20, 1),
-    ?assertMatch([{update_previous_record, _}, {update_current_record, 30, _}], Test2),
+    ?assertMatch([{update_previous_data_node, _}, {update_current_data_node, 30, _}], Test2),
     [{_, Test2Windows1}, {_, _, Test2Windows2}] = Test2,
     ?assertEqual(?LIST_ALL_RESULT(ReversedMeasurements2 ++ ReversedMeasurements1), ?LIST_ALL(Test2Windows1)),
     ?assertEqual(ts_windows:init(), Test2Windows2),
 
     Test3 = ts_windows:reorganize(Windows1, Windows2, 13, 1),
-    ?assertMatch([{update_previous_record, _}, {update_current_record, 23, _}], Test3),
+    ?assertMatch([{update_previous_data_node, _}, {update_current_data_node, 23, _}], Test3),
     [{_, Test3Windows1}, {_, _, Test3Windows2}] = Test3,
     ?assertEqual(?LIST_ALL_RESULT(lists:sublist(ReversedMeasurements2, 8, 3) ++ ReversedMeasurements1),
         ?LIST_ALL(Test3Windows1)),

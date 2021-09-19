@@ -29,8 +29,8 @@
 %%% +----------------------------------------------------------------------+
 %%% |                                                                      |
 %%% |    metric{                metric{               metric{              |
-%%% |      data{                  data{                 data{              |
-%%% |        prev_record            prev_record           prev_record      |     Heads inside hub records
+%%% |      data_node{             data_node{            data_node{         |
+%%% |        older_node_key         older_node_key        older_node_key   |     Heads inside hub records
 %%% |      }    |                   = undefined         }    |             |
 %%% |    }      |                 }                   }      |             |
 %%% |           |               }                            |             |
@@ -42,9 +42,9 @@
 %%%   ts_metric_data_node                             ts_metric_data_node
 %%% +---------------------+                         +---------------------+
 %%% |                     |                         |                     |
-%%% |    data{            |                         |    data{            |
-%%% |      prev_record    |                         |      prev_record    |     Rest of data inside
-%%% |    }      |         |                         |      = undefined    |     metric_data records
+%%% |    data_node{       |                         |    data_node{       |
+%%% |      older_node_key |                         |      older_node_key |     Rest of windows inside
+%%% |    }      |         |                         |      = undefined    |     ts_metric_data_node records
 %%% |           |         |                         |    }                |
 %%% +-----------+---------+                         +---------------------+
 %%%             |
@@ -53,14 +53,17 @@
 %%%   ts_metric_data_node
 %%% +---------------------+
 %%% |                     |
-%%% |    data{            |
-%%% |      prev_record    |
+%%% |    data_node{       |
+%%% |      older_node_key |
 %%% |      = undefined    |
 %%% |    }                |
 %%% +---------------------+
 %%%
 %%% Key of ts_hub document is equal to id of time series collection while
 %%% ts_metric_data_node documents have randomly generated ids.
+%%%
+%%% NOTE: linked list of #data_node{} records contains windows from
+%%% newest (stored in first record - head) to oldest.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ts_persistence).
