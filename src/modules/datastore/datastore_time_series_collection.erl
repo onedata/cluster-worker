@@ -14,7 +14,7 @@
 -author("Michal Wrzeszcz").
 
 %% API
--export([create/3, update/4, update/5, update_many/3, list/3, list/4, delete/2]).
+-export([create/3, update/4, update/5, update_many/3, list_windows/3, list_windows/4, delete/2]).
 
 -type ctx() :: datastore_model:ctx().
 
@@ -67,23 +67,23 @@ update_many(Ctx, Id, Measurements) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns windows for requested ranges. Windows for all metrics from all time series are included in
-%% answer - see time_series_collection:list/4.
+%% answer - see time_series_collection:list_windows/4.
 %% @end
 %%--------------------------------------------------------------------
--spec list(ctx(), time_series_collection:collection_id(), ts_windows:list_options()) ->
+-spec list_windows(ctx(), time_series_collection:collection_id(), ts_windows:list_options()) ->
     time_series_collection:windows_map() | {error, term()}.
-list(Ctx, Id, Options) ->
+list_windows(Ctx, Id, Options) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4, [?FUNCTION_NAME, [Options]]).
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns windows for requested ranges for chosen metrics - see time_series_collection:list/5.
+%% Returns windows for requested ranges for chosen metrics - see time_series_collection:list_windows/5.
 %% @end
 %%--------------------------------------------------------------------
--spec list(ctx(), time_series_collection:collection_id(), time_series_collection:request_range(),
+-spec list_windows(ctx(), time_series_collection:collection_id(), time_series_collection:request_range(),
     ts_windows:list_options()) -> [ts_windows:window()] | time_series_collection:windows_map() | {error, term()}.
-list(Ctx, Id, RequestedMetrics, Options) ->
+list_windows(Ctx, Id, RequestedMetrics, Options) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
         [?FUNCTION_NAME, [RequestedMetrics, Options]]).
 

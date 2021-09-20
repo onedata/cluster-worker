@@ -21,7 +21,7 @@
 -include("global_definitions.hrl").
 
 -define(LIST(Id, Requested, Batch), ?LIST(Id, Requested, #{}, Batch)).
--define(LIST(Id, Requested, Options, Batch), time_series_collection:list(#{}, Id, Requested, Options, Batch)).
+-define(LIST(Id, Requested, Options, Batch), time_series_collection:list_windows(#{}, Id, Requested, Options, Batch)).
 -define(LIST_OK_ANS(Expected), {{ok, Expected}, _}).
 
 %%%===================================================================

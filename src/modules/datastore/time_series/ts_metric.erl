@@ -30,7 +30,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([update/4, list/3, delete/2]).
+-export([update/4, list_windows/3, delete/2]).
 
 -type id() :: binary().
 -type metric() :: #metric{}.
@@ -57,13 +57,13 @@ update(#metric{
     update(Data, DataNodeKey, 1, DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx).
 
 
--spec list(metric(), ts_windows:list_options(), ts_persistence:ctx()) -> {[ts_windows:window()], ts_persistence:ctx()}.
-list(#metric{
+-spec list_windows(metric(), ts_windows:list_options(), ts_persistence:ctx()) -> {[ts_windows:window()], ts_persistence:ctx()}.
+list_windows(#metric{
     head_data = Data,
     config = Config
 }, Options, PersistenceCtx) ->
     Window = get_window_id(maps:get(start, Options, undefined), Config),
-    list(Data, Window, Options, PersistenceCtx).
+    list_windows(Data, Window, Options, PersistenceCtx).
 
 
 -spec delete(metric(), ts_persistence:ctx()) -> ts_persistence:ctx().
@@ -186,7 +186,7 @@ prune_overflowing_node(NewerNodeKey, NewerDataNode, Key, _Data,
     #splitting_strategy{max_docs_count = MaxCount}, DocumentNumber, PersistenceCtx) when DocumentNumber > MaxCount ->
     UpdatedNewerDataNode = NewerDataNode#data_node{older_node_key = undefined},
     UpdatedPersistenceCtx = ts_persistence:update(NewerNodeKey, UpdatedNewerDataNode, PersistenceCtx),
-    ts_persistence:delete(Key, UpdatedPersistenceCtx);
+    ts_persistence:delete_data_node(Key, UpdatedPersistenceCtx);
 prune_overflowing_node(NewerNodeKey, NewerDataNode, Key, undefined,
     DocSplittingStrategy, DocumentNumber, PersistenceCtx) ->
     {Data, UpdatedPersistenceCtx} = ts_persistence:get(Key, PersistenceCtx),
@@ -200,9 +200,9 @@ prune_overflowing_node(_NewerNodeKey, _NewerDataNode, Key, #data_node{older_node
     prune_overflowing_node(Key, Data, OlderNodeKey, undefined, DocSplittingStrategy, DocumentNumber + 1, PersistenceCtx).
 
 
--spec list(data_node(), ts_windows:window_id() | undefined, ts_windows:list_options(),
+-spec list_windows(data_node(), ts_windows:window_id() | undefined, ts_windows:list_options(),
     ts_persistence:ctx()) -> {[ts_windows:window()], ts_persistence:ctx()}.
-list(
+list_windows(
     #data_node{
         windows = Windows,
         older_node_key = undefined
@@ -210,16 +210,16 @@ list(
     {_, WindowsToReturn} = ts_windows:list(Windows, Window, Options),
     {WindowsToReturn, PersistenceCtx};
 
-list(
+list_windows(
     #data_node{
         older_node_key = OlderNodeKey,
         older_node_timestamp = OlderNodeTimestamp
     }, Window, Options, PersistenceCtx)
     when OlderNodeTimestamp >= Window ->
     {OlderDataNode, UpdatedPersistenceCtx} = ts_persistence:get(OlderNodeKey, PersistenceCtx),
-    list(OlderDataNode, Window, Options, UpdatedPersistenceCtx);
+    list_windows(OlderDataNode, Window, Options, UpdatedPersistenceCtx);
 
-list(
+list_windows(
     #data_node{
         windows = Windows,
         older_node_key = OlderNodeKey
@@ -230,17 +230,17 @@ list(
         {{continue, NewOptions}, WindowsToReturn} ->
             {OlderDataNode, UpdatedPersistenceCtx} = ts_persistence:get(OlderNodeKey, PersistenceCtx),
             {NextWindowsToReturn, FinalPersistenceCtx} =
-                list(OlderDataNode, undefined, NewOptions, UpdatedPersistenceCtx),
+                list_windows(OlderDataNode, undefined, NewOptions, UpdatedPersistenceCtx),
             {WindowsToReturn ++ NextWindowsToReturn, FinalPersistenceCtx}
     end.
 
 
 -spec delete(ts_metric_data_node:key(), data_node(), ts_persistence:ctx()) -> ts_persistence:ctx().
 delete(DataNodeKey, #data_node{older_node_key = undefined}, PersistenceCtx) ->
-    ts_persistence:delete(DataNodeKey, PersistenceCtx);
+    ts_persistence:delete_data_node(DataNodeKey, PersistenceCtx);
 delete(DataNodeKey, #data_node{older_node_key = OlderNodeKey}, PersistenceCtx) ->
     {OlderDataNode, UpdatedPersistenceCtx} = ts_persistence:get(OlderNodeKey, PersistenceCtx),
-    UpdatedPersistenceCtx2 = ts_persistence:delete(DataNodeKey, UpdatedPersistenceCtx),
+    UpdatedPersistenceCtx2 = ts_persistence:delete_data_node(DataNodeKey, UpdatedPersistenceCtx),
     delete(OlderNodeKey, OlderDataNode, UpdatedPersistenceCtx2).
 
 

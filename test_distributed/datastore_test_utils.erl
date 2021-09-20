@@ -174,13 +174,13 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_time_series_collection:update_many(Ctx, Id, Measurements)
         end},
-        {time_series_collection_list, fun(Id, Options) ->
+        {time_series_collection_list_windows, fun(Id, Options) ->
             Ctx = get_ctx(Model),
-            datastore_time_series_collection:list(Ctx, Id, Options)
+            datastore_time_series_collection:list_windows(Ctx, Id, Options)
         end},
-        {time_series_collection_list, fun(Id, RequestedMetrics, Options) ->
+        {time_series_collection_list_windows, fun(Id, RequestedMetrics, Options) ->
             Ctx = get_ctx(Model),
-            datastore_time_series_collection:list(Ctx, Id, RequestedMetrics, Options)
+            datastore_time_series_collection:list_windows(Ctx, Id, RequestedMetrics, Options)
         end},
         {time_series_collection_delete, fun(Id) ->
             Ctx = get_ctx(Model),

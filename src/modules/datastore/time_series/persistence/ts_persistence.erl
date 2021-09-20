@@ -76,12 +76,12 @@
 -export([init_for_new_collection/4, init_for_existing_collection/3, finalize/1,
     set_currently_processed_time_series/2, set_currently_processed_metric/2,
     get_time_series_collection_id/1, is_hub_key/2,
-    get/2, create/2, update/3, delete/2, delete_hub/1]).
+    get/2, create/2, update/3, delete_data_node/2, delete_hub/1]).
 
 -record(ctx, {
     datastore_ctx :: datastore_ctx(),
     batch :: batch() | undefined, % Undefined when time series collection is used outside tp process
-                                  % (call via datastore_reader:time_series_collection_list/3)
+                                  % (call via datastore_reader:time_series_collection_list_windows/3)
     hub :: doc(),
     is_hub_updated = false :: boolean(), % Field used to determine if hub should be saved by finalize/1 function
     % Fields representing metric currently being updated (single ctx can be used to update several metrics)
@@ -195,8 +195,8 @@ update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx
     Ctx#ctx{batch = UpdatedBatch}.
 
 
--spec delete(key(), ctx()) -> ctx().
-delete(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
+-spec delete_data_node(key(), ctx()) -> ctx().
+delete_data_node(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     {ok, UpdatedBatch} = datastore_doc:delete(DatastoreCtx, Key, Batch),
     Ctx#ctx{batch = UpdatedBatch}.
 

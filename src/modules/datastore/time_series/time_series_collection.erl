@@ -44,7 +44,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([create/4, update/5, update/6, update_many/4, list/4, list/5, delete/3]).
+-export([create/4, update/5, update/6, update_many/4, list_windows/4, list_windows/5, delete/3]).
 
 -type time_series_id() :: binary().
 -type collection_id() :: binary().
@@ -200,9 +200,9 @@ update_many(Ctx, Id, [{NewTimestamp, NewValue} | Measurements], Batch) ->
 %% Windows for all metrics from all time series are included in answer.
 %% @end
 %%--------------------------------------------------------------------
--spec list(ctx(), collection_id(), ts_windows:list_options(), batch() | undefined) ->
+-spec list_windows(ctx(), collection_id(), ts_windows:list_options(), batch() | undefined) ->
     {{ok, windows_map()} | {error, term()}, batch() | undefined}.
-list(Ctx, Id, Options, Batch) ->
+list_windows(Ctx, Id, Options, Batch) ->
     ?CATCH_UNEXPECTED_ERRORS(
         begin
             {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
@@ -211,7 +211,7 @@ list(Ctx, Id, Options, Batch) ->
                     [{TimeSeriesId, MetricsId} | InternalAcc]
                 end, Acc, MetricsConfigs)
             end, [], TimeSeriesCollectionHeads),
-            {Ans, FinalPersistenceCtx} = list_time_series(
+            {Ans, FinalPersistenceCtx} = list_time_series_windows(
                 TimeSeriesCollectionHeads, FillMetricsIds, Options, PersistenceCtx),
             {{ok, Ans}, ts_persistence:finalize(FinalPersistenceCtx)}
         end,
@@ -226,13 +226,13 @@ list(Ctx, Id, Options, Batch) ->
 %% Otherwise, map containing list of windows for each requested metric is returned.
 %% @end
 %%--------------------------------------------------------------------
--spec list(ctx(), collection_id(), request_range(), ts_windows:list_options(), batch() | undefined) ->
+-spec list_windows(ctx(), collection_id(), request_range(), ts_windows:list_options(), batch() | undefined) ->
     {{ok, [ts_windows:window()] | windows_map()} | {error, term()}, batch() | undefined}.
-list(Ctx, Id, RequestedMetrics, Options, Batch) ->
+list_windows(Ctx, Id, RequestedMetrics, Options, Batch) ->
     ?CATCH_UNEXPECTED_ERRORS(
         begin
             {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-            {Ans, FinalPersistenceCtx} = list_time_series(
+            {Ans, FinalPersistenceCtx} = list_time_series_windows(
                 TimeSeriesCollectionHeads, RequestedMetrics, Options, PersistenceCtx),
             {{ok, Ans}, ts_persistence:finalize(FinalPersistenceCtx)}
         end,
@@ -313,43 +313,43 @@ update_metrics([{MetricId, Metric} | Tail], NewTimestamp, NewValue, PersistenceC
     update_metrics(Tail, NewTimestamp, NewValue, FinalPersistenceCtx).
 
 
--spec list_time_series(ts_hub:time_series_collection_heads(), request_range(), ts_windows:list_options(),
+-spec list_time_series_windows(ts_hub:time_series_collection_heads(), request_range(), ts_windows:list_options(),
     ts_persistence:ctx()) -> {[ts_windows:window()] | windows_map(), ts_persistence:ctx()}.
-list_time_series(_TimeSeriesCollectionHeads, [], _Options, PersistenceCtx) ->
+list_time_series_windows(_TimeSeriesCollectionHeads, [], _Options, PersistenceCtx) ->
     {#{}, PersistenceCtx};
 
-list_time_series(TimeSeriesCollectionHeads, [{TimeSeriesIds, MetricIds} | RequestedMetrics], Options, PersistenceCtx) ->
+list_time_series_windows(TimeSeriesCollectionHeads, [{TimeSeriesIds, MetricIds} | RequestedMetrics], Options, PersistenceCtx) ->
     {Ans, UpdatedPersistenceCtx} = lists:foldl(fun(TimeSeriesId, Acc) ->
         MetricsMap = maps:get(TimeSeriesId, TimeSeriesCollectionHeads, #{}),
         lists:foldl(fun(MetricId, {TmpAns, TmpPersistenceCtx}) ->
             {Values, UpdatedTmpPersistenceCtx} = case maps:get(MetricId, MetricsMap, undefined) of
                 undefined -> {undefined, TmpPersistenceCtx};
-                Metric -> ts_metric:list(Metric, Options, TmpPersistenceCtx)
+                Metric -> ts_metric:list_windows(Metric, Options, TmpPersistenceCtx)
             end,
             {TmpAns#{{TimeSeriesId, MetricId} => Values}, UpdatedTmpPersistenceCtx}
         end, Acc, utils:ensure_list(MetricIds))
     end, {#{}, PersistenceCtx}, utils:ensure_list(TimeSeriesIds)),
 
-    {Ans2, FinalPersistenceCtx} = list_time_series(
+    {Ans2, FinalPersistenceCtx} = list_time_series_windows(
         TimeSeriesCollectionHeads, RequestedMetrics, Options, UpdatedPersistenceCtx),
     {maps:merge(Ans, Ans2), FinalPersistenceCtx};
 
-list_time_series(TimeSeriesCollectionHeads, [TimeSeriesId | RequestedMetrics], Options, PersistenceCtx) ->
+list_time_series_windows(TimeSeriesCollectionHeads, [TimeSeriesId | RequestedMetrics], Options, PersistenceCtx) ->
     {Ans, UpdatedPersistenceCtx} = case maps:get(TimeSeriesId, TimeSeriesCollectionHeads, undefined) of
         undefined ->
             {#{TimeSeriesId => undefined}, PersistenceCtx};
         MetricsMap ->
             lists:foldl(fun({MetricId, Metric}, {TmpAns, TmpPersistenceCtx}) ->
-                {Values, UpdatedTmpPersistenceCtx} = ts_metric:list(Metric, Options, TmpPersistenceCtx),
+                {Values, UpdatedTmpPersistenceCtx} = ts_metric:list_windows(Metric, Options, TmpPersistenceCtx),
                 {TmpAns#{{TimeSeriesId, MetricId} => Values}, UpdatedTmpPersistenceCtx}
             end, {#{}, PersistenceCtx}, maps:to_list(MetricsMap))
     end,
 
-    {Ans2, FinalPersistenceCtx} = list_time_series(TimeSeriesCollectionHeads, RequestedMetrics, Options, UpdatedPersistenceCtx),
+    {Ans2, FinalPersistenceCtx} = list_time_series_windows(TimeSeriesCollectionHeads, RequestedMetrics, Options, UpdatedPersistenceCtx),
     {maps:merge(Ans, Ans2), FinalPersistenceCtx};
 
-list_time_series(TimeSeriesCollectionHeads, Request, Options, PersistenceCtx) ->
-    {Ans, FinalPersistenceCtx} = list_time_series(TimeSeriesCollectionHeads, [Request], Options, PersistenceCtx),
+list_time_series_windows(TimeSeriesCollectionHeads, Request, Options, PersistenceCtx) ->
+    {Ans, FinalPersistenceCtx} = list_time_series_windows(TimeSeriesCollectionHeads, [Request], Options, PersistenceCtx),
     case maps:is_key(Request, Ans) of
         true ->
             % Single key is requested - return value for the key instead of map

@@ -1098,8 +1098,8 @@ time_series_test(Config) ->
         end, #{}, ConfigMap),
 
         % Test getting all metrics
-        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list, [Id, #{}])),
-        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list, [Id, maps:keys(ExpectedMap), #{}]))
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, #{}])),
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, maps:keys(ExpectedMap), #{}]))
     end, ?TEST_MODELS).
 
 
@@ -1123,7 +1123,7 @@ multinode_time_series_test(Config) ->
                     lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
-        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list, [Id, #{}])),
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, #{}])),
 
         % Test getting all metrics
         Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
@@ -1177,11 +1177,11 @@ time_series_document_fetch_test(Config) ->
 
             ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
             assert_key_not_in_memory(Worker, Model, Key),
-            ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list, [Id, #{}])),
+            ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, #{}])),
 
             ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
             assert_key_not_in_memory(Worker, Model, Key),
-            ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list, [Id, maps:keys(ExpectedMap), #{}]))
+            ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, maps:keys(ExpectedMap), #{}]))
         end, Keys)
     end, ?TEST_CACHED_MODELS).
 
