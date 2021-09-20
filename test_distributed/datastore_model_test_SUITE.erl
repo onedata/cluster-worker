@@ -1476,21 +1476,7 @@ infinite_log_list_performance_test(Config) ->
             [{name, log_size}, {value, 20}, {description, "Size of each log"}],
             [{name, size_pruning_threshold}, {value, undefined}, {description, "Default size pruning threshold."}],
             [{name, age_pruning_threshold}, {value, undefined}, {description, "Default age pruning threshold."}],
-            [{name, max_entries_per_node_list}, {value, [100, 200, 400, 600, 800, 1000]}, {description, "Max entries per node to be tested."}]
-        ]},
-        {config, [
-            {name, size_pruning_on},
-            {parameters, [
-                [{name, size_pruning_threshold}, {value, 10000}]
-            ]},
-            {description, "Size pruning on"}
-        ]},
-        {config, [
-            {name, age_pruning_on},
-            {parameters, [
-                [{name, age_pruning_threshold}, {value, 2}]
-            ]},
-            {description, "Age pruning on"}
+            [{name, max_entries_per_node_list}, {value, [100, 600]}, {description, "Max entries per node to be tested."}]
         ]},
         {config, [
             {name, both_pruning_on},
@@ -1500,6 +1486,23 @@ infinite_log_list_performance_test(Config) ->
             ]},
             {description, "Both pruning on"}
         ]}
+%%      Below configs are supposed to show difference between pruning methods.
+%%      They are currently disabled to limit the duration of the tests.
+%%
+%%        {config, [
+%%            {name, size_pruning_on},
+%%            {parameters, [
+%%                [{name, size_pruning_threshold}, {value, 10000}]
+%%            ]},
+%%            {description, "Size pruning on"}
+%%        ]},
+%%        {config, [
+%%            {name, age_pruning_on},
+%%            {parameters, [
+%%                [{name, age_pruning_threshold}, {value, 2}]
+%%            ]},
+%%            {description, "Age pruning on"}
+%%        ]}
     ]).
 
 infinite_log_list_performance_test_base(Config) ->
