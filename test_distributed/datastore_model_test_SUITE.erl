@@ -1123,16 +1123,13 @@ multinode_time_series_test(Config) ->
                     lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
-        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, #{}])),
 
         % Test getting all metrics
-        Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, #{}])),
 
         % Verify if delete clears all documents from datastore
         ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [Id])),
-        lists:foreach(fun(Key) ->
-            assert_key_not_in_memory(Worker, Model, Key)
-        end, Keys)
+        ?assertEqual([], get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys)
     end, ?TEST_MODELS).
 
 
@@ -1167,7 +1164,6 @@ time_series_document_fetch_test(Config) ->
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
 
-        % Test getting all metrics
         Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
 
         % Test if documents deleted from disc are fetched when needed
@@ -1181,7 +1177,8 @@ time_series_document_fetch_test(Config) ->
 
             ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
             assert_key_not_in_memory(Worker, Model, Key),
-            ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, maps:keys(ExpectedMap), #{}]))
+            ?assertMatch({ok, ExpectedMap},
+                rpc:call(Worker, Model, time_series_collection_list_windows, [Id, maps:keys(ExpectedMap), #{}]))
         end, Keys)
     end, ?TEST_CACHED_MODELS).
 
@@ -1856,7 +1853,7 @@ assert_in_memory(Worker, Model, Key, Deleted) ->
     end.
 
 assert_not_in_memory(Worker, Model, Key) ->
-    assert_not_in_memory(Worker, Model, ?UNIQUE_KEY(Model, Key)).
+    assert_key_not_in_memory(Worker, Model, ?UNIQUE_KEY(Model, Key)).
 
 assert_key_not_in_memory(Worker, Model, Key) ->
     case ?MEM_DRV(Model) of
@@ -1864,11 +1861,7 @@ assert_key_not_in_memory(Worker, Model, Key) ->
             ok;
         Driver ->
             Ctx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
-            ?assertMatch({error, not_found},
-                rpc:call(Worker, Driver, get, [
-                    Ctx, ?UNIQUE_KEY(Model, Key)
-                ])
-            )
+            ?assertMatch({error, not_found}, rpc:call(Worker, Driver, get, [Ctx, Key]))
     end.
 
 assert_on_disc(Worker, Model, Key) ->
