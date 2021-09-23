@@ -379,7 +379,7 @@ prepare_store(Requests) ->
             catch
                 Type:Reason:Stacktrace ->
                     ?warning_stacktrace("Cannot encode document due to ~p:~p~nDoc: ~p", [
-                        Type, Reason
+                        Type, Reason, Value
                     ], Stacktrace),
                     Reason2 = {Reason, Stacktrace},
                     {

@@ -34,7 +34,7 @@ create(Ctx, Key, Opts) ->
         fun datastore:infinite_log_operation/4, [?FUNCTION_NAME, [Opts]]).
 
 
--spec destroy(ctx(), key()) -> ok | {error, term}.
+-spec destroy(ctx(), key()) -> ok | {error, term()}.
 destroy(Ctx, Key) ->
     datastore_model:datastore_apply(Ctx, Key,
         fun datastore:infinite_log_operation/4, [?FUNCTION_NAME, []]).
