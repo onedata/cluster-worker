@@ -61,7 +61,7 @@
 -define(KEY, ?KEY(1)).
 -define(KEY(N), ?TERM("key", N)).
 -define(UNIQUE_KEY(Model, Key),
-    datastore_model:get_unique_key(#{model => Model}, Key)).
+    datastore_model:get_unique_key(Model, Key)).
 -define(RND_KEY, datastore_key:new()).
 -define(REV, ?REV(1)).
 -define(REV(N), <<(integer_to_binary(N))/binary, "-",

@@ -18,7 +18,7 @@
 
 
 %% API
--export([init/1, get_unique_key/2]).
+-export([init/1, get_unique_key/2, get_generic_key/2]).
 -export([datastore_apply/4]).
 -export([create/2, save/2, save_with_routing_key/2, update/3, update/4]).
 -export([get/2, exists/2]).
@@ -89,11 +89,15 @@ init(Ctx) ->
 %% Returns key that is unique between different models.
 %% @end
 %%--------------------------------------------------------------------
--spec get_unique_key(ctx(), key()) -> key().
+-spec get_unique_key(model(), key()) -> key().
 % TODO - VFS-3975 - allow routing via generic key without model
 % problem with links application that need such routing key
-get_unique_key(#{model := Model}, Key) ->
+get_unique_key(Model, Key) ->
     datastore_key:build_adjacent(atom_to_binary(Model, utf8), Key).
+
+-spec get_generic_key(model(), key()) -> key() | undefined.
+get_generic_key(Model, Key) ->
+    datastore_key:remove_extension(atom_to_binary(Model, utf8), Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -102,8 +106,8 @@ get_unique_key(#{model := Model}, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec datastore_apply(ctx(), key(), fun(), list()) -> term().
-datastore_apply(Ctx0, Key, Fun, Args) ->
-    UniqueKey = get_unique_key(Ctx0, Key),
+datastore_apply(#{model := Model} = Ctx0, Key, Fun, Args) ->
+    UniqueKey = get_unique_key(Model, Key),
     Ctx = datastore_model_default:set_defaults(UniqueKey, Ctx0),
     erlang:apply(Fun, [Ctx, UniqueKey | Args]).
 
@@ -466,9 +470,9 @@ get_fold_ctx_and_key(#{model := Model} = Ctx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec datastore_apply_all(ctx(), key(), fun(), atom(), list()) -> term().
-datastore_apply_all(Ctx0, Key, Fun, _FunName, Args) ->
+datastore_apply_all(#{model := Model} = Ctx0, Key, Fun, _FunName, Args) ->
     Ctx = datastore_model_default:set_defaults(Ctx0),
-    UniqueKey = get_unique_key(Ctx, Key),
+    UniqueKey = get_unique_key(Model, Key),
     Routing = maps:get(routing, Ctx, global),
 
     case Routing of

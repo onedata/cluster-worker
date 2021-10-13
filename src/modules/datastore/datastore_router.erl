@@ -127,8 +127,8 @@ get_routing_key(_Ctx, #document{value = #links_node{key = Key}}) ->
     Key;
 get_routing_key(_Ctx, #document{value = #links_mask{key = Key}}) ->
     Key;
-get_routing_key(Ctx, #document{key = Key}) ->
-    datastore_model:get_unique_key(Ctx, Key).
+get_routing_key(#{model := Model} = Ctx, #document{key = Key}) ->
+    datastore_model:get_unique_key(Model, Key).
 
 %%%===================================================================
 %%% Internal functions
