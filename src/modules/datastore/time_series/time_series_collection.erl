@@ -20,7 +20,7 @@
 %%% Window = {WindowTimestamp, aggregator(PrevAggregatedValue, MeasurementValue)} where
 %%% PrevAggregatedValue is result of previous aggregator function executions
 %%% (window can be created using several measurements).
-%%% See ts_windows:aggregate/3 to see possible aggregation functions.
+%%% See ts_windows:set_or_aggregate/3 to see possible aggregation functions.
 %%%
 %%% The module delegates operations on single metric to ts_metric module
 %%% that is able to handle infinite number of windows inside single metric splitting
@@ -44,7 +44,8 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([create/4, update/5, update/6, update_many/4, list_windows/4, list_windows/5, delete/3]).
+-export([create/4, add_metrics/5, delete_metrics/4, list_time_series_ids/3, list_metric_ids/3, 
+    update/5, update/6, update_many/4, list_windows/4, list_windows/5, delete/3]).
 
 -type time_series_id() :: binary().
 -type collection_id() :: binary().
@@ -56,6 +57,7 @@
 % mainly to return requested data (get can return only chosen metrics so it does not return hierarchical map).
 -type full_metric_id() :: {time_series_id(), ts_metric:id()}.
 -type windows_map() :: #{full_metric_id() => [ts_windows:window()]}.
+-type ids_map() :: #{time_series_id() => [ts_metric:id()]}.
 
 -type time_series_range() :: time_series_id() | [time_series_id()].
 -type metrics_range() :: ts_metric:id() | [ts_metric:id()].
@@ -68,6 +70,11 @@
 
 -type ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
+
+-type add_metrics_option() :: #{
+    time_series_conflict_resulution_strategy => merge | override | throw,
+    metric_conflict_resulution_strategy => override | throw
+}.
 
 -define(CATCH_UNEXPECTED_ERRORS(Expr, ErrorLog, ErrorLogArgs, ErrorReturnValue),
     try
@@ -91,11 +98,8 @@ create(Ctx, Id, ConfigMap, Batch) ->
         DocSplittingStrategies = ts_doc_splitting_strategies:calculate(ConfigMap),
 
         TimeSeriesCollectionHeads = maps:map(fun(TimeSeriesId, MetricsConfigs) ->
-            maps:map(fun(MetricsId, Config) ->
-                 #metric{
-                     config = Config,
-                     splitting_strategy = maps:get({TimeSeriesId, MetricsId}, DocSplittingStrategies)
-                 }
+            maps:map(fun(MetricId, Config) ->
+                ts_metric:init(Config, maps:get({TimeSeriesId, MetricId}, DocSplittingStrategies))
             end, MetricsConfigs)
         end, ConfigMap),
 
@@ -113,6 +117,85 @@ create(Ctx, Id, ConfigMap, Batch) ->
                 [Id, Error, Reason, ConfigMap], Stacktrace),
             {{error, create_failed}, Batch}
     end.
+
+
+-spec add_metrics(ctx(), collection_id(), collection_config(), add_metrics_option(), batch()) -> 
+    {ok | {error, term()}, batch()}.
+add_metrics(Ctx, Id, ConfigMapExtension, Options, Batch) ->
+    try
+        {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+            
+        ExistingConfigMap = maps:map(fun(_TimeSeriesId, TimeSeriesHeads) ->
+            maps:map(fun(_MetricId, #metric{config = Config}) ->
+                Config
+            end, TimeSeriesHeads)
+        end, TimeSeriesCollectionHeads),
+        NewConfigMap = merge_config_maps(ExistingConfigMap, ConfigMapExtension, Options),
+        NewDocSplittingStrategies = ts_doc_splitting_strategies:calculate(NewConfigMap),
+            
+        UpdatedPersistenceCtx = delete_overridden_metrics(
+            TimeSeriesCollectionHeads, ExistingConfigMap, ConfigMapExtension, Options, PersistenceCtx),
+        FinalPersistenceCtx = reconfigure_metrics(
+            NewConfigMap, ConfigMapExtension, NewDocSplittingStrategies, UpdatedPersistenceCtx),
+            
+        {ok, ts_persistence:finalize(FinalPersistenceCtx)}
+    catch
+        _:{error, too_many_metrics} ->
+            {{error, too_many_metrics}, Batch};
+        _:{error, empty_metric} ->
+            {{error, empty_metric}, Batch};
+        _:{error, wrong_resolution} ->
+            {{error, wrong_resolution}, Batch};
+        _:{error, time_series_already_exists} ->
+            {{error, time_series_already_exists}, Batch};
+        _:{error, metric_already_exists} ->
+            {{error, metric_already_exists}, Batch};
+        Error:Reason:Stacktrace ->
+            ?error_stacktrace("Adding metrics to time series collection ~p error: ~p:~p~nConfig map: ~pnOptions: ~p",
+                [Id, Error, Reason, ConfigMapExtension, Options], Stacktrace),
+            {{error, add_metrics_failed}, Batch}
+    end.
+
+
+-spec delete_metrics(ctx(), collection_id(), request_range(), batch()) -> {ok | {error, term()}, batch()}.
+delete_metrics(Ctx, Id, MetricsToDelete, Batch) ->
+    try
+        {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+        SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToDelete),
+        FinalPersistenceCtx = delete_time_series(maps:to_list(SelectedHeads), false, PersistenceCtx),
+        {ok, ts_persistence:finalize(FinalPersistenceCtx)}
+    catch
+        Error:Reason:Stacktrace ->
+            ?error_stacktrace("Time series collection ~p delete metrics error: ~p:~p~nFailed to delete metrics ~p",
+                [Id, Error, Reason, MetricsToDelete], Stacktrace),
+            {{error, delete_metrics_failed}, Batch}
+    end.
+
+
+-spec list_time_series_ids(ctx(), collection_id(), batch()) -> {{ok, [time_series_id()]} | {error, term()}, batch()}.
+list_time_series_ids(Ctx, Id, Batch) ->
+    ?CATCH_UNEXPECTED_ERRORS(
+        begin
+            {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+            TimeSeriesIds = maps:keys(TimeSeriesCollectionHeads),
+            {{ok, TimeSeriesIds}, ts_persistence:finalize(PersistenceCtx)}
+        end,
+        "Error listing ids of time series in collection", [Id], {{error, list_failed}, Batch}
+    ).
+
+
+-spec list_metric_ids(ctx(), collection_id(), batch()) -> {{ok, ids_map()} | {error, term()}, batch()}.
+list_metric_ids(Ctx, Id, Batch) ->
+    ?CATCH_UNEXPECTED_ERRORS(
+        begin
+            {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+            MetricIds = maps:map(fun(_TimeSeriesId, TimeSeriesHeads) ->
+                maps:keys(TimeSeriesHeads)
+            end, TimeSeriesCollectionHeads),
+            {{ok, MetricIds}, ts_persistence:finalize(PersistenceCtx)}
+        end,
+        "Error listing ids of metrics in collection", [Id], {{error, list_failed}, Batch}
+    ).
 
 
 %%--------------------------------------------------------------------
@@ -206,13 +289,13 @@ list_windows(Ctx, Id, Options, Batch) ->
     ?CATCH_UNEXPECTED_ERRORS(
         begin
             {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-            FillMetricsIds = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
-                maps:fold(fun(MetricsId, _Config, InternalAcc) ->
-                    [{TimeSeriesId, MetricsId} | InternalAcc]
+            FillMetricIds = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
+                maps:fold(fun(MetricId, _Config, InternalAcc) ->
+                    [{TimeSeriesId, MetricId} | InternalAcc]
                 end, Acc, MetricsConfigs)
             end, [], TimeSeriesCollectionHeads),
             {Ans, FinalPersistenceCtx} = list_time_series_windows(
-                TimeSeriesCollectionHeads, FillMetricsIds, Options, PersistenceCtx),
+                TimeSeriesCollectionHeads, FillMetricIds, Options, PersistenceCtx),
             {{ok, Ans}, ts_persistence:finalize(FinalPersistenceCtx)}
         end,
         "Time series collection ~p list error~nOptions: ~p", [Id, Options], {{error, list_failed}, Batch}
@@ -243,19 +326,92 @@ list_windows(Ctx, Id, RequestedMetrics, Options, Batch) ->
 
 -spec delete(ctx(), collection_id(), batch() ) -> {ok | {error, term()}, batch()}.
 delete(Ctx, Id, Batch) ->
-    ?CATCH_UNEXPECTED_ERRORS(
-        begin
+    try
             {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-            FinalPersistenceCtx = delete_time_series(maps:to_list(TimeSeriesCollectionHeads), PersistenceCtx),
+            FinalPersistenceCtx = delete_time_series(maps:to_list(TimeSeriesCollectionHeads), true, PersistenceCtx),
             {ok, ts_persistence:finalize(FinalPersistenceCtx)}
-        end,
-        "Time series collection ~p delete error", [Id], {{error, delete_failed}, Batch}
-    ).
+    catch
+        Error:Reason:Stacktrace ->
+            ?error_stacktrace("Time series collection ~p delete error: ~p:~p", [Id, Error, Reason], Stacktrace),
+            {{error, delete_failed}, Batch}
+    end.
 
 
 %%=====================================================================
 %% Internal functions
 %%=====================================================================
+
+-spec merge_config_maps(collection_config(), collection_config(), add_metrics_option()) -> collection_config().
+merge_config_maps(ExistingConfigMap, ConfigMapExtension, Options) ->
+    TimeSeriesConflictResolution = maps:get(time_series_conflict_resulution_strategy, Options, merge),
+    MetricConflictResolution = maps:get(metric_conflict_resulution_strategy, Options, throw),
+    maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
+        case maps:get(TimeSeriesId, Acc, undefined) of
+            undefined ->
+                Acc#{TimeSeriesId => MetricsConfigs};
+            ExistingMetricsConfigs when TimeSeriesConflictResolution =:= override ->
+                Acc#{TimeSeriesId => MetricsConfigs};
+            ExistingMetricsConfigs when TimeSeriesConflictResolution =:= throw ->
+                throw({error, time_series_already_exists});
+            ExistingMetricsConfigs when TimeSeriesConflictResolution =:= merge ->
+                MergedMetricsConfigs = maps:fold(fun
+                    (MetricId, Config, InternalAcc) ->
+                        case maps:is_key(MetricId, InternalAcc) of
+                            true when MetricConflictResolution =:= throw -> throw({error, metric_already_exists});
+                            true when MetricConflictResolution =:= override -> InternalAcc#{MetricId => Config};
+                            false -> InternalAcc#{MetricId => Config}
+                        end
+                end, ExistingMetricsConfigs, MetricsConfigs),
+                Acc#{TimeSeriesId => MergedMetricsConfigs}
+        end
+    end, ExistingConfigMap, ConfigMapExtension).
+
+
+-spec delete_overridden_metrics(ts_hub:time_series_collection_heads(), collection_config(), collection_config(), 
+    add_metrics_option(), ts_persistence:ctx()) -> ts_persistence:ctx().
+delete_overridden_metrics(TimeSeriesCollectionHeads, ExistingConfigMap, ConfigMapExtension, Options, PersistenceCtx) ->
+    TimeSeriesConflictResolution = maps:get(time_series_conflict_resulution_strategy, Options, merge),
+    MetricsToDelete = maps:fold(fun(TimeSeriesId, TimeSeriesConfigMapExtension, Acc) ->
+        case maps:get(TimeSeriesId, ExistingConfigMap, undefined) of
+            undefined ->
+                Acc;
+            _ExistingMetricsConfigs when TimeSeriesConflictResolution =:= override ->
+                [TimeSeriesId | Acc];
+            ExistingMetricsConfigs when TimeSeriesConflictResolution =:= merge ->
+                lists:foldl(fun(MetricId, InternalAcc) ->
+                    case maps:is_key(MetricId, ExistingMetricsConfigs) of
+                        true -> [{TimeSeriesId, MetricId} | InternalAcc];
+                        false -> InternalAcc
+                    end
+                end, Acc, maps:keys(TimeSeriesConfigMapExtension))
+        end
+    end, [], ConfigMapExtension),
+
+    SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToDelete),
+    delete_time_series(maps:to_list(SelectedHeads), false, PersistenceCtx).
+
+
+-spec reconfigure_metrics(collection_config(), collection_config(),
+    ts_doc_splitting_strategies:splitting_strategies_map(), ts_persistence:ctx()) -> ts_persistence:ctx().
+reconfigure_metrics(NewConfigMap, ConfigMapExtension, DocSplittingStrategies, PersistenceCtx) ->
+    maps:fold(fun(TimeSeriesId, MetricsConfigs, PersistenceCtxAcc) ->
+        UpdatedPersistenceCtxAcc = ts_persistence:set_currently_processed_time_series(TimeSeriesId, PersistenceCtxAcc),
+        TimeSeriesConfigMapExtension = maps:get(TimeSeriesId, ConfigMapExtension, #{}),
+        maps:fold(fun(MetricId, Config, InternalPersistenceCtx) ->
+            UpdatedInternalPersistenceCtx = ts_persistence:set_currently_processed_metric(
+                MetricId, InternalPersistenceCtx),
+            case maps:get(MetricId, TimeSeriesConfigMapExtension, undefined) of
+                undefned ->
+                    CurrentMetric = ts_persistence:get_currently_processed_metric(UpdatedInternalPersistenceCtx),
+                    ts_metric:reconfigure(CurrentMetric, Config,
+                        maps:get({TimeSeriesId, MetricId}, DocSplittingStrategies), UpdatedInternalPersistenceCtx);
+                Config ->
+                    Metric = ts_metric:init(Config, maps:get({TimeSeriesId, MetricId}, DocSplittingStrategies)),
+                    ts_persistence:init_metric(Metric, UpdatedInternalPersistenceCtx)
+            end
+        end, UpdatedPersistenceCtxAcc, MetricsConfigs)
+    end, PersistenceCtx, NewConfigMap).
+
 
 -spec select_heads(ts_hub:time_series_collection_heads(), request_range()) ->
     ts_hub:time_series_collection_heads().
@@ -359,18 +515,24 @@ list_time_series_windows(TimeSeriesCollectionHeads, Request, Options, Persistenc
     end.
 
 
--spec delete_time_series([{time_series_id(), ts_hub:time_series_heads()}], ts_persistence:ctx()) -> ts_persistence:ctx().
-delete_time_series([], PersistenceCtx) ->
-    ts_persistence:delete_hub(PersistenceCtx);
-delete_time_series([{_TimeSeriesId, TimeSeries} | Tail], PersistenceCtx) ->
-    UpdatedPersistenceCtx = delete_metric(maps:to_list(TimeSeries), PersistenceCtx),
-    delete_time_series(Tail, UpdatedPersistenceCtx).
-
-
--spec delete_metric([{ts_metric:id(), ts_metric:metric()}], ts_persistence:ctx()) ->
+-spec delete_time_series([{time_series_id(), ts_hub:time_series_heads()}], boolean(), ts_persistence:ctx()) -> 
     ts_persistence:ctx().
-delete_metric([], PersistenceCtx) ->
+delete_time_series([], true = _DeleteHub, PersistenceCtx) ->
+    ts_persistence:delete_hub(PersistenceCtx);
+delete_time_series([], false = _DeleteHub, PersistenceCtx) ->
     PersistenceCtx;
-delete_metric([{_MetricId, Metric} | Tail], PersistenceCtx) ->
-    UpdatedPersistenceCtx = ts_metric:delete(Metric, PersistenceCtx),
-    delete_metric(Tail, UpdatedPersistenceCtx).
+delete_time_series([{TimeSeriesId, TimeSeries} | Tail], DeleteHub, PersistenceCtx) ->
+    UpdatedPersistenceCtx = ts_persistence:set_currently_processed_time_series(TimeSeriesId, PersistenceCtx),
+    UpdatedPersistenceCtx2 = delete_metrics(maps:to_list(TimeSeries), UpdatedPersistenceCtx),
+    delete_time_series(Tail, DeleteHub, UpdatedPersistenceCtx2).
+
+
+-spec delete_metrics([{ts_metric:id(), ts_metric:metric()}], ts_persistence:ctx()) ->
+    ts_persistence:ctx().
+delete_metrics([], PersistenceCtx) ->
+    PersistenceCtx;
+delete_metrics([{MetricId, Metric} | Tail], PersistenceCtx) ->
+    UpdatedPersistenceCtx = ts_persistence:set_currently_processed_metric(MetricId, PersistenceCtx),
+    UpdatedPersistenceCtx2 = ts_metric:delete_data_nodes(Metric, UpdatedPersistenceCtx),
+    UpdatedPersistenceCtx3 = ts_persistence:delete_metric(UpdatedPersistenceCtx2),
+    delete_metrics(Tail, UpdatedPersistenceCtx3).

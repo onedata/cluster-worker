@@ -1090,8 +1090,8 @@ time_series_test(Config) ->
         % Prepare expected answer (measurements are arithmetic sequence so values of windows
         % are calculated using formula for the sum of an arithmetic sequence)
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
-            maps:fold(fun(MetricsId, #metric_config{resolution = Resolution, retention = Retention}, InternalAcc) ->
-                InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(lists:reverse(lists:map(fun(N) ->
+            maps:fold(fun(MetricId, #metric_config{resolution = Resolution, retention = Retention}, InternalAcc) ->
+                InternalAcc#{{TimeSeriesId, MetricId} => lists:sublist(lists:reverse(lists:map(fun(N) ->
                     {N, {Resolution, (N + N + Resolution - 1) * Resolution}}
                 end, lists:seq(0, MeasurementsCount, Resolution))), Retention)}
             end, Acc, MetricsConfigs)
@@ -1118,8 +1118,8 @@ multinode_time_series_test(Config) ->
         % Prepare expected answer
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
-            maps:fold(fun(MetricsId, #metric_config{retention = Retention}, InternalAcc) ->
-                InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(
+            maps:fold(fun(MetricId, #metric_config{retention = Retention}, InternalAcc) ->
+                InternalAcc#{{TimeSeriesId, MetricId} => lists:sublist(
                     lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
@@ -1154,12 +1154,12 @@ time_series_document_fetch_test(Config) ->
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
         ExpectedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
             maps:fold(fun
-                (MetricsId, #metric_config{retention = Retention, aggregator = last}, InternalAcc) ->
-                    InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(
+                (MetricId, #metric_config{retention = Retention, aggregator = last}, InternalAcc) ->
+                    InternalAcc#{{TimeSeriesId, MetricId} => lists:sublist(
                         lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))};
-                (MetricsId, #metric_config{retention = Retention, aggregator = sum}, InternalAcc) ->
+                (MetricId, #metric_config{retention = Retention, aggregator = sum}, InternalAcc) ->
                     MappedMeasurements = lists:map(fun({Timestamp, Value}) -> {Timestamp, {1, Value}} end, Measurements),
-                    InternalAcc#{{TimeSeriesId, MetricsId} => lists:sublist(
+                    InternalAcc#{{TimeSeriesId, MetricId} => lists:sublist(
                         lists:reverse(MappedMeasurements), maps:get(Retention, ExpectedWindowsCounts))}
             end, Acc, MetricsConfigs)
         end, #{}, ConfigMap),
