@@ -104,14 +104,15 @@ concurrent_clients_spawning_performance(Config) ->
     ?PERFORMANCE(Config, [
         {repeats, 3},
         {success_rate, 100},
-        {description, "Checks the performance of spawning multiple, parallel GS "
-        "clients."},
-        {parameters, [?CLIENT_NUM(100)]},
-        ?PERF_CFG(small, [?CLIENT_NUM(100)]),
-        ?PERF_CFG(medium, [?CLIENT_NUM(500)]),
-        ?PERF_CFG(large, [?CLIENT_NUM(1000)])
+        {description, "Checks the performance of spawning multiple, parallel GS clients."},
+        {parameters, [?CLIENT_NUM(20)]},
+        ?PERF_CFG(small, [?CLIENT_NUM(20)]),
+        ?PERF_CFG(medium, [?CLIENT_NUM(100)]),
+        ?PERF_CFG(large, [?CLIENT_NUM(300)])
     ]).
 concurrent_clients_spawning_performance_base(Config) ->
+    init_per_repeat(Config),
+
     ClientNum = ?CLIENT_NUM,
 
     ?begin_measurement(clients_spawning_time),
@@ -123,7 +124,7 @@ concurrent_clients_spawning_performance_base(Config) ->
     end),
 
 
-    terminate_clients(Config, SupervisorPid),
+    end_per_repeat(Config, SupervisorPid),
 
     [
         ?format_measurement(clients_spawning_time, ms,
@@ -139,12 +140,14 @@ concurrent_active_clients_spawning_performance(Config) ->
         {success_rate, 100},
         {description, "Checks the performance of spawning multiple, parallel GS "
         "clients that regularly make a request."},
-        {parameters, [?CLIENT_NUM(100), ?REQUEST_INTERVAL_SECONDS(2)]},
-        ?PERF_CFG(small, [?CLIENT_NUM(100), ?REQUEST_INTERVAL_SECONDS(2)]),
-        ?PERF_CFG(medium, [?CLIENT_NUM(500), ?REQUEST_INTERVAL_SECONDS(2)]),
-        ?PERF_CFG(large, [?CLIENT_NUM(1000), ?REQUEST_INTERVAL_SECONDS(2)])
+        {parameters, [?CLIENT_NUM(20), ?REQUEST_INTERVAL_SECONDS(2)]},
+        ?PERF_CFG(small, [?CLIENT_NUM(20), ?REQUEST_INTERVAL_SECONDS(2)]),
+        ?PERF_CFG(medium, [?CLIENT_NUM(100), ?REQUEST_INTERVAL_SECONDS(2)]),
+        ?PERF_CFG(large, [?CLIENT_NUM(300), ?REQUEST_INTERVAL_SECONDS(2)])
     ]).
 concurrent_active_clients_spawning_performance_base(Config) ->
+    init_per_repeat(Config),
+
     ClientNum = ?CLIENT_NUM,
     RequestInterval = ?REQUEST_INTERVAL_SECONDS,
 
@@ -175,7 +178,7 @@ concurrent_active_clients_spawning_performance_base(Config) ->
     end),
 
 
-    terminate_clients(Config, SupervisorPid),
+    end_per_repeat(Config, SupervisorPid),
 
     [
         ?format_measurement(clients_spawning_time, ms,
@@ -192,12 +195,14 @@ update_propagation_performance(Config) ->
         {description, "Checks update propagation times depending on the number "
         "of subscribed clients and record changes."},
         {parameters, [?CLIENT_NUM(20), ?CHANGE_NUM(100)]},
-        ?PERF_CFG(small, [?CLIENT_NUM(10), ?CHANGE_NUM(10)]),
-        ?PERF_CFG(medium, [?CLIENT_NUM(100), ?CHANGE_NUM(30)]),
-        ?PERF_CFG(large, [?CLIENT_NUM(500), ?CHANGE_NUM(50)]),
-        ?PERF_CFG(large_single_change, [?CLIENT_NUM(1000), ?CHANGE_NUM(1)])
+        ?PERF_CFG(small, [?CLIENT_NUM(20), ?CHANGE_NUM(10)]),
+        ?PERF_CFG(medium, [?CLIENT_NUM(20), ?CHANGE_NUM(30)]),
+        ?PERF_CFG(large, [?CLIENT_NUM(100), ?CHANGE_NUM(50)]),
+        ?PERF_CFG(large_single_change, [?CLIENT_NUM(300), ?CHANGE_NUM(1)])
     ]).
 update_propagation_performance_base(Config) ->
+    init_per_repeat(Config),
+
     ClientNum = ?CLIENT_NUM,
     ChangeNum = ?CHANGE_NUM,
 
@@ -267,7 +272,7 @@ update_propagation_performance_base(Config) ->
     end),
 
 
-    terminate_clients(Config, SupervisorPid),
+    end_per_repeat(Config, SupervisorPid),
 
     [
         ?format_measurement(updates_propagation_time, ms,
@@ -454,11 +459,23 @@ get_trusted_cacerts(Config) ->
 %%%===================================================================
 
 init_per_suite(Config) ->
-    ssl:start(),
     [{?LOAD_MODULES, [graph_sync_mocks]} | Config].
 
 
+end_per_suite(_Config) ->
+    ok.
+
+
 init_per_testcase(_, Config) ->
+    Config.
+
+
+end_per_testcase(_, _Config) ->
+    ok.
+
+
+init_per_repeat(Config) ->
+    ssl:start(),
     Nodes = ?config(cluster_worker_nodes, Config),
     [start_gs_listener(N) || N <- Nodes],
     graph_sync_mocks:mock_callbacks(Config),
@@ -466,12 +483,9 @@ init_per_testcase(_, Config) ->
     Config.
 
 
-end_per_testcase(_, Config) ->
+end_per_repeat(Config, SupervisorPid) ->
+    terminate_clients(Config, SupervisorPid),
     Nodes = ?config(cluster_worker_nodes, Config),
     [stop_gs_listener(N) || N <- Nodes],
-    graph_sync_mocks:unmock_callbacks(Config).
-
-
-end_per_suite(_Config) ->
     ssl:stop(),
-    ok.
+    graph_sync_mocks:unmock_callbacks(Config).

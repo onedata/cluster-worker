@@ -219,8 +219,21 @@ do_spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback, OnSu
     gs_protocol:client_auth(), aai:subject(), gs_client:push_callback(),
     OnSuccessFun :: fun((gs_client:client_ref()) -> any())) -> Client :: pid().
 spawn_client(URL, SslOpts, Auth, Identity, PushCallback, OnSuccessFun) ->
-    {ok, Client, #gs_resp_handshake{identity = Identity}} = gs_client:start_link(
-        URL, Auth, ?SUPPORTED_PROTO_VERSIONS, PushCallback, SslOpts
-    ),
-    OnSuccessFun(Client),
-    Client.
+    spawn_client(URL, SslOpts, Auth, Identity, PushCallback, OnSuccessFun, 20).
+
+
+spawn_client(URL, SslOpts, Auth, Identity, PushCallback, OnSuccessFun, AttemptsLeft) ->
+    case gs_client:start_link(URL, Auth, ?SUPPORTED_PROTO_VERSIONS, PushCallback, SslOpts) of
+        {ok, Client, #gs_resp_handshake{identity = Identity}} ->
+            OnSuccessFun(Client),
+            Client;
+        {error, _} = Error ->
+            case AttemptsLeft =< 1 of
+                true ->
+                    ct:print("Failed to spawn GS client, no retries left. Last error was: ~p", [Error]),
+                    error(failed_to_spawn_gs_client);
+                false ->
+                    timer:sleep(rand:uniform(5000)),
+                    spawn_client(URL, SslOpts, Auth, Identity, PushCallback, OnSuccessFun, AttemptsLeft - 1)
+            end
+    end.
