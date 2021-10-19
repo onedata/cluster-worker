@@ -86,20 +86,24 @@ delete_data_nodes(#metric{head_data = #data_node{older_node_key = OlderNodeKey}}
 
 -spec reconfigure(metric(), ts_metric:config(), ts_metric:splitting_strategy(), ts_persistence:ctx()) ->
     ts_persistence:ctx().
+reconfigure(#metric{
+    splitting_strategy = DocSplittingStrategy
+} = _CurrentMetric, _NewConfig, DocSplittingStrategy, PersistenceCtx) ->
+    PersistenceCtx;
 reconfigure(CurrentMetric, NewConfig, NewDocSplittingStrategy, PersistenceCtx) ->
     {ExistingWindows, UpdatedPersistenceCtx} = list_windows(CurrentMetric, #{}, PersistenceCtx),
     PersistenceCtxAfterCleaning = delete_data_nodes(CurrentMetric, UpdatedPersistenceCtx),
 
     NewMetric = init(NewConfig,  NewDocSplittingStrategy),
-    UpdatedPersistenceCtx = ts_persistence:init_metric(NewMetric, PersistenceCtxAfterCleaning),
+    PersistenceCtxAfterInit = ts_persistence:init_metric(NewMetric, PersistenceCtxAfterCleaning),
 
-    DataNodeKey = ts_persistence:get_time_series_collection_id(UpdatedPersistenceCtx),
+    DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtxAfterInit),
     lists:foldr(fun({Timestamp, WindowValue}, TmpPersistenceCtx) ->
         WindowToBeUpdated = get_window_id(Timestamp, NewConfig),
         {Data, UpdatedTmpPersistenceCtx} = ts_persistence:get(DataNodeKey, TmpPersistenceCtx),
         update(Data, DataNodeKey, 1, NewDocSplittingStrategy, set,
             WindowToBeUpdated, WindowValue, UpdatedTmpPersistenceCtx)
-    end, UpdatedPersistenceCtx, ExistingWindows).
+    end, PersistenceCtxAfterInit, ExistingWindows).
 
 
 %%=====================================================================

@@ -135,7 +135,7 @@ init_metric(Metric, #ctx{
     currently_processed_metric = MetricId
 } = Ctx) ->
     TimeSeriesHeads = ts_hub:get_time_series_collection_heads(Record),
-    TimeSeries = maps:get(TimeSeriesId, TimeSeriesHeads),
+    TimeSeries = maps:get(TimeSeriesId, TimeSeriesHeads, #{}),
     UpdatedTimeSeriesHeads = TimeSeriesHeads#{TimeSeriesId => TimeSeries#{MetricId => Metric}},
     UpdatedDoc = HubDoc#document{value = ts_hub:set_time_series_collection_heads(UpdatedTimeSeriesHeads)},
     Ctx#ctx{hub = UpdatedDoc, is_hub_updated = true}.
