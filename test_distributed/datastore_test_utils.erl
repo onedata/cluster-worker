@@ -162,6 +162,22 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_time_series_collection:create(Ctx, Id, ConfigMap)
         end},
+        {time_series_collection_add_metrics, fun(Id, ConfigMapExtension, Options) ->
+            Ctx = get_ctx(Model),
+            datastore_time_series_collection:add_metrics(Ctx, Id, ConfigMapExtension, Options)
+        end},
+        {time_series_collection_delete_metrics, fun(Id, MetricsToDelete) ->
+            Ctx = get_ctx(Model),
+            datastore_time_series_collection:delete_metrics(Ctx, Id, MetricsToDelete)
+        end},
+        {time_series_collection_list_time_series_ids, fun(Id) ->
+            Ctx = get_ctx(Model),
+            datastore_time_series_collection:list_time_series_ids(Ctx, Id)
+        end},
+        {time_series_collection_list_metric_ids, fun(Id) ->
+            Ctx = get_ctx(Model),
+            datastore_time_series_collection:list_metric_ids(Ctx, Id)
+        end},
         {time_series_collection_update, fun(Id, NewTimestamp, ValueOrUpdateRange) ->
             Ctx = get_ctx(Model),
             datastore_time_series_collection:update(Ctx, Id, NewTimestamp, ValueOrUpdateRange)

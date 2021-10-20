@@ -1127,6 +1127,18 @@ multinode_time_series_test(Config) ->
         % Test getting all metrics
         ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, #{}])),
 
+        % Test listing time ids
+        {ok, TimeSeriesIds} = ?assertMatch({ok, _},
+            rpc:call(Worker, Model, time_series_collection_list_time_series_ids, [Id])),
+        ?assertEqual([<<"TS", 0>>, <<"TS", 1>>], lists:sort(TimeSeriesIds)),
+
+        % Test listing metrics ids
+        {ok, MetricsIds} = ?assertMatch({ok, _},
+            rpc:call(Worker, Model, time_series_collection_list_metric_ids, [Id])),
+        SortedMetricsIds = lists:sort(lists:map(fun({K, V}) -> {K, lists:sort(V)} end, maps:to_list(MetricsIds))),
+        ?assertEqual([{<<"TS", 0>>, [<<"M",1>>, <<"M",2>>]}, {<<"TS", 1>>, [<<"M",0>>, <<"M",1>>, <<"M",2>>]}],
+            SortedMetricsIds),
+
         % Verify if delete clears all documents from datastore
         ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [Id])),
         ?assertEqual([], get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys)
@@ -1167,6 +1179,7 @@ time_series_document_fetch_test(Config) ->
         Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
 
         % Test if documents deleted from disc are fetched when needed
+        % TODO - podobnie sprawdzic listowanie idkow
         lists:foreach(fun(Key) ->
             assert_key_on_disc(Worker, Model, Key, false),
             MemCtx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
@@ -1182,6 +1195,7 @@ time_series_document_fetch_test(Config) ->
         end, Keys)
     end, ?TEST_CACHED_MODELS).
 
+% TODO - test add/delete metric
 
 %%%===================================================================
 %%% Stress tests

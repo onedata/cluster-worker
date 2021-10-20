@@ -65,16 +65,16 @@
 -type request_range() :: range() | [range()].
 -type update_range() :: {request_range(), ts_windows:value()} | [{request_range(), ts_windows:value()}].
 
--export_type([collection_id/0, collection_config/0, time_series_id/0, full_metric_id/0,
-    request_range/0, update_range/0, windows_map/0]).
-
--type ctx() :: datastore:ctx().
--type batch() :: datastore_doc:batch().
-
 -type add_metrics_option() :: #{
     time_series_conflict_resulution_strategy => merge | override | throw,
     metric_conflict_resulution_strategy => override | throw
 }.
+
+-export_type([collection_id/0, collection_config/0, time_series_id/0, full_metric_id/0,
+    request_range/0, update_range/0, windows_map/0, ids_map/0, add_metrics_option/0]).
+
+-type ctx() :: datastore:ctx().
+-type batch() :: datastore_doc:batch().
 
 -define(CATCH_UNEXPECTED_ERRORS(Expr, ErrorLog, ErrorLogArgs, ErrorReturnValue),
     try
@@ -327,9 +327,9 @@ list_windows(Ctx, Id, RequestedMetrics, Options, Batch) ->
 -spec delete(ctx(), collection_id(), batch() ) -> {ok | {error, term()}, batch()}.
 delete(Ctx, Id, Batch) ->
     try
-            {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-            FinalPersistenceCtx = delete_time_series(maps:to_list(TimeSeriesCollectionHeads), true, PersistenceCtx),
-            {ok, ts_persistence:finalize(FinalPersistenceCtx)}
+        {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+        FinalPersistenceCtx = delete_time_series(maps:to_list(TimeSeriesCollectionHeads), true, PersistenceCtx),
+        {ok, ts_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace ->
             ?error_stacktrace("Time series collection ~p delete error: ~p:~p", [Id, Error, Reason], Stacktrace),

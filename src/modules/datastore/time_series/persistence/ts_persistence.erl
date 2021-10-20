@@ -82,7 +82,7 @@
     datastore_ctx :: datastore_ctx(),
     batch :: batch() | undefined, % Undefined when time series collection is used outside tp process
                                   % (call via datastore_reader:time_series_collection_list_windows/3)
-    hub :: doc(),
+    hub :: doc() | undefined, % undefined after hub deletion to prevent usage of outdated document
     is_hub_updated = false :: boolean(), % Field used to determine if hub should be saved by finalize/1 function
     % Fields representing metric currently being updated (single ctx can be used to update several metrics)
     currently_processed_time_series :: time_series_collection:time_series_id() | undefined,
@@ -231,7 +231,7 @@ delete_data_node(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) -
 -spec delete_hub(ctx()) -> ctx().
 delete_hub(#ctx{hub = #document{key = HubKey}, datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     {ok, UpdatedBatch} = datastore_doc:delete(DatastoreCtx, HubKey, Batch),
-    Ctx#ctx{batch = UpdatedBatch}.
+    Ctx#ctx{batch = UpdatedBatch, hub = undefined, is_hub_updated = false}.
 
 
 -spec delete_metric(ctx()) -> ctx().

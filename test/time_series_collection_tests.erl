@@ -449,17 +449,19 @@ multiple_time_series_multiple_nodes() ->
     ?assertMatch(?LIST_OK_ANS(GetAllExpected), ?LIST(Id, GetAllArg, Batch2)),
     ?assertMatch(?LIST_OK_ANS(GetAllExpected), ?LIST(Id, GetAllArg2, Batch2)),
 
+    % Test listing time series ids
     ListTimeSeriesIdsAns = time_series_collection:list_time_series_ids(#{}, Id, Batch2),
     ?assertMatch(?LIST_OK_ANS(_), ListTimeSeriesIdsAns),
     ?LIST_OK_ANS(TimeSeriesIds) = ListTimeSeriesIdsAns,
     ?assertEqual([<<"TS", 0>>, <<"TS", 1>>], lists:sort(TimeSeriesIds)),
 
+    % Test listing metrics ids
     ListMetricsIdsAns = time_series_collection:list_metric_ids(#{}, Id, Batch2),
     ?assertMatch(?LIST_OK_ANS(_), ListMetricsIdsAns),
     ?LIST_OK_ANS(MetricsIds) = ListMetricsIdsAns,
-    ExpectedMetricsIds = lists:sort(lists:map(fun({K, V}) -> {K, lists:sort(V)} end, maps:to_list(MetricsIds))),
+    SortedMetricsIds = lists:sort(lists:map(fun({K, V}) -> {K, lists:sort(V)} end, maps:to_list(MetricsIds))),
     ?assertEqual([{<<"TS", 0>>, [<<"M",1>>, <<"M",2>>]}, {<<"TS", 1>>, [<<"M",0>>, <<"M",1>>, <<"M",2>>]}],
-        ExpectedMetricsIds).
+        SortedMetricsIds).
 
 
 update_subset() ->
@@ -500,9 +502,11 @@ metric_adding_and_deleting() ->
     InitialConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{resolution = 1, retention = 2000, aggregator = sum}}},
     Batch = init(Id, InitialConfigMap),
 
+    % Prepare time series collection to be used in tests (batch stores collection)
     Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 2000)),
     Batch2 = update_many(Id, Measurements, Batch),
 
+    % Add metric to collection
     ConfigMapExtension = #{<<"TS1">> => #{<<"M2">> => #metric_config{resolution = 1, retention = 1000, aggregator = last}}},
     Batch3 = extend_collection(Id, ConfigMapExtension, Batch2),
     ExpectedMap = #{
@@ -511,6 +515,7 @@ metric_adding_and_deleting() ->
     },
     ?assertMatch(?LIST_OK_ANS(ExpectedMap), ?LIST_ALL(Id, Batch3)),
 
+    % Add time series to collection
     ConfigMapExtension2 = #{<<"TS2">> => #{<<"M1">> => #metric_config{resolution = 1, retention = 4000, aggregator = last}}},
     Batch4 = extend_collection(Id, ConfigMapExtension2, Batch3),
     ExpectedMap2 = ExpectedMap#{
@@ -518,6 +523,7 @@ metric_adding_and_deleting() ->
     },
     ?assertMatch(?LIST_OK_ANS(ExpectedMap2), ?LIST_ALL(Id, Batch4)),
 
+    % Add multiple metrics to collection
     Batch5 = update_many(Id, Measurements, <<"TS2">>, Batch4),
     ConfigMapExtension3 = #{
         <<"TS1">> => #{
@@ -537,6 +543,7 @@ metric_adding_and_deleting() ->
     },
     ?assertMatch(?LIST_OK_ANS(ExpectedMap3), ?LIST_ALL(Id, Batch6)),
 
+    % Add measurements to added metrics
     Measurements2 = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(2001, 3300)),
     Batch7 = update_many(Id, Measurements2, {<<"TS2">>, [<<"M1">>, <<"M3">>]}, Batch6),
     Measurements3 = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(3301, 9000)),
@@ -547,6 +554,7 @@ metric_adding_and_deleting() ->
     },
     ?assertMatch(?LIST_OK_ANS(ExpectedMap4), ?LIST_ALL(Id, Batch8)),
 
+    % Test errors handling using different add options
     ConfigMapExtension4 = #{<<"TS2">> => #{
         <<"M0">> => #metric_config{resolution = 1, retention = 100, aggregator = min},
         <<"M3">> => #metric_config{resolution = 1, retention = 100, aggregator = max}
@@ -559,6 +567,7 @@ metric_adding_and_deleting() ->
     extend_collection_with_error(Id, ConfigMapExtension4, time_series_already_exists,
         #{time_series_conflict_resulution_strategy => throw}, Batch8),
 
+    % Test overriding metric
     ConfigMapExtension5 = #{<<"TS2">> => #{
         <<"M2">> => #metric_config{resolution = 1, retention = 500, aggregator = last},
         <<"M3">> => #metric_config{resolution = 1, retention = 100, aggregator = max},
@@ -571,12 +580,12 @@ metric_adding_and_deleting() ->
         {<<"TS2">>, <<"M4">>} => []
     },
     ?assertMatch(?LIST_OK_ANS(ExpectedMap5), ?LIST_ALL(Id, Batch9)),
-
     Batch10 = extend_collection(Id, ConfigMapExtension5,
         #{time_series_conflict_resulution_strategy => merge, metric_conflict_resulution_strategy => override}, Batch9),
     ?assertMatch(?LIST_OK_ANS(ExpectedMap5), ?LIST_ALL(Id, Batch10)),
     ?assertEqual(Batch9, Batch10),
 
+    % Add measurements to overridden metric
     Measurements4 = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 10)),
     Batch11 = update_many(Id, Measurements4, {<<"TS2">>, <<"M3">>}, Batch10),
     ExpectedMap6 = ExpectedMap5#{
@@ -584,6 +593,7 @@ metric_adding_and_deleting() ->
     },
     ?assertMatch(?LIST_OK_ANS(ExpectedMap6), ?LIST_ALL(Id, Batch11)),
 
+    % Test time series overriding
     ConfigMapExtension6 = #{<<"TS1">> => #{
         <<"M0">> => #metric_config{resolution = 1, retention = 100, aggregator = last},
         <<"M1">> => #metric_config{resolution = 1, retention = 100, aggregator = max}
@@ -594,7 +604,6 @@ metric_adding_and_deleting() ->
         {<<"TS1">>, <<"M1">>} => []
     },
     ?assertMatch(?LIST_OK_ANS(ExpectedMap7), ?LIST_ALL(Id, Batch12)),
-
     Batch13 = extend_collection(Id, ConfigMapExtension6, #{time_series_conflict_resulution_strategy => override}, Batch12),
     ?assertMatch(?LIST_OK_ANS(ExpectedMap7), ?LIST_ALL(Id, Batch13)),
     ?assertEqual(Batch12, Batch13),
@@ -607,12 +616,14 @@ metric_adding_and_deleting() ->
     ?assertMatch(?LIST_OK_ANS(ExpectedMap7), ?LIST_ALL(Id, Batch15)),
     ?assertEqual(Batch12, Batch15),
 
+    % Add measurements to overridden metric
     Batch16 = update_many(Id, Measurements, {<<"TS1">>, <<"M0">>}, Batch15),
     ExpectedMap8 = ExpectedMap7#{
         {<<"TS1">>, <<"M0">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1901, 2000)))
     },
     ?assertMatch(?LIST_OK_ANS(ExpectedMap8), ?LIST_ALL(Id, Batch16)),
 
+    % Verify if windows are stored using multiple datastore documents
     Documents = lists:sort(maps:values(Batch16)),
     ?assertMatch([#document{}, #document{}, #document{}], Documents),
     [#document{value = Record1}, #document{value = Record2}, #document{value = Record3}] = Documents,
@@ -632,6 +643,7 @@ metric_adding_and_deleting() ->
     end, maps:values(MetricsMap2)),
     ?assertEqual([0, 100], lists:sort(MetricsMap1Sizes)),
     ?assertEqual([0, 0, 10, 200], lists:sort(MetricsMap2Sizes)).
+% TODO - przetestowac usuwanie
 
 
 %%%===================================================================
