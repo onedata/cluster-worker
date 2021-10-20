@@ -81,7 +81,8 @@
     infinite_log_list_performance_test_base/1,
     time_series_test/1,
     multinode_time_series_test/1,
-    time_series_document_fetch_test/1
+    time_series_document_fetch_test/1,
+    metric_adding_and_deleting_test/1
 ]).
 
 % for rpc
@@ -143,7 +144,8 @@ all() ->
         infinite_log_age_pruning_test,
         time_series_test,
         multinode_time_series_test,
-        time_series_document_fetch_test
+        time_series_document_fetch_test,
+        metric_adding_and_deleting_test
     ], [
         links_performance,
         create_get_performance,
@@ -1128,16 +1130,10 @@ multinode_time_series_test(Config) ->
         ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, #{}])),
 
         % Test listing time ids
-        {ok, TimeSeriesIds} = ?assertMatch({ok, _},
-            rpc:call(Worker, Model, time_series_collection_list_time_series_ids, [Id])),
-        ?assertEqual([<<"TS", 0>>, <<"TS", 1>>], lists:sort(TimeSeriesIds)),
+        verify_time_series_ids(Worker, Model, Id),
 
         % Test listing metrics ids
-        {ok, MetricsIds} = ?assertMatch({ok, _},
-            rpc:call(Worker, Model, time_series_collection_list_metric_ids, [Id])),
-        SortedMetricsIds = lists:sort(lists:map(fun({K, V}) -> {K, lists:sort(V)} end, maps:to_list(MetricsIds))),
-        ?assertEqual([{<<"TS", 0>>, [<<"M",1>>, <<"M",2>>]}, {<<"TS", 1>>, [<<"M",0>>, <<"M",1>>, <<"M",2>>]}],
-            SortedMetricsIds),
+        verify_metric_ids(Worker, Model, Id),
 
         % Verify if delete clears all documents from datastore
         ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [Id])),
@@ -1179,7 +1175,6 @@ time_series_document_fetch_test(Config) ->
         Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
 
         % Test if documents deleted from disc are fetched when needed
-        % TODO - podobnie sprawdzic listowanie idkow
         lists:foreach(fun(Key) ->
             assert_key_on_disc(Worker, Model, Key, false),
             MemCtx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
@@ -1191,11 +1186,74 @@ time_series_document_fetch_test(Config) ->
             ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
             assert_key_not_in_memory(Worker, Model, Key),
             ?assertMatch({ok, ExpectedMap},
-                rpc:call(Worker, Model, time_series_collection_list_windows, [Id, maps:keys(ExpectedMap), #{}]))
+                rpc:call(Worker, Model, time_series_collection_list_windows, [Id, maps:keys(ExpectedMap), #{}])),
+
+            ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
+            assert_key_not_in_memory(Worker, Model, Key),
+            verify_time_series_ids(Worker, Model, Id),
+
+            ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
+            assert_key_not_in_memory(Worker, Model, Key),
+            verify_metric_ids(Worker, Model, Id)
         end, Keys)
     end, ?TEST_CACHED_MODELS).
 
-% TODO - test add/delete metric
+
+metric_adding_and_deleting_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        InitialKeys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)),
+        Id = datastore_key:new(),
+        InitialConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{
+            resolution = 1, retention = 100000, aggregator = last
+        }}},
+        ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_create, [Id, InitialConfigMap])),
+
+        % Add measurements to metric
+        MeasurementsCount = 100000,
+        Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
+        ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_update_many, [Id, Measurements])),
+
+        % Add metrics to collection
+        ConfigMapExtension = #{
+            <<"TS1">> => #{
+                <<"M2">> => #metric_config{resolution = 1, retention = 100, aggregator = max}
+            },
+            <<"TS2">> => #{
+                <<"M3">> => #metric_config{resolution = 1, retention = 500, aggregator = last},
+                <<"M4">> => #metric_config{resolution = 1, retention = 20000, aggregator = min}
+            }
+        },
+        ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_add_metrics, [Id, ConfigMapExtension, #{}])),
+
+        % Add measurements to new metric
+        ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_update, [Id, 1, {<<"TS2">>, <<"M3">>}, 10])),
+
+        % Test getting all metrics
+        ExpectedMap = #{
+            {<<"TS1">>, <<"M1">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount))),
+            {<<"TS1">>, <<"M2">>} => [],
+            {<<"TS2">>, <<"M3">>} => [{1, 10}],
+            {<<"TS2">>, <<"M4">>} => []
+        },
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, #{}])),
+
+        % Delete metrics from collection
+        MetricsToDelete = [{<<"TS1">>, <<"M2">>}, {<<"TS2">>, <<"M3">>}],
+        ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_delete_metrics, [Id, MetricsToDelete])),
+
+        % Test getting all metrics
+        ExpectedMap2 = #{
+            {<<"TS1">>, <<"M1">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount))),
+            {<<"TS2">>, <<"M4">>} => []
+        },
+        ?assertMatch({ok, ExpectedMap2}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, #{}])),
+
+        % Verify if delete clears all documents from datastore
+        ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [Id])),
+        ?assertEqual([], get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys)
+    end, ?TEST_MODELS).
+
 
 %%%===================================================================
 %%% Stress tests
@@ -2168,3 +2226,19 @@ create_time_series(Worker, Model, CreateMetricConfigFun) ->
     end, #{}, lists:seq(1, 5)),
     ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_create, [Id, ConfigMap])),
     {Id, ConfigMap}.
+
+
+%% @private
+verify_time_series_ids(Worker, Model, CollectionId) ->
+    {ok, TimeSeriesIds} = ?assertMatch({ok, _},
+        rpc:call(Worker, Model, time_series_collection_list_time_series_ids, [CollectionId])),
+    ?assertEqual([<<"TS", 0>>, <<"TS", 1>>], lists:sort(TimeSeriesIds)).
+
+
+%% @private
+verify_metric_ids(Worker, Model, CollectionId) ->
+    {ok, MetricsIds} = ?assertMatch({ok, _},
+        rpc:call(Worker, Model, time_series_collection_list_metric_ids, [CollectionId])),
+    SortedMetricsIds = lists:sort(lists:map(fun({K, V}) -> {K, lists:sort(V)} end, maps:to_list(MetricsIds))),
+    ?assertEqual([{<<"TS", 0>>, [<<"M",1>>, <<"M",2>>]}, {<<"TS", 1>>, [<<"M",0>>, <<"M",1>>, <<"M",2>>]}],
+        SortedMetricsIds).

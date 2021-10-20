@@ -544,12 +544,12 @@ metric_adding_and_deleting() ->
     ?assertMatch(?LIST_OK_ANS(ExpectedMap3), ?LIST_ALL(Id, Batch6)),
 
     % Add measurements to added metrics
-    Measurements2 = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(2001, 3300)),
+    Measurements2 = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(2001, 3000)),
     Batch7 = update_many(Id, Measurements2, {<<"TS2">>, [<<"M1">>, <<"M3">>]}, Batch6),
-    Measurements3 = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(3301, 9000)),
+    Measurements3 = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(3001, 9000)),
     Batch8 = update_many(Id, Measurements3, {<<"TS2">>, <<"M3">>}, Batch7),
     ExpectedMap4 = ExpectedMap3#{
-        {<<"TS2">>, <<"M1">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 3300))),
+        {<<"TS2">>, <<"M1">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 3000))),
         {<<"TS2">>, <<"M3">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(2001, 9000)))
     },
     ?assertMatch(?LIST_OK_ANS(ExpectedMap4), ?LIST_ALL(Id, Batch8)),
@@ -570,7 +570,7 @@ metric_adding_and_deleting() ->
     % Test overriding metric
     ConfigMapExtension5 = #{<<"TS2">> => #{
         <<"M2">> => #metric_config{resolution = 1, retention = 500, aggregator = last},
-        <<"M3">> => #metric_config{resolution = 1, retention = 100, aggregator = max},
+        <<"M3">> => #metric_config{resolution = 1, retention = 10000, aggregator = max},
         <<"M4">> => #metric_config{resolution = 1, retention = 100, aggregator = min}
     }},
     Batch9 = extend_collection(Id, ConfigMapExtension5, #{metric_conflict_resulution_strategy => override}, Batch8),
@@ -629,21 +629,49 @@ metric_adding_and_deleting() ->
     [#document{value = Record1}, #document{value = Record2}, #document{value = Record3}] = Documents,
     [{ts_hub, TimeSeries}, {ts_metric_data_node, #data_node{windows = DataNodeWindows1}},
         {ts_metric_data_node, #data_node{windows = DataNodeWindows2}}] = lists:sort([Record1, Record2, Record3]),
-    ?assertEqual([1100, 2000], lists:sort([ts_windows:get_size(DataNodeWindows1), ts_windows:get_size(DataNodeWindows2)])),
+    ?assertEqual([600, 2000], lists:sort([ts_windows:get_size(DataNodeWindows1), ts_windows:get_size(DataNodeWindows2)])),
     ?assertEqual(2, maps:size(TimeSeries)),
-    MetricsMap1 = maps:get(<<"TS1">>, TimeSeries),
-    MetricsMap2 = maps:get(<<"TS2">>, TimeSeries),
-    ?assertEqual([<<"M0">>, <<"M1">>], lists:sort(maps:keys(MetricsMap1))),
-    ?assertEqual([<<"M1">>, <<"M2">>, <<"M3">>, <<"M4">>], lists:sort(maps:keys(MetricsMap2))),
-    MetricsMap1Sizes = lists:map(fun(#metric{head_data = #data_node{windows = Windows}}) ->
-        ts_windows:get_size(Windows)
-    end, maps:values(MetricsMap1)),
-    MetricsMap2Sizes = lists:map(fun(#metric{head_data = #data_node{windows = Windows}}) ->
-        ts_windows:get_size(Windows)
-    end, maps:values(MetricsMap2)),
-    ?assertEqual([0, 100], lists:sort(MetricsMap1Sizes)),
-    ?assertEqual([0, 0, 10, 200], lists:sort(MetricsMap2Sizes)).
-% TODO - przetestowac usuwanie
+    verify_time_series_heads(maps:get(<<"TS1">>, TimeSeries), [<<"M0">>, <<"M1">>],
+        [0, 100], [100, 100]),
+    verify_time_series_heads(maps:get(<<"TS2">>, TimeSeries), [<<"M1">>, <<"M2">>, <<"M3">>, <<"M4">>],
+        [0, 0, 10, 400], [100, 500, 600, 600]),
+
+    % Test metric deletion
+    Batch17 = delete_metrics(Id, {<<"TS2">>, <<"M1">>}, Batch16),
+    ExpectedMap9 = maps:remove({<<"TS2">>, <<"M1">>}, ExpectedMap8),
+    ?assertMatch(?LIST_OK_ANS(ExpectedMap9), ?LIST_ALL(Id, Batch17)),
+
+    % Test measurements adding to remaining metric
+    Batch18 = update_many(Id, Measurements, {<<"TS1">>, <<"M1">>}, Batch17),
+    ExpectedMap10 = ExpectedMap9#{
+        {<<"TS1">>, <<"M1">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1901, 2000)))
+    },
+    ?assertMatch(?LIST_OK_ANS(ExpectedMap10), ?LIST_ALL(Id, Batch18)),
+
+    % Test deletion of multiple metrics
+    Batch19 = delete_metrics(Id, [{<<"TS1">>, <<"M1">>}, {<<"TS2">>, <<"M2">>}], Batch18),
+    ExpectedMap11 = maps:remove({<<"TS1">>, <<"M1">>}, maps:remove({<<"TS2">>, <<"M2">>}, ExpectedMap10)),
+    ?assertMatch(?LIST_OK_ANS(ExpectedMap11), ?LIST_ALL(Id, Batch19)),
+
+    % Test time series deletion
+    Batch20 = delete_metrics(Id, <<"TS1">>, Batch19),
+    ExpectedMap12 = maps:remove({<<"TS1">>, <<"M0">>}, ExpectedMap11),
+    ?assertMatch(?LIST_OK_ANS(ExpectedMap12), ?LIST_ALL(Id, Batch20)),
+
+    % Verify documents used to store measurements after deletion
+    Documents2 = lists:sort(maps:values(Batch20)),
+    ?assertMatch([#document{value = {ts_hub, _}}], Documents2),
+    [#document{value = {ts_hub, TimeSeries2}}] = Documents2,
+    ?assertEqual(1, maps:size(TimeSeries2)),
+    verify_time_series_heads(maps:get(<<"TS2">>, TimeSeries2), [<<"M3">>, <<"M4">>],
+        [0, 10], [100, 1900]),
+
+    % Verify collection deletion
+    DeleteAns = time_series_collection:delete(#{}, Id, Batch20),
+    ?assertMatch({ok, _}, DeleteAns),
+    {ok, Batch21} = DeleteAns,
+    ?assertEqual({{error, list_failed}, Batch21}, ?LIST_ALL(Id, Batch21)),
+    ?assertEqual(#{}, Batch21).
 
 
 %%%===================================================================
@@ -702,5 +730,26 @@ extend_collection_with_error(Id, ConfigMapExtension, Reason, Options, Batch) ->
     ?assertMatch({{error, Reason}, _}, AddAns),
     {_, Batch2} = AddAns,
     ?assertEqual(Batch, Batch2).
+
+
+delete_metrics(Id, MetricsToDelete, Batch) ->
+    DeleteAns = time_series_collection:delete_metrics(#{}, Id, MetricsToDelete, Batch),
+    ?assertMatch({ok, _}, DeleteAns),
+    {ok, Batch2} = DeleteAns,
+    Batch2.
+
+
+verify_time_series_heads(MetricsMap, ExpectedMetricIds, ExpectedMetricsMapSizes, ExpectedMetricsMaxWindowsInHead) ->
+    ?assertEqual(ExpectedMetricIds, lists:sort(maps:keys(MetricsMap))),
+    {MetricsMapSizes, MetricsMaxWindowsInHead} = lists:unzip(lists:map(fun(#metric{
+        head_data = #data_node{windows = Windows},
+        splitting_strategy = #splitting_strategy{max_windows_in_head_doc = MaxWindowsInHead}
+    }) ->
+        {ts_windows:get_size(Windows), MaxWindowsInHead}
+    end, maps:values(MetricsMap))),
+
+    ?assertEqual(ExpectedMetricsMapSizes, lists:sort(MetricsMapSizes)),
+    ?assertEqual(ExpectedMetricsMaxWindowsInHead, lists:sort(MetricsMaxWindowsInHead)).
+
 
 -endif.

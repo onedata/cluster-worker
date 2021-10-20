@@ -125,11 +125,7 @@ add_metrics(Ctx, Id, ConfigMapExtension, Options, Batch) ->
     try
         {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
             
-        ExistingConfigMap = maps:map(fun(_TimeSeriesId, TimeSeriesHeads) ->
-            maps:map(fun(_MetricId, #metric{config = Config}) ->
-                Config
-            end, TimeSeriesHeads)
-        end, TimeSeriesCollectionHeads),
+        ExistingConfigMap = get_config_map(TimeSeriesCollectionHeads),
         NewConfigMap = merge_config_maps(ExistingConfigMap, ConfigMapExtension, Options),
         NewDocSplittingStrategies = ts_doc_splitting_strategies:calculate(NewConfigMap),
             
@@ -162,7 +158,13 @@ delete_metrics(Ctx, Id, MetricsToDelete, Batch) ->
     try
         {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
         SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToDelete),
-        FinalPersistenceCtx = delete_time_series(maps:to_list(SelectedHeads), false, PersistenceCtx),
+        PersistenceCtxAfterDelete = delete_time_series(maps:to_list(SelectedHeads), false, PersistenceCtx),
+
+        UpdatedTimeSeriesCollectionHeads = ts_persistence:get_time_series_collection_heads(PersistenceCtxAfterDelete),
+        ConfigMap = get_config_map(UpdatedTimeSeriesCollectionHeads),
+        NewDocSplittingStrategies = ts_doc_splitting_strategies:calculate(ConfigMap),
+        FinalPersistenceCtx = reconfigure_metrics(ConfigMap, #{}, NewDocSplittingStrategies, PersistenceCtxAfterDelete),
+
         {ok, ts_persistence:finalize(FinalPersistenceCtx)}
     catch
         Error:Reason:Stacktrace ->
@@ -446,6 +448,15 @@ select_heads(TimeSeriesCollectionHeads, [TimeSeriesId | Tail]) ->
 
 select_heads(TimeSeriesCollectionHeads, ToBeIncluded) ->
     select_heads(TimeSeriesCollectionHeads, [ToBeIncluded]).
+
+
+-spec get_config_map(ts_hub:time_series_collection_heads()) -> collection_config().
+get_config_map(TimeSeriesCollectionHeads) ->
+    maps:map(fun(_TimeSeriesId, TimeSeriesHeads) ->
+        maps:map(fun(_MetricId, #metric{config = Config}) ->
+            Config
+        end, TimeSeriesHeads)
+    end, TimeSeriesCollectionHeads).
 
 
 -spec update_time_series([{time_series_id(), ts_hub:time_series_heads()}], ts_windows:timestamp(),

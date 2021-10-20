@@ -75,7 +75,7 @@
 %% API
 -export([init_for_new_collection/4, init_for_existing_collection/3, init_metric/2, finalize/1,
     set_currently_processed_time_series/2, set_currently_processed_metric/2, get_currently_processed_metric/1,
-    get_time_series_collection_id/1, is_hub_key/2,
+    get_time_series_collection_id/1, get_time_series_collection_heads/1, is_hub_key/2,
     get/2, create/2, update/3, delete_data_node/2, delete_hub/1, delete_metric/1]).
 
 -record(ctx, {
@@ -179,6 +179,11 @@ get_currently_processed_metric(#ctx{
 -spec get_time_series_collection_id(ctx()) -> key().
 get_time_series_collection_id(#ctx{hub = #document{key = HubKey}}) ->
     HubKey. % Hub key is always equal to time series collection id
+
+
+-spec get_time_series_collection_heads(ctx()) -> ts_hub:time_series_collection_heads().
+get_time_series_collection_heads(#ctx{hub = #document{value = Record}}) ->
+    ts_hub:get_time_series_collection_heads(Record).
 
 
 -spec is_hub_key(key(), ctx()) -> boolean().
