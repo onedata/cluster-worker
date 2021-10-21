@@ -13,7 +13,8 @@
 -author("Michal Wrzeszcz").
 
 %% API
--export([init/0, list/3, set_or_aggregate/4, prune_overflowing/2, split/2, is_size_exceeded/2, reorganize/4]).
+-export([init/0, list/3, set_or_aggregate/4, set_many/2, prune_overflowing/2, split/2,
+    is_size_exceeded/2, get_remaining_windows_count/2, reorganize/4]).
 %% Encoding/decoding  API
 -export([encode/1, decode/1]).
 %% Exported for unit tests
@@ -62,6 +63,11 @@ set_or_aggregate(Windows, WindowToBeUpdatedTimestamp, NewValue, Aggregator) ->
     set_value(WindowToBeUpdatedTimestamp, NewWindowValue, Windows).
 
 
+-spec set_many(windows(), [window()]) -> windows().
+set_many(Windows, NewWindowsList) ->
+    from_list(prepare_windows_input_list(NewWindowsList) ++ to_list(Windows)).
+
+
 -spec prune_overflowing(windows(), non_neg_integer()) -> windows().
 prune_overflowing(Windows, MaxWindowsCount) ->
     case get_size(Windows) > MaxWindowsCount of
@@ -80,6 +86,11 @@ split(Windows, SplitPosition) ->
 -spec is_size_exceeded(windows(), non_neg_integer()) -> boolean().
 is_size_exceeded(Windows, MaxWindowsCount) ->
     get_size(Windows) > MaxWindowsCount.
+
+
+-spec get_remaining_windows_count(windows(), non_neg_integer()) -> non_neg_integer().
+get_remaining_windows_count(Windows, MaxWindowsCount) ->
+    MaxWindowsCount - get_size(Windows).
 
 
 %%--------------------------------------------------------------------
@@ -262,3 +273,8 @@ to_list(Windows) ->
 -spec from_list([window()]) -> windows().
 from_list(WindowsList) ->
     gb_trees:from_orddict(WindowsList).
+
+
+-spec prepare_windows_input_list([window()]) -> [window()].
+prepare_windows_input_list(NewWindowsList) ->
+    lists:reverse(lists:map(fun({Timestamp, Value}) -> {reverse_timestamp(Timestamp), Value} end, NewWindowsList)).
