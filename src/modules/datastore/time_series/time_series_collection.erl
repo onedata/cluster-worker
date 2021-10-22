@@ -405,8 +405,8 @@ reconfigure_metrics(NewConfigMap, ConfigMapExtension, DocSplittingStrategies, Pe
             case maps:get(MetricId, TimeSeriesConfigMapExtension, undefined) of
                 undefined ->
                     CurrentMetric = ts_persistence:get_currently_processed_metric(UpdatedInternalPersistenceCtx),
-                    ts_metric:reconfigure(CurrentMetric, Config,
-                        maps:get({TimeSeriesId, MetricId}, DocSplittingStrategies), UpdatedInternalPersistenceCtx);
+                    ts_metric:reconfigure(CurrentMetric, maps:get({TimeSeriesId, MetricId}, DocSplittingStrategies),
+                        UpdatedInternalPersistenceCtx);
                 Config ->
                     Metric = ts_metric:init(Config, maps:get({TimeSeriesId, MetricId}, DocSplittingStrategies)),
                     ts_persistence:init_metric(Metric, UpdatedInternalPersistenceCtx)

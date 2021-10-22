@@ -30,7 +30,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([init/2, update/4, list_windows/3, delete_data_nodes/2, reconfigure/4]).
+-export([init/2, update/4, list_windows/3, delete_data_nodes/2, reconfigure/3]).
 
 -type id() :: binary().
 -type metric() :: #metric{}.
@@ -84,21 +84,43 @@ delete_data_nodes(#metric{head_data = #data_node{older_node_key = OlderNodeKey}}
     delete_data_nodes(OlderNodeKey, OlderDataNode, UpdatedPersistenceCtx).
 
 
--spec reconfigure(metric(), ts_metric:config(), ts_metric:splitting_strategy(), ts_persistence:ctx()) ->
-    ts_persistence:ctx().
+-spec reconfigure(metric(), ts_metric:splitting_strategy(), ts_persistence:ctx()) -> ts_persistence:ctx().
 reconfigure(#metric{
     splitting_strategy = DocSplittingStrategy
-} = _CurrentMetric, _NewConfig, DocSplittingStrategy, PersistenceCtx) ->
+} = _CurrentMetric, DocSplittingStrategy, PersistenceCtx) ->
     PersistenceCtx;
-reconfigure(CurrentMetric, NewConfig, NewDocSplittingStrategy, PersistenceCtx) ->
+reconfigure(#metric{
+    head_data = #data_node{
+        windows = ExistingWindowsSet
+    } = Data,
+    splitting_strategy = #splitting_strategy{
+        max_windows_in_tail_doc = MaxInTail
+    }
+} = CurrentMetric, #splitting_strategy{
+    max_windows_in_tail_doc = MaxInTail
+} = NewDocSplittingStrategy, PersistenceCtx) ->
+    NewMetric = CurrentMetric#metric{
+        head_data = Data#data_node{
+            windows = ts_windows:init()
+        },
+        splitting_strategy = NewDocSplittingStrategy
+    },
+    PersistenceCtxAfterInit = ts_persistence:init_metric(NewMetric, PersistenceCtx),
+    {_, ExistingWindows} = ts_windows:list(ExistingWindowsSet, undefined, #{}),
+    DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtxAfterInit),
+    set_sorted_windows_at_beginning(DataNodeKey, NewDocSplittingStrategy,
+        lists:reverse(ExistingWindows), PersistenceCtxAfterInit);
+reconfigure(#metric{
+    config = Config
+} = CurrentMetric, NewDocSplittingStrategy, PersistenceCtx) ->
     {ExistingWindows, UpdatedPersistenceCtx} = list_windows(CurrentMetric, #{}, PersistenceCtx),
     PersistenceCtxAfterCleaning = delete_data_nodes(CurrentMetric, UpdatedPersistenceCtx),
 
-    NewMetric = init(NewConfig, NewDocSplittingStrategy),
+    NewMetric = init(Config, NewDocSplittingStrategy),
     PersistenceCtxAfterInit = ts_persistence:init_metric(NewMetric, PersistenceCtxAfterCleaning),
 
     DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtxAfterInit),
-    set_sorted_windows_to_empty_metric(DataNodeKey, NewDocSplittingStrategy,
+    set_sorted_windows_at_beginning(DataNodeKey, NewDocSplittingStrategy,
         lists:reverse(ExistingWindows), PersistenceCtxAfterInit).
 
 
@@ -207,11 +229,11 @@ update(
     end.
 
 
--spec set_sorted_windows_to_empty_metric(ts_metric_data_node:key(), splitting_strategy(),
+-spec set_sorted_windows_at_beginning(ts_metric_data_node:key(), splitting_strategy(),
     [ts_windows:window()], ts_persistence:ctx()) -> ts_persistence:ctx().
-set_sorted_windows_to_empty_metric(_DataNodeKey, _DocSplittingStrategy, [], PersistenceCtx) ->
+set_sorted_windows_at_beginning(_DataNodeKey, _DocSplittingStrategy, [], PersistenceCtx) ->
     PersistenceCtx;
-set_sorted_windows_to_empty_metric(DataNodeKey,
+set_sorted_windows_at_beginning(DataNodeKey,
     #splitting_strategy{
         max_windows_in_head_doc = MaxWindowsCount
     } = DocSplittingStrategy, WindowsToSet, PersistenceCtx) ->
@@ -235,7 +257,7 @@ set_sorted_windows_to_empty_metric(DataNodeKey,
                 UpdatedPersistenceCtx}
     end,
 
-    set_sorted_windows_to_empty_metric(DataNodeKey, DocSplittingStrategy, RemainingWindowsToSet, FinalPersistenceCtx).
+    set_sorted_windows_at_beginning(DataNodeKey, DocSplittingStrategy, RemainingWindowsToSet, FinalPersistenceCtx).
 
 
 -spec prune_overflowing_node(ts_metric_data_node:key(), data_node(), ts_metric_data_node:key(), data_node() | undefined,
@@ -318,12 +340,17 @@ get_max_windows_and_split_position(
         max_windows_in_tail_doc = MaxWindowsCountInTail
     },
     PersistenceCtx) ->
-    case ts_persistence:is_hub_key(DataNodeKey, PersistenceCtx) of
-        true ->
-            % If adding of single window results in reorganization split should be at first element
+    case {ts_persistence:is_hub_key(DataNodeKey, PersistenceCtx), MaxWindowsCountInHead =:= MaxWindowsCountInTail} of
+        {true, true} ->
+            % If adding of single window results in hub reorganization and MaxWindowsCountInHead =:= MaxWindowsCountInTail,
+            % moving all windows would result in creation of too large tail document and split should be at first element
             % to move most of windows to tail doc
             {MaxWindowsCountInHead, 1};
-        false ->
+        {true, false} ->
+            % If adding of single window results in hub reorganization and MaxWindowsCountInHead =/= MaxWindowsCountInTail,
+            % all windows should be moved to tail doc (capacity of head doc is always equal or smaller to capacity of tail doc)
+            {MaxWindowsCountInHead, 0};
+        {false, _} ->
             % Split of tail doc should result in two documents with at list of half of capacity used
             {MaxWindowsCountInTail, ceil(MaxWindowsCountInTail / 2)}
     end.

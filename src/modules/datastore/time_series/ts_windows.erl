@@ -253,6 +253,8 @@ list_internal(Iterator, Options) ->
 
 
 -spec split_internal(windows(), non_neg_integer()) -> {windows(), windows(), timestamp()}.
+split_internal(Windows, 0) ->
+    {init_windows_set(), Windows, get_first_timestamp(Windows)};
 split_internal(Windows, SplitPosition) ->
     WindowsList = gb_trees:to_list(Windows),
     Windows1 = lists:sublist(WindowsList, SplitPosition),

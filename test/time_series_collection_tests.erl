@@ -629,12 +629,17 @@ metric_adding_and_deleting() ->
     [#document{value = Record1}, #document{value = Record2}, #document{value = Record3}] = Documents,
     [{ts_hub, TimeSeries}, {ts_metric_data_node, #data_node{windows = DataNodeWindows1}},
         {ts_metric_data_node, #data_node{windows = DataNodeWindows2}}] = lists:sort([Record1, Record2, Record3]),
-    ?assertEqual([600, 2000], lists:sort([ts_windows:get_size(DataNodeWindows1), ts_windows:get_size(DataNodeWindows2)])),
+    % Note: data_nodes were created for metric {<<"TS2">>, <<"M1">>} ; size of node equal 762 is a result of
+    % splitting_strategy when measurements were added
+    % (it would be 600 if doc_splitting_strategy for current batch is used)
+    ?assertEqual([762, 2000], lists:sort([ts_windows:get_size(DataNodeWindows1), ts_windows:get_size(DataNodeWindows2)])),
     ?assertEqual(2, maps:size(TimeSeries)),
     verify_time_series_heads(maps:get(<<"TS1">>, TimeSeries), [<<"M0">>, <<"M1">>],
         [0, 100], [100, 100]),
+    % Note: value 238 is for metric {<<"TS2">>, <<"M1">>} as a result of doc_splitting_strategy when measurements
+    % were added (it would be 400 if splitting_strategy for current batch is used)
     verify_time_series_heads(maps:get(<<"TS2">>, TimeSeries), [<<"M1">>, <<"M2">>, <<"M3">>, <<"M4">>],
-        [0, 0, 10, 400], [100, 500, 600, 600]),
+        [0, 0, 10, 238], [100, 500, 600, 600]),
 
     % Test metric deletion
     Batch17 = delete_metrics(Id, {<<"TS2">>, <<"M1">>}, Batch16),
