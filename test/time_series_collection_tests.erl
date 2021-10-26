@@ -52,7 +52,10 @@ setup() ->
     meck:expect(datastore_doc_batch, init, fun() -> #{} end),
     meck:expect(datastore_doc, save, fun(_Ctx, Key, Doc, Batch) -> {{ok, Doc}, Batch#{Key => Doc}} end),
     meck:expect(datastore_doc, fetch, fun(_Ctx, Key, Batch) ->
-        {{ok, maps:get(Key, Batch, {error, not_found})}, Batch}
+        case maps:get(Key, Batch, {error, not_found}) of
+            {error, not_found} -> {{error, not_found}, Batch};
+            Doc -> {{ok, Doc}, Batch}
+        end
     end),
     meck:expect(datastore_doc, delete, fun(_Ctx, Key, Batch) -> {ok, maps:remove(Key, Batch)} end).
 
@@ -71,6 +74,7 @@ single_metric_single_node() ->
     MetricsConfig = #metric_config{resolution = 10, retention = 5, aggregator = sum},
     ConfigMap = #{TimeSeriesId => #{MetricId => MetricsConfig}},
     Batch = init(Id, ConfigMap),
+    ?assertEqual({{error, collection_already_exists}, Batch}, time_series_collection:create(#{}, Id, ConfigMap, Batch)),
 
     % Prepare time series collection to be used in tests (batch stores collection)
     Measurements = lists:map(fun(I) -> {I, I/2} end, lists:seq(10, 49) ++ lists:seq(60, 69)),

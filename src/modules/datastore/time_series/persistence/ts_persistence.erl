@@ -102,22 +102,26 @@
 %%%===================================================================
 
 -spec init_for_new_collection(datastore_ctx(), time_series_collection:collection_id(), ts_hub:time_series_collection_heads(),
-    batch()) -> ctx().
+    batch()) -> ctx() | {{error, collection_already_exists}, batch()}.
 init_for_new_collection(DatastoreCtx, Id, TimeSeriesHeads, Batch) ->
-    TSHub = #document{key = Id, value = ts_hub:set_time_series_collection_heads(TimeSeriesHeads)},
-    #ctx{
-        datastore_ctx = DatastoreCtx,
-        batch = Batch,
-        hub = TSHub,
-        is_hub_updated = true
-    }.
+    case datastore_doc:fetch(DatastoreCtx, Id, Batch) of
+        {{error, not_found}, UpdatedBatch} ->
+            TSHub = #document{key = Id, value = ts_hub:set_time_series_collection_heads(TimeSeriesHeads)},
+            #ctx{
+                datastore_ctx = DatastoreCtx,
+                batch = UpdatedBatch,
+                hub = TSHub,
+                is_hub_updated = true
+            };
+        {{ok, #document{}}, UpdatedBatch} ->
+            {{error, collection_already_exists}, UpdatedBatch}
+    end.
 
 
 -spec init_for_existing_collection(datastore_ctx(), time_series_collection:collection_id(), batch() | undefined) ->
     {ts_hub:time_series_collection_heads(), ctx()}.
 init_for_existing_collection(DatastoreCtx, Id, Batch) ->
-    {{ok, #document{value = TSHubRecord} = TSHub}, UpdatedBatch} =
-        datastore_doc:fetch(DatastoreCtx, Id, Batch),
+    {{ok, #document{value = TSHubRecord} = TSHub}, UpdatedBatch} = datastore_doc:fetch(DatastoreCtx, Id, Batch),
     {
         ts_hub:get_time_series_collection_heads(TSHubRecord),
         #ctx{

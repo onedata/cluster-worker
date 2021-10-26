@@ -103,8 +103,10 @@ create(Ctx, Id, ConfigMap, Batch) ->
             end, MetricsConfigs)
         end, ConfigMap),
 
-        PersistenceCtx = ts_persistence:init_for_new_collection(Ctx, Id, TimeSeriesCollectionHeads, Batch),
-        {ok, ts_persistence:finalize(PersistenceCtx)}
+        case ts_persistence:init_for_new_collection(Ctx, Id, TimeSeriesCollectionHeads, Batch) of
+            {{error, collection_already_exists}, UpdatedBatch} -> {{error, collection_already_exists}, UpdatedBatch};
+            PersistenceCtx -> {ok, ts_persistence:finalize(PersistenceCtx)}
+        end
     catch
         _:{error, too_many_metrics} ->
             {{error, too_many_metrics}, Batch};
