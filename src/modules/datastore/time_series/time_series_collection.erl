@@ -149,7 +149,7 @@ add_metrics(Ctx, Id, ConfigMapExtension, Options, Batch) ->
         _:{error, metric_already_exists} ->
             {{error, metric_already_exists}, Batch};
         Error:Reason:Stacktrace ->
-            ?error_stacktrace("Adding metrics to time series collection ~p error: ~p:~p~nConfig map: ~pnOptions: ~p",
+            ?error_stacktrace("Adding metrics to time series collection ~p error: ~p:~p~nConfig map: ~p~nOptions: ~p",
                 [Id, Error, Reason, ConfigMapExtension, Options], Stacktrace),
             {{error, add_metrics_failed}, Batch}
     end.
