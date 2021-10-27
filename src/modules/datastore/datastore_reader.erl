@@ -174,13 +174,9 @@ set_direct_access_ctx(_FetchNode, Ctx) ->
 %% @private
 -spec time_series_collection_list_unsafe(node(), datastore_doc:ctx(), time_series_collection_list_function(), list()) ->
     {{ok, time_series_collection_list_ok_ans} | {error, term()}, datastore_doc:batch()}.
-time_series_collection_list_unsafe(FetchNode, Ctx, list_windows, Args) ->
-    case Args of
-        [Id, Options] ->
-            time_series_collection:list_windows(set_direct_access_ctx(FetchNode, Ctx), Id, Options, undefined);
-        [Id, RequestedMetrics, Options] ->
-            time_series_collection:list_windows(
-                set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined)
-    end;
+time_series_collection_list_unsafe(FetchNode, Ctx, list_windows, [Id, Options]) ->
+    time_series_collection:list_windows(set_direct_access_ctx(FetchNode, Ctx), Id, Options, undefined);
+time_series_collection_list_unsafe(FetchNode, Ctx, list_windows, [Id, RequestedMetrics, Options]) ->
+    time_series_collection:list_windows(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined);
 time_series_collection_list_unsafe(FetchNode, Ctx, ListFunction, [Id]) ->
     time_series_collection:ListFunction(set_direct_access_ctx(FetchNode, Ctx), Id, undefined).

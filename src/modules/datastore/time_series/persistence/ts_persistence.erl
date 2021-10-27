@@ -73,7 +73,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([init_for_new_collection/4, init_for_existing_collection/3, init_metric/2, finalize/1,
+-export([init_for_new_collection/4, init_for_existing_collection/3, insert_metric/2, finalize/1,
     set_currently_processed_time_series/2, set_currently_processed_metric/2, get_currently_processed_metric/1,
     get_time_series_collection_id/1, get_time_series_collection_heads/1, is_hub_key/2,
     get/2, create/2, update/3, delete_data_node/2, delete_hub/1, delete_metric/1]).
@@ -82,7 +82,7 @@
     datastore_ctx :: datastore_ctx(),
     batch :: batch() | undefined, % Undefined when time series collection is used outside tp process
                                   % (call via datastore_reader:time_series_collection_list_windows/3)
-    hub :: doc() | undefined, % undefined after hub deletion to prevent usage of outdated document
+    hub :: doc() | deleted,
     is_hub_updated = false :: boolean(), % Field used to determine if hub should be saved by finalize/1 function
     % Fields representing metric currently being updated (single ctx can be used to update several metrics)
     currently_processed_time_series :: time_series_collection:time_series_id() | undefined,
@@ -102,7 +102,7 @@
 %%%===================================================================
 
 -spec init_for_new_collection(datastore_ctx(), time_series_collection:collection_id(), ts_hub:time_series_collection_heads(),
-    batch()) -> ctx() | {{error, collection_already_exists}, batch()}.
+    batch()) -> ctx() | {{error, already_exists}, batch()}.
 init_for_new_collection(DatastoreCtx, Id, TimeSeriesHeads, Batch) ->
     case datastore_doc:fetch(DatastoreCtx, Id, Batch) of
         {{error, not_found}, UpdatedBatch} ->
@@ -114,7 +114,7 @@ init_for_new_collection(DatastoreCtx, Id, TimeSeriesHeads, Batch) ->
                 is_hub_updated = true
             };
         {{ok, #document{}}, UpdatedBatch} ->
-            {{error, collection_already_exists}, UpdatedBatch}
+            {{error, already_exists}, UpdatedBatch}
     end.
 
 
@@ -132,8 +132,8 @@ init_for_existing_collection(DatastoreCtx, Id, Batch) ->
     }.
 
 
--spec init_metric(ts_metric:metric(), ctx()) -> ctx().
-init_metric(Metric, #ctx{
+-spec insert_metric(ts_metric:metric(), ctx()) -> ctx().
+insert_metric(Metric, #ctx{
     hub = #document{value = Record} = HubDoc,
     currently_processed_time_series = TimeSeriesId,
     currently_processed_metric = MetricId
@@ -240,7 +240,7 @@ delete_data_node(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) -
 -spec delete_hub(ctx()) -> ctx().
 delete_hub(#ctx{hub = #document{key = HubKey}, datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
     {ok, UpdatedBatch} = datastore_doc:delete(DatastoreCtx, HubKey, Batch),
-    Ctx#ctx{batch = UpdatedBatch, hub = undefined, is_hub_updated = false}.
+    Ctx#ctx{batch = UpdatedBatch, hub = deleted, is_hub_updated = false}.
 
 
 -spec delete_metric(ctx()) -> ctx().

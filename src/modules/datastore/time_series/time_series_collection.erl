@@ -104,7 +104,7 @@ create(Ctx, Id, ConfigMap, Batch) ->
         end, ConfigMap),
 
         case ts_persistence:init_for_new_collection(Ctx, Id, TimeSeriesCollectionHeads, Batch) of
-            {{error, collection_already_exists}, UpdatedBatch} -> {{error, collection_already_exists}, UpdatedBatch};
+            {{error, already_exists}, UpdatedBatch} -> {{error, collection_already_exists}, UpdatedBatch};
             PersistenceCtx -> {ok, ts_persistence:finalize(PersistenceCtx)}
         end
     catch
@@ -184,7 +184,7 @@ list_time_series_ids(Ctx, Id, Batch) ->
             TimeSeriesIds = maps:keys(TimeSeriesCollectionHeads),
             {{ok, TimeSeriesIds}, ts_persistence:finalize(PersistenceCtx)}
         end,
-        "Error listing ids of time series in collection", [Id], {{error, list_failed}, Batch}
+        "Error listing ids of time series in collection ~p", [Id], {{error, list_failed}, Batch}
     ).
 
 
@@ -198,7 +198,7 @@ list_metric_ids(Ctx, Id, Batch) ->
             end, TimeSeriesCollectionHeads),
             {{ok, MetricIds}, ts_persistence:finalize(PersistenceCtx)}
         end,
-        "Error listing ids of metrics in collection", [Id], {{error, list_failed}, Batch}
+        "Error listing ids of metrics in collection ~p", [Id], {{error, list_failed}, Batch}
     ).
 
 
@@ -411,7 +411,7 @@ reconfigure_metrics(NewConfigMap, ConfigMapExtension, DocSplittingStrategies, Pe
                         UpdatedInternalPersistenceCtx);
                 Config ->
                     Metric = ts_metric:init(Config, maps:get({TimeSeriesId, MetricId}, DocSplittingStrategies)),
-                    ts_persistence:init_metric(Metric, UpdatedInternalPersistenceCtx)
+                    ts_persistence:insert_metric(Metric, UpdatedInternalPersistenceCtx)
             end
         end, UpdatedPersistenceCtxAcc, MetricsConfigs)
     end, PersistenceCtx, NewConfigMap).

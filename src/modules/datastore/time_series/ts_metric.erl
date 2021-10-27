@@ -88,6 +88,7 @@ delete_data_nodes(#metric{head_data = #data_node{older_node_key = OlderNodeKey}}
 reconfigure(#metric{
     splitting_strategy = DocSplittingStrategy
 } = _CurrentMetric, DocSplittingStrategy, PersistenceCtx) ->
+    % Doc splitting strategy has not changed - do nothing
     PersistenceCtx;
 reconfigure(#metric{
     head_data = #data_node{
@@ -99,13 +100,14 @@ reconfigure(#metric{
 } = CurrentMetric, #splitting_strategy{
     max_windows_in_tail_doc = MaxInTail
 } = NewDocSplittingStrategy, PersistenceCtx) ->
+    % Doc splitting strategy has changed for head - clean windows from head and set them once more
     NewMetric = CurrentMetric#metric{
         head_data = Data#data_node{
             windows = ts_windows:init()
         },
         splitting_strategy = NewDocSplittingStrategy
     },
-    PersistenceCtxAfterInit = ts_persistence:init_metric(NewMetric, PersistenceCtx),
+    PersistenceCtxAfterInit = ts_persistence:insert_metric(NewMetric, PersistenceCtx),
     {_, ExistingWindows} = ts_windows:list(ExistingWindowsSet, undefined, #{}),
     DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtxAfterInit),
     set_sorted_windows_at_beginning(DataNodeKey, NewDocSplittingStrategy,
@@ -113,11 +115,12 @@ reconfigure(#metric{
 reconfigure(#metric{
     config = Config
 } = CurrentMetric, NewDocSplittingStrategy, PersistenceCtx) ->
+    % Doc splitting strategy has changed - delete all windows and set them once more
     {ExistingWindows, UpdatedPersistenceCtx} = list_windows(CurrentMetric, #{}, PersistenceCtx),
     PersistenceCtxAfterCleaning = delete_data_nodes(CurrentMetric, UpdatedPersistenceCtx),
 
     NewMetric = init(Config, NewDocSplittingStrategy),
-    PersistenceCtxAfterInit = ts_persistence:init_metric(NewMetric, PersistenceCtxAfterCleaning),
+    PersistenceCtxAfterInit = ts_persistence:insert_metric(NewMetric, PersistenceCtxAfterCleaning),
 
     DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtxAfterInit),
     set_sorted_windows_at_beginning(DataNodeKey, NewDocSplittingStrategy,
