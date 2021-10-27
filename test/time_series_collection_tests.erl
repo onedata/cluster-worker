@@ -47,6 +47,7 @@ ts_test_() ->
 
 
 setup() ->
+    % TODO VFS-8539 - set time_series_max_doc_size to 100
     application:set_env(?CLUSTER_WORKER_APP_NAME, time_series_max_doc_size, 2000),
     meck:new([datastore_doc_batch, datastore_doc], [passthrough, no_history]),
     meck:expect(datastore_doc_batch, init, fun() -> #{} end),
@@ -565,11 +566,11 @@ metric_adding_and_deleting() ->
     }},
     extend_collection_with_error(Id, ConfigMapExtension4, metric_already_exists, Batch8),
     extend_collection_with_error(Id, ConfigMapExtension4, metric_already_exists,
-        #{metric_conflict_resulution_strategy => throw}, Batch8),
+        #{metric_conflict_resulution_strategy => fail}, Batch8),
     extend_collection_with_error(Id, ConfigMapExtension4, metric_already_exists,
-        #{time_series_conflict_resulution_strategy => merge, metric_conflict_resulution_strategy => throw}, Batch8),
+        #{time_series_conflict_resulution_strategy => merge, metric_conflict_resulution_strategy => fail}, Batch8),
     extend_collection_with_error(Id, ConfigMapExtension4, time_series_already_exists,
-        #{time_series_conflict_resulution_strategy => throw}, Batch8),
+        #{time_series_conflict_resulution_strategy => fail}, Batch8),
 
     % Test overriding metric
     ConfigMapExtension5 = #{<<"TS2">> => #{
@@ -616,7 +617,7 @@ metric_adding_and_deleting() ->
     ?assertMatch(?LIST_OK_ANS(ExpectedMap7), ?LIST_ALL(Id, Batch14)),
     ?assertEqual(Batch12, Batch14),
     Batch15 = extend_collection(Id, ConfigMapExtension6,
-        #{time_series_conflict_resulution_strategy => override, metric_conflict_resulution_strategy => throw}, Batch14),
+        #{time_series_conflict_resulution_strategy => override, metric_conflict_resulution_strategy => fail}, Batch14),
     ?assertMatch(?LIST_OK_ANS(ExpectedMap7), ?LIST_ALL(Id, Batch15)),
     ?assertEqual(Batch12, Batch15),
 

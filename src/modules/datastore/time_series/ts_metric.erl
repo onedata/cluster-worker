@@ -100,30 +100,32 @@ reconfigure(#metric{
 } = CurrentMetric, #splitting_strategy{
     max_windows_in_tail_doc = MaxInTail
 } = NewDocSplittingStrategy, PersistenceCtx) ->
-    % Doc splitting strategy has changed for head - clean windows from head and set them once more
+    % Doc splitting strategy has changed for head - get all windows from head, clean windows from head and
+    % than set them once more
     NewMetric = CurrentMetric#metric{
         head_data = Data#data_node{
-            windows = ts_windows:init()
+            windows = ts_windows:init() % init cleans all windows from head (they are replaced by new record)
         },
         splitting_strategy = NewDocSplittingStrategy
     },
     PersistenceCtxAfterInit = ts_persistence:insert_metric(NewMetric, PersistenceCtx),
     {_, ExistingWindows} = ts_windows:list(ExistingWindowsSet, undefined, #{}),
     DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtxAfterInit),
-    set_sorted_windows_at_beginning(DataNodeKey, NewDocSplittingStrategy,
+    prepend_sorted_windows(DataNodeKey, NewDocSplittingStrategy,
         lists:reverse(ExistingWindows), PersistenceCtxAfterInit);
 reconfigure(#metric{
     config = Config
 } = CurrentMetric, NewDocSplittingStrategy, PersistenceCtx) ->
-    % Doc splitting strategy has changed - delete all windows and set them once more
+    % Doc splitting strategy has changed - get all windows from head and data nodes, delete all data nodes
+    % and clean all windows from head and then set them once more
     {ExistingWindows, UpdatedPersistenceCtx} = list_windows(CurrentMetric, #{}, PersistenceCtx),
     PersistenceCtxAfterCleaning = delete_data_nodes(CurrentMetric, UpdatedPersistenceCtx),
 
-    NewMetric = init(Config, NewDocSplittingStrategy),
+    NewMetric = init(Config, NewDocSplittingStrategy), % init cleans all windows from head
     PersistenceCtxAfterInit = ts_persistence:insert_metric(NewMetric, PersistenceCtxAfterCleaning),
 
     DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtxAfterInit),
-    set_sorted_windows_at_beginning(DataNodeKey, NewDocSplittingStrategy,
+    prepend_sorted_windows(DataNodeKey, NewDocSplittingStrategy,
         lists:reverse(ExistingWindows), PersistenceCtxAfterInit).
 
 
@@ -232,11 +234,18 @@ update(
     end.
 
 
--spec set_sorted_windows_at_beginning(ts_metric_data_node:key(), splitting_strategy(),
+%%--------------------------------------------------------------------
+%% @doc
+%% This function allows setting multiple windows in single call. Same result can be obtained calling
+%% multiple times update/8 function. However, prepend_sorted_windows is optimized for prepending sorted
+%% sets of windows so it is much faster than multiple update/8 function calls.
+%% @end
+%%--------------------------------------------------------------------
+-spec prepend_sorted_windows(ts_metric_data_node:key(), splitting_strategy(),
     [ts_windows:window()], ts_persistence:ctx()) -> ts_persistence:ctx().
-set_sorted_windows_at_beginning(_DataNodeKey, _DocSplittingStrategy, [], PersistenceCtx) ->
+prepend_sorted_windows(_DataNodeKey, _DocSplittingStrategy, [], PersistenceCtx) ->
     PersistenceCtx;
-set_sorted_windows_at_beginning(DataNodeKey,
+prepend_sorted_windows(DataNodeKey,
     #splitting_strategy{
         max_windows_in_head_doc = MaxWindowsCount
     } = DocSplittingStrategy, WindowsToSet, PersistenceCtx) ->
@@ -260,7 +269,7 @@ set_sorted_windows_at_beginning(DataNodeKey,
                 UpdatedPersistenceCtx}
     end,
 
-    set_sorted_windows_at_beginning(DataNodeKey, DocSplittingStrategy, RemainingWindowsToSet, FinalPersistenceCtx).
+    prepend_sorted_windows(DataNodeKey, DocSplittingStrategy, RemainingWindowsToSet, FinalPersistenceCtx).
 
 
 -spec prune_overflowing_node(ts_metric_data_node:key(), data_node(), ts_metric_data_node:key(), data_node() | undefined,

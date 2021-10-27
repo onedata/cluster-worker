@@ -66,8 +66,8 @@
 -type update_range() :: {request_range(), ts_windows:value()} | [{request_range(), ts_windows:value()}].
 
 -type add_metrics_option() :: #{
-    time_series_conflict_resulution_strategy => merge | override | throw,
-    metric_conflict_resulution_strategy => override | throw
+    time_series_conflict_resulution_strategy => merge | override | fail,
+    metric_conflict_resulution_strategy => override | fail
 }.
 
 -export_type([collection_id/0, collection_config/0, time_series_id/0, full_metric_id/0,
@@ -348,20 +348,20 @@ delete(Ctx, Id, Batch) ->
 -spec merge_config_maps(collection_config(), collection_config(), add_metrics_option()) -> collection_config().
 merge_config_maps(ExistingConfigMap, ConfigMapExtension, Options) ->
     TimeSeriesConflictResolution = maps:get(time_series_conflict_resulution_strategy, Options, merge),
-    MetricConflictResolution = maps:get(metric_conflict_resulution_strategy, Options, throw),
+    MetricConflictResolution = maps:get(metric_conflict_resulution_strategy, Options, fail),
     maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
         case maps:get(TimeSeriesId, Acc, undefined) of
             undefined ->
                 Acc#{TimeSeriesId => MetricsConfigs};
-            ExistingMetricsConfigs when TimeSeriesConflictResolution =:= override ->
+            _ExistingMetricsConfigs when TimeSeriesConflictResolution =:= override ->
                 Acc#{TimeSeriesId => MetricsConfigs};
-            ExistingMetricsConfigs when TimeSeriesConflictResolution =:= throw ->
+            _ExistingMetricsConfigs when TimeSeriesConflictResolution =:= fail ->
                 throw({error, time_series_already_exists});
             ExistingMetricsConfigs when TimeSeriesConflictResolution =:= merge ->
                 MergedMetricsConfigs = maps:fold(fun
                     (MetricId, Config, InternalAcc) ->
                         case maps:is_key(MetricId, InternalAcc) of
-                            true when MetricConflictResolution =:= throw -> throw({error, metric_already_exists});
+                            true when MetricConflictResolution =:= fail -> throw({error, metric_already_exists});
                             true when MetricConflictResolution =:= override -> InternalAcc#{MetricId => Config};
                             false -> InternalAcc#{MetricId => Config}
                         end
