@@ -174,9 +174,9 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_time_series_collection:list_time_series_ids(Ctx, Id)
         end},
-        {time_series_collection_list_metric_ids, fun(Id) ->
+        {time_series_collection_list_metrics_by_time_series, fun(Id) ->
             Ctx = get_ctx(Model),
-            datastore_time_series_collection:list_metric_ids(Ctx, Id)
+            datastore_time_series_collection:list_metrics_by_time_series(Ctx, Id)
         end},
         {time_series_collection_update, fun(Id, NewTimestamp, ValueOrUpdateRange) ->
             Ctx = get_ctx(Model),

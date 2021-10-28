@@ -30,52 +30,52 @@ add_new_measurement_test() ->
 
     ?assertEqual(undefined, ts_windows:get_value(Timestamp, Windows)),
 
-    Test1 = ts_windows:set_or_aggregate(Windows, Timestamp, 1, sum),
+    Test1 = ts_windows:insert_value(Windows, Timestamp, 1, {aggregate, sum}),
     ?assertEqual({1, 1}, ts_windows:get_value(Timestamp, Test1)),
 
-    Test2 = ts_windows:set_or_aggregate(Windows, Timestamp, 1, max),
+    Test2 = ts_windows:insert_value(Windows, Timestamp, 1, {aggregate, max}),
     ?assertEqual(1, ts_windows:get_value(Timestamp, Test2)),
 
-    Test3 = ts_windows:set_or_aggregate(Windows, Timestamp, 1, min),
+    Test3 = ts_windows:insert_value(Windows, Timestamp, 1, {aggregate, min}),
     ?assertEqual(1, ts_windows:get_value(Timestamp, Test3)),
 
-    Test4 = ts_windows:set_or_aggregate(Windows, Timestamp, 1, last),
+    Test4 = ts_windows:insert_value(Windows, Timestamp, 1, {aggregate, last}),
     ?assertEqual(1, ts_windows:get_value(Timestamp, Test4)),
 
-    Test5 = ts_windows:set_or_aggregate(Windows, Timestamp, 1, first),
+    Test5 = ts_windows:insert_value(Windows, Timestamp, 1, {aggregate, first}),
     ?assertEqual(1, ts_windows:get_value(Timestamp, Test5)).
 
 
 add_with_existing_timestamp_test() ->
     Timestamp = 1,
-    Windows = ts_windows:set_or_aggregate(ts_windows:init(), Timestamp, 2, max),
+    Windows = ts_windows:insert_value(ts_windows:init(), Timestamp, 2, {aggregate, max}),
 
-    Test1 = ts_windows:set_or_aggregate(Windows, Timestamp, 3, max),
+    Test1 = ts_windows:insert_value(Windows, Timestamp, 3, {aggregate, max}),
     ?assertEqual(3, ts_windows:get_value(Timestamp, Test1)),
-    Test2 = ts_windows:set_or_aggregate(Windows, Timestamp, 1, max),
+    Test2 = ts_windows:insert_value(Windows, Timestamp, 1, {aggregate, max}),
     ?assertEqual(2, ts_windows:get_value(Timestamp, Test2)),
 
-    Test3 = ts_windows:set_or_aggregate(Windows, Timestamp, 1, min),
+    Test3 = ts_windows:insert_value(Windows, Timestamp, 1, {aggregate, min}),
     ?assertEqual(1, ts_windows:get_value(Timestamp, Test3)),
-    Test4 = ts_windows:set_or_aggregate(Windows, Timestamp, 3, min),
+    Test4 = ts_windows:insert_value(Windows, Timestamp, 3, {aggregate, min}),
     ?assertEqual(2, ts_windows:get_value(Timestamp, Test4)),
 
-    Test5 = ts_windows:set_or_aggregate(Windows, Timestamp, 3, last),
+    Test5 = ts_windows:insert_value(Windows, Timestamp, 3, {aggregate, last}),
     ?assertEqual(3, ts_windows:get_value(Timestamp, Test5)),
 
-    Test6 = ts_windows:set_or_aggregate(Windows, Timestamp, 3, first),
+    Test6 = ts_windows:insert_value(Windows, Timestamp, 3, {aggregate, first}),
     ?assertEqual(2, ts_windows:get_value(Timestamp, Test6)),
 
-    WindowsWithSum = ts_windows:set_or_aggregate(ts_windows:init(), Timestamp, 2, sum),
-    Test7 = ts_windows:set_or_aggregate(WindowsWithSum, Timestamp, 3, sum),
+    WindowsWithSum = ts_windows:insert_value(ts_windows:init(), Timestamp, 2, {aggregate, sum}),
+    Test7 = ts_windows:insert_value(WindowsWithSum, Timestamp, 3, {aggregate, sum}),
     ?assertEqual({2, 5}, ts_windows:get_value(Timestamp, Test7)).
 
 
 prune_overflowing_windows_test() ->
     Timestamp1 = 1,
     Timestamp2 = 2,
-    Windows1 = ts_windows:set_or_aggregate(ts_windows:init(), Timestamp1, 1, max),
-    Windows2 = ts_windows:set_or_aggregate(Windows1, Timestamp2, 1, max),
+    Windows1 = ts_windows:insert_value(ts_windows:init(), Timestamp1, 1, {aggregate, max}),
+    Windows2 = ts_windows:insert_value(Windows1, Timestamp2, 1, {aggregate, max}),
 
     Test1 = ts_windows:prune_overflowing(Windows2, 3),
     ?assertEqual(Windows2, Test1),
@@ -98,7 +98,7 @@ get_test() ->
     MeasurementsCount = 10,
     MeasurementsToAdd = lists:map(fun(I) -> {I, I - 20} end, lists:seq(1, MeasurementsCount)),
     Windows = lists:foldl(fun({Timestamp, Value}, Acc) ->
-        ts_windows:set_or_aggregate(Acc, Timestamp, Value, max)
+        ts_windows:insert_value(Acc, Timestamp, Value, {aggregate, max})
     end, ts_windows:init(), MeasurementsToAdd),
     ReversedMeasurements = lists:reverse(MeasurementsToAdd),
 
@@ -138,7 +138,7 @@ split_test() ->
     MeasurementsCount = 10,
     MeasurementsToAdd = lists:map(fun(I) -> {I, I - 20} end, lists:seq(1, MeasurementsCount)),
     Windows = lists:foldl(fun({Timestamp, Value}, Acc) ->
-        ts_windows:set_or_aggregate(Acc, Timestamp, Value, max)
+        ts_windows:insert_value(Acc, Timestamp, Value, {aggregate, max})
     end, ts_windows:init(), MeasurementsToAdd),
     ReversedMeasurements = lists:reverse(MeasurementsToAdd),
 
@@ -154,13 +154,13 @@ reorganization_test() ->
 
     MeasurementsToAdd1 = lists:map(fun(I) -> {I, I - 20} end, lists:seq(1, MeasurementsCount)),
     Windows1 = lists:foldl(fun({Timestamp, Value}, Acc) ->
-        ts_windows:set_or_aggregate(Acc, Timestamp, Value, max)
+        ts_windows:insert_value(Acc, Timestamp, Value, {aggregate, max})
     end, ts_windows:init(), MeasurementsToAdd1),
     ReversedMeasurements1 = lists:reverse(MeasurementsToAdd1),
 
     MeasurementsToAdd2 = lists:map(fun(I) -> {I, I - 120} end, lists:seq(21, 20 + MeasurementsCount)),
     Windows2 = lists:foldl(fun({Timestamp, Value}, Acc) ->
-        ts_windows:set_or_aggregate(Acc, Timestamp, Value, max)
+        ts_windows:insert_value(Acc, Timestamp, Value, {aggregate, max})
     end, ts_windows:init(), MeasurementsToAdd2),
     ReversedMeasurements2 = lists:reverse(MeasurementsToAdd2),
 

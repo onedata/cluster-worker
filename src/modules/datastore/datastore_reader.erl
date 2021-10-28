@@ -21,9 +21,9 @@
 -type tree_id() :: datastore_links:tree_id().
 -type link() :: datastore_links:link().
 -type link_name() :: datastore_links:link_name().
--type time_series_collection_list_function() :: list_windows | list_time_series_ids | list_metric_ids.
+-type time_series_collection_list_function() :: list_windows | list_time_series_ids | list_metrics_by_time_series.
 -type time_series_collection_list_ok_ans() :: [ts_windows:window()] | time_series_collection:windows_map() |
-    [time_series_collection:time_series_id()] | time_series_collection:ids_map().
+    [time_series_collection:time_series_id()] | time_series_collection:metrics_by_time_series().
 
 %%%===================================================================
 %%% Direct access API

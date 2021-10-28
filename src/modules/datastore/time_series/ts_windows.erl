@@ -13,7 +13,7 @@
 -author("Michal Wrzeszcz").
 
 %% API
--export([init/0, list/3, set_or_aggregate/4, set_many/2, prune_overflowing/2, split/2,
+-export([init/0, list/3, insert_value/4, set_many/2, prune_overflowing/2, split/2,
     is_size_exceeded/2, get_remaining_windows_count/2, reorganize/4]).
 %% Encoding/decoding  API
 -export([encode/1, decode/1]).
@@ -27,7 +27,7 @@
 -type window() :: {timestamp(), window_value()}.
 -type windows() :: gb_trees:tree(timestamp(), window_value()).
 -type aggregator() :: sum | max | min | last | first. % | {gather, Max}. % TODO VFS-8164 - extend functions list
--type setter_or_aggregator() :: set | aggregator().
+-type insert_strategy() :: {aggregate, aggregator()} | ignore_existing.
 
 -type list_options() :: #{
     start => timestamp(),
@@ -36,7 +36,7 @@
 }.
 
 -export_type([timestamp/0, value/0, window_id/0, window_value/0, window/0, windows/0,
-    aggregator/0, setter_or_aggregator/0, list_options/0]).
+    aggregator/0, insert_strategy/0, list_options/0]).
 
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
 
@@ -54,10 +54,10 @@ list(Windows, Timestamp, Options) ->
     list_internal(Timestamp, Windows, Options).
 
 
--spec set_or_aggregate(windows(), timestamp(), value() | window_value(), setter_or_aggregator()) -> windows().
-set_or_aggregate(Windows, WindowToBeUpdatedTimestamp, WindowValue, set) ->
+-spec insert_value(windows(), timestamp(), value() | window_value(), insert_strategy()) -> windows().
+insert_value(Windows, WindowToBeUpdatedTimestamp, WindowValue, ignore_existing) ->
     set_value(WindowToBeUpdatedTimestamp, WindowValue, Windows);
-set_or_aggregate(Windows, WindowToBeUpdatedTimestamp, NewValue, Aggregator) ->
+insert_value(Windows, WindowToBeUpdatedTimestamp, NewValue, {aggregate, Aggregator}) ->
     CurrentValue = get_value(WindowToBeUpdatedTimestamp, Windows),
     NewWindowValue = aggregate(CurrentValue, NewValue, Aggregator),
     set_value(WindowToBeUpdatedTimestamp, NewWindowValue, Windows).

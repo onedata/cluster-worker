@@ -2238,7 +2238,7 @@ verify_time_series_ids(Worker, Model, CollectionId) ->
 %% @private
 verify_metric_ids(Worker, Model, CollectionId) ->
     {ok, MetricsIds} = ?assertMatch({ok, _},
-        rpc:call(Worker, Model, time_series_collection_list_metric_ids, [CollectionId])),
+        rpc:call(Worker, Model, time_series_collection_list_metrics_by_time_series, [CollectionId])),
     SortedMetricsIds = lists:sort(lists:map(fun({K, V}) -> {K, lists:sort(V)} end, maps:to_list(MetricsIds))),
     ?assertEqual([{<<"TS", 0>>, [<<"M",1>>, <<"M",2>>]}, {<<"TS", 1>>, [<<"M",0>>, <<"M",1>>, <<"M",2>>]}],
         SortedMetricsIds).

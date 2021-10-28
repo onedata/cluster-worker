@@ -121,15 +121,19 @@ init_for_new_collection(DatastoreCtx, Id, TimeSeriesHeads, Batch) ->
 -spec init_for_existing_collection(datastore_ctx(), time_series_collection:collection_id(), batch() | undefined) ->
     {ts_hub:time_series_collection_heads(), ctx()}.
 init_for_existing_collection(DatastoreCtx, Id, Batch) ->
-    {{ok, #document{value = TSHubRecord} = TSHub}, UpdatedBatch} = datastore_doc:fetch(DatastoreCtx, Id, Batch),
-    {
-        ts_hub:get_time_series_collection_heads(TSHubRecord),
-        #ctx{
-            datastore_ctx = DatastoreCtx,
-            batch = UpdatedBatch,
-            hub = TSHub
-        }
-    }.
+    case datastore_doc:fetch(DatastoreCtx, Id, Batch) of
+        {{ok, #document{value = TSHubRecord} = TSHub}, UpdatedBatch} ->
+            {
+                ts_hub:get_time_series_collection_heads(TSHubRecord),
+                #ctx{
+                    datastore_ctx = DatastoreCtx,
+                    batch = UpdatedBatch,
+                    hub = TSHub
+                }
+            };
+        {{error, not_found}, UpdatedBatch} ->
+            throw({{error, hub_not_found}, UpdatedBatch})
+    end.
 
 
 -spec insert_metric(ts_metric:metric(), ctx()) -> ctx().

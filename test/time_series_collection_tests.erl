@@ -41,7 +41,8 @@ ts_test_() ->
             fun multiple_time_series_single_node/0,
             {timeout, 300, fun multiple_time_series_multiple_nodes/0},
             fun update_subset/0,
-            {timeout, 300, fun metric_adding_and_deleting/0}
+            {timeout, 300, fun metric_adding_and_deleting/0},
+            fun errors_when_collection_does_not_exist/0
         ]
     }.
 
@@ -461,7 +462,7 @@ multiple_time_series_multiple_nodes() ->
     ?assertEqual([<<"TS", 0>>, <<"TS", 1>>], lists:sort(TimeSeriesIds)),
 
     % Test listing metrics ids
-    ListMetricsIdsAns = time_series_collection:list_metric_ids(#{}, Id, Batch2),
+    ListMetricsIdsAns = time_series_collection:list_metrics_by_time_series(#{}, Id, Batch2),
     ?assertMatch(?LIST_OK_ANS(_), ListMetricsIdsAns),
     ?LIST_OK_ANS(MetricsIds) = ListMetricsIdsAns,
     SortedMetricsIds = lists:sort(lists:map(fun({K, V}) -> {K, lists:sort(V)} end, maps:to_list(MetricsIds))),
@@ -680,8 +681,25 @@ metric_adding_and_deleting() ->
     DeleteAns = time_series_collection:delete(#{}, Id, Batch20),
     ?assertMatch({ok, _}, DeleteAns),
     {ok, Batch21} = DeleteAns,
-    ?assertEqual({{error, list_failed}, Batch21}, ?LIST_ALL(Id, Batch21)),
+    ?assertEqual({{error, not_found}, Batch21}, ?LIST_ALL(Id, Batch21)),
     ?assertEqual(#{}, Batch21).
+
+
+errors_when_collection_does_not_exist() ->
+    Id = datastore_key:new(),
+    Batch = datastore_doc_batch:init(),
+    Ctx = #{},
+
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:add_metrics(Ctx, Id, #{}, #{}, Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:delete_metrics(Ctx, Id, [], Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:list_time_series_ids(Ctx, Id, Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:list_metrics_by_time_series(Ctx, Id, Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:update(Ctx, Id, 0, 0, Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:update(Ctx, Id, 0, [], Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:update(Ctx, Id, 0, [], 0, Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:list_windows(Ctx, Id, #{}, Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:list_windows(Ctx, Id, [], #{}, Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:delete(Ctx, Id, Batch)).
 
 
 %%%===================================================================

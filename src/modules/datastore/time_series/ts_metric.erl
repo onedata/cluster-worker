@@ -62,7 +62,7 @@ update(#metric{
 }, NewTimestamp, NewValue, PersistenceCtx) ->
     WindowToBeUpdated = get_window_id(NewTimestamp, Config),
     DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtx),
-    update(Data, DataNodeKey, 1, DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx).
+    update(Data, DataNodeKey, 1, DocSplittingStrategy, {aggregate, Aggregator}, WindowToBeUpdated, NewValue, PersistenceCtx).
 
 
 -spec list_windows(metric(), ts_windows:list_options(), ts_persistence:ctx()) -> {[ts_windows:window()], ts_persistence:ctx()}.
@@ -134,7 +134,7 @@ reconfigure(#metric{
 %%=====================================================================
 
 -spec update(data_node(), ts_metric_data_node:key(), non_neg_integer(), splitting_strategy(),
-    ts_windows:setter_or_aggregator(), ts_windows:window_id(), ts_windows:value(), ts_persistence:ctx()) ->
+    ts_windows:insert_strategy(), ts_windows:window_id(), ts_windows:value(), ts_persistence:ctx()) ->
     ts_persistence:ctx().
 update(
     #data_node{
@@ -143,9 +143,9 @@ update(
     #splitting_strategy{
         max_docs_count = 1,
         max_windows_in_head_doc = MaxWindowsCount
-    }, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx) ->
+    }, InsertStrategy, WindowToBeUpdated, NewValue, PersistenceCtx) ->
     % All windows are stored in single data node - update it
-    UpdatedWindows = ts_windows:set_or_aggregate(Windows, WindowToBeUpdated, NewValue, Aggregator),
+    UpdatedWindows = ts_windows:insert_value(Windows, WindowToBeUpdated, NewValue, InsertStrategy),
     FinalWindows = ts_windows:prune_overflowing(UpdatedWindows, MaxWindowsCount),
     ts_persistence:update(DataNodeKey, Data#data_node{windows = FinalWindows}, PersistenceCtx);
 
@@ -154,7 +154,7 @@ update(
         older_node_key = undefined,
         older_node_timestamp = OlderNodeTimestamp
     }, _DataNodeKey, _DataDocPosition,
-    _DocSplittingStrategy, _Aggregator, WindowToBeUpdated, _NewValue, PersistenceCtx)
+    _DocSplittingStrategy, _InsertStrategy, WindowToBeUpdated, _NewValue, PersistenceCtx)
     when OlderNodeTimestamp =/= undefined andalso OlderNodeTimestamp >= WindowToBeUpdated ->
     % There are too many newer windows - skip it
     PersistenceCtx;
@@ -164,9 +164,9 @@ update(
         older_node_key = undefined,
         windows = Windows
     } = Data, DataNodeKey, DataDocPosition,
-    DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx) ->
+    DocSplittingStrategy, InsertStrategy, WindowToBeUpdated, NewValue, PersistenceCtx) ->
     % Updating last data node
-    UpdatedWindows = ts_windows:set_or_aggregate(Windows, WindowToBeUpdated, NewValue, Aggregator),
+    UpdatedWindows = ts_windows:insert_value(Windows, WindowToBeUpdated, NewValue, InsertStrategy),
     {MaxWindowsCount, SplitPosition} = get_max_windows_and_split_position(
         DataNodeKey, DocSplittingStrategy, PersistenceCtx),
 
@@ -186,12 +186,12 @@ update(
         older_node_key = OlderNodeKey,
         older_node_timestamp = OlderNodeTimestamp
     }, _DataNodeKey, DataDocPosition,
-    DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx)
+    DocSplittingStrategy, InsertStrategy, WindowToBeUpdated, NewValue, PersistenceCtx)
     when OlderNodeTimestamp >= WindowToBeUpdated ->
     % Window should be stored in one one previous data nodes
     {OlderDataNode, UpdatedPersistenceCtx} = ts_persistence:get(OlderNodeKey, PersistenceCtx),
     update(OlderDataNode, OlderNodeKey, DataDocPosition + 1,
-        DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, UpdatedPersistenceCtx);
+        DocSplittingStrategy, InsertStrategy, WindowToBeUpdated, NewValue, UpdatedPersistenceCtx);
 
 update(
     #data_node{
@@ -200,9 +200,9 @@ update(
     } = Data, DataNodeKey, DataDocPosition,
     #splitting_strategy{
         max_windows_in_tail_doc = MaxWindowsInTail
-    } = DocSplittingStrategy, Aggregator, WindowToBeUpdated, NewValue, PersistenceCtx) ->
+    } = DocSplittingStrategy, InsertStrategy, WindowToBeUpdated, NewValue, PersistenceCtx) ->
     % Updating data node in the middle of data nodes' list (older_node_key is not undefined)
-    WindowsWithAggregatedMeasurement = ts_windows:set_or_aggregate(Windows, WindowToBeUpdated, NewValue, Aggregator),
+    WindowsWithAggregatedMeasurement = ts_windows:insert_value(Windows, WindowToBeUpdated, NewValue, InsertStrategy),
     {MaxWindowsCount, SplitPosition} = get_max_windows_and_split_position(
         DataNodeKey, DocSplittingStrategy, PersistenceCtx),
 
@@ -257,7 +257,7 @@ prepend_sorted_windows(DataNodeKey,
         0 ->
             % Use update function to reorganize documents and allow further adding to head
             [{Timestamp, WindowValue} | WindowsToSetTail] = WindowsToSet,
-            UpdatedPersistenceCtx = update(Data, DataNodeKey, 1, DocSplittingStrategy, set,
+            UpdatedPersistenceCtx = update(Data, DataNodeKey, 1, DocSplittingStrategy, ignore_existing,
                 Timestamp, WindowValue, PersistenceCtxAfterGet),
             {WindowsToSetTail, UpdatedPersistenceCtx};
         WindowsToUseCount ->

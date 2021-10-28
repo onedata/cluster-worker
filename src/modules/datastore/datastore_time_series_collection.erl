@@ -14,7 +14,7 @@
 -author("Michal Wrzeszcz").
 
 %% API
--export([create/3, add_metrics/4, delete_metrics/3, list_time_series_ids/2, list_metric_ids/2,
+-export([create/3, add_metrics/4, delete_metrics/3, list_time_series_ids/2, list_metrics_by_time_series/2,
     update/4, update/5, update_many/3, list_windows/3, list_windows/4, delete/2]).
 
 -type ctx() :: datastore_model:ctx().
@@ -50,9 +50,9 @@ list_time_series_ids(Ctx, Id) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4, [?FUNCTION_NAME, []]).
 
 
--spec list_metric_ids(ctx(), time_series_collection:collection_id()) ->
-    {ok, time_series_collection:ids_map()} | {error, term()}.
-list_metric_ids(Ctx, Id) ->
+-spec list_metrics_by_time_series(ctx(), time_series_collection:collection_id()) ->
+    {ok, time_series_collection:metrics_by_time_series()} | {error, term()}.
+list_metrics_by_time_series(Ctx, Id) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4, [?FUNCTION_NAME, []]).
 
 
