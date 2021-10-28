@@ -65,7 +65,8 @@ update(#metric{
     update(Data, DataNodeKey, 1, DocSplittingStrategy, {aggregate, Aggregator}, WindowToBeUpdated, NewValue, PersistenceCtx).
 
 
--spec list_windows(metric(), ts_windows:list_options(), ts_persistence:ctx()) -> {[ts_windows:window()], ts_persistence:ctx()}.
+-spec list_windows(metric(), ts_windows:list_options(), ts_persistence:ctx()) -> 
+    {ts_windows:descending_windows_list(), ts_persistence:ctx()}.
 list_windows(#metric{
     head_data = Data,
     config = Config
@@ -111,8 +112,7 @@ reconfigure(#metric{
     PersistenceCtxAfterInit = ts_persistence:insert_metric(NewMetric, PersistenceCtx),
     {_, ExistingWindows} = ts_windows:list(ExistingWindowsSet, undefined, #{}),
     DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtxAfterInit),
-    prepend_sorted_windows(DataNodeKey, NewDocSplittingStrategy,
-        lists:reverse(ExistingWindows), PersistenceCtxAfterInit);
+    prepend_sorted_windows(DataNodeKey, NewDocSplittingStrategy, ExistingWindows, PersistenceCtxAfterInit);
 reconfigure(#metric{
     config = Config
 } = CurrentMetric, NewDocSplittingStrategy, PersistenceCtx) ->
@@ -125,8 +125,7 @@ reconfigure(#metric{
     PersistenceCtxAfterInit = ts_persistence:insert_metric(NewMetric, PersistenceCtxAfterCleaning),
 
     DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtxAfterInit),
-    prepend_sorted_windows(DataNodeKey, NewDocSplittingStrategy,
-        lists:reverse(ExistingWindows), PersistenceCtxAfterInit).
+    prepend_sorted_windows(DataNodeKey, NewDocSplittingStrategy, ExistingWindows, PersistenceCtxAfterInit).
 
 
 %%=====================================================================
@@ -242,34 +241,36 @@ update(
 %% @end
 %%--------------------------------------------------------------------
 -spec prepend_sorted_windows(ts_metric_data_node:key(), splitting_strategy(),
-    [ts_windows:window()], ts_persistence:ctx()) -> ts_persistence:ctx().
+    ts_windows:descending_windows_list(), ts_persistence:ctx()) -> ts_persistence:ctx().
 prepend_sorted_windows(_DataNodeKey, _DocSplittingStrategy, [], PersistenceCtx) ->
     PersistenceCtx;
 prepend_sorted_windows(DataNodeKey,
     #splitting_strategy{
         max_windows_in_head_doc = MaxWindowsCount
-    } = DocSplittingStrategy, WindowsToSet, PersistenceCtx) ->
+    } = DocSplittingStrategy, WindowsToPrepend, PersistenceCtx) ->
     {#data_node{windows = ExistingWindows} = Data, PersistenceCtxAfterGet} =
         ts_persistence:get(DataNodeKey, PersistenceCtx),
 
-    {RemainingWindowsToSet, FinalPersistenceCtx} = case
+    {RemainingWindowsToPrepend, FinalPersistenceCtx} = case
         ts_windows:get_remaining_windows_count(ExistingWindows, MaxWindowsCount) of
         0 ->
             % Use update function to reorganize documents and allow further adding to head
-            [{Timestamp, WindowValue} | WindowsToSetTail] = WindowsToSet,
+            {Timestamp, WindowValue} = lists:last(WindowsToPrepend),
             UpdatedPersistenceCtx = update(Data, DataNodeKey, 1, DocSplittingStrategy, ignore_existing,
                 Timestamp, WindowValue, PersistenceCtxAfterGet),
-            {WindowsToSetTail, UpdatedPersistenceCtx};
+            {lists:droplast(WindowsToPrepend), UpdatedPersistenceCtx};
         WindowsToUseCount ->
             % Set whole windows batch as windows in argument are sorted
-            UpdatedExistingWindows = ts_windows:set_many(ExistingWindows, lists:sublist(WindowsToSet, WindowsToUseCount)),
+            WindowsCount = length(WindowsToPrepend),
+            SplitPosition = WindowsCount - min(WindowsToUseCount, WindowsCount),
+            UpdatedExistingWindows = ts_windows:prepend_windows_list(ExistingWindows,
+                lists:sublist(WindowsToPrepend, SplitPosition + 1, WindowsCount - SplitPosition)),
             UpdatedPersistenceCtx = ts_persistence:update(
                 DataNodeKey, Data#data_node{windows = UpdatedExistingWindows}, PersistenceCtxAfterGet),
-            {lists:sublist(WindowsToSet, WindowsToUseCount + 1, length(WindowsToSet) - WindowsToUseCount),
-                UpdatedPersistenceCtx}
+            {lists:sublist(WindowsToPrepend, SplitPosition), UpdatedPersistenceCtx}
     end,
 
-    prepend_sorted_windows(DataNodeKey, DocSplittingStrategy, RemainingWindowsToSet, FinalPersistenceCtx).
+    prepend_sorted_windows(DataNodeKey, DocSplittingStrategy, RemainingWindowsToPrepend, FinalPersistenceCtx).
 
 
 -spec prune_overflowing_node(ts_metric_data_node:key(), data_node(), ts_metric_data_node:key(), data_node() | undefined,
@@ -293,7 +294,7 @@ prune_overflowing_node(_NewerNodeKey, _NewerDataNode, Key, #data_node{older_node
 
 
 -spec list_windows(data_node(), ts_windows:window_id() | undefined, ts_windows:list_options(),
-    ts_persistence:ctx()) -> {[ts_windows:window()], ts_persistence:ctx()}.
+    ts_persistence:ctx()) -> {ts_windows:descending_windows_list(), ts_persistence:ctx()}.
 list_windows(
     #data_node{
         windows = Windows,
@@ -368,7 +369,7 @@ get_max_windows_and_split_position(
     end.
 
 
--spec split_node(ts_metric_data_node:key(), data_node(), ts_windows:windows(), ts_windows:windows(),
+-spec split_node(ts_metric_data_node:key(), data_node(), ts_windows:windows_collection(), ts_windows:windows_collection(),
     ts_windows:timestamp(), non_neg_integer(), splitting_strategy(), ts_persistence:ctx()) ->
     {ts_metric_data_node:key() | undefined, data_node() | undefined, ts_persistence:ctx()}.
 split_node(DataNodeKey, Data, Windows1, _Windows2, SplitTimestamp, MaxCount,

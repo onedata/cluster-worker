@@ -113,7 +113,8 @@ list_windows(Ctx, Id, Options) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list_windows(ctx(), time_series_collection:collection_id(), time_series_collection:request_range(),
-    ts_windows:list_options()) -> [ts_windows:window()] | time_series_collection:windows_map() | {error, term()}.
+    ts_windows:list_options()) ->
+    ts_windows:descending_windows_list() | time_series_collection:windows_map() | {error, term()}.
 list_windows(Ctx, Id, RequestedMetrics, Options) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
         [?FUNCTION_NAME, [RequestedMetrics, Options]]).

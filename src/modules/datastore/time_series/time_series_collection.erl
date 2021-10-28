@@ -56,7 +56,7 @@
 % Other way of presentation is flattened map that uses keys {time_series_id(), ts_metric:id()}. It is used
 % mainly to return requested data (get can return only chosen metrics so it does not return hierarchical map).
 -type full_metric_id() :: {time_series_id(), ts_metric:id()}.
--type windows_map() :: #{full_metric_id() => [ts_windows:window()]}.
+-type windows_map() :: #{full_metric_id() => ts_windows:descending_windows_list()}.
 -type metrics_by_time_series() :: #{time_series_id() => [ts_metric:id()]}.
 
 -type time_series_range() :: time_series_id() | [time_series_id()].
@@ -327,7 +327,7 @@ list_windows(Ctx, Id, Options, Batch) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list_windows(ctx(), collection_id(), request_range(), ts_windows:list_options(), batch() | undefined) ->
-    {{ok, [ts_windows:window()] | windows_map()} | {error, term()}, batch() | undefined}.
+    {{ok, ts_windows:descending_windows_list() | windows_map()} | {error, term()}, batch() | undefined}.
 list_windows(Ctx, Id, RequestedMetrics, Options, Batch) ->
     ?CATCH_LIST_UNEXPECTED_ERRORS(
         begin
@@ -495,7 +495,7 @@ update_metrics([{MetricId, Metric} | Tail], NewTimestamp, NewValue, PersistenceC
 
 
 -spec list_time_series_windows(ts_hub:time_series_collection_heads(), request_range(), ts_windows:list_options(),
-    ts_persistence:ctx()) -> {[ts_windows:window()] | windows_map(), ts_persistence:ctx()}.
+    ts_persistence:ctx()) -> {ts_windows:descending_windows_list() | windows_map(), ts_persistence:ctx()}.
 list_time_series_windows(_TimeSeriesCollectionHeads, [], _Options, PersistenceCtx) ->
     {#{}, PersistenceCtx};
 

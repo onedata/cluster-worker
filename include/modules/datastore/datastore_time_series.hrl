@@ -20,7 +20,7 @@
 % stored in linked list of #data_node{} records where newest windows are stored in
 % first record (head).
 -record(data_node, {
-    windows = ts_windows:init() :: ts_windows:windows(),
+    windows = ts_windows:init() :: ts_windows:windows_collection(),
     older_node_key :: ts_metric_data_node:key() | undefined,
     % Timestamp of newest measurement in older data node
     older_node_timestamp :: ts_windows:timestamp() | undefined
