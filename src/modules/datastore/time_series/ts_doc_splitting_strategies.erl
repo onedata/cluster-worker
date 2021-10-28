@@ -23,6 +23,9 @@
 
 -type flat_config_map() :: #{time_series_collection:full_metric_id() => ts_metric:config()}.
 -type windows_count_map() :: #{time_series_collection:full_metric_id() => non_neg_integer()}.
+-type splitting_strategies_map() :: #{time_series_collection:full_metric_id() => ts_metric:splitting_strategy()}.
+
+-export_type([splitting_strategies_map/0]).
 
 % Warning: do not use this env in app.config (setting it to very high value can result in creation of
 % datastore documents that are too big for couchbase). Use of env limited to tests.
@@ -32,7 +35,7 @@
 %% API
 %%=====================================================================
 
--spec calculate(time_series_collection:collection_config()) -> #{time_series_collection:full_metric_id() => ts_metric:splitting_strategy()}.
+-spec calculate(time_series_collection:collection_config()) -> splitting_strategies_map().
 calculate(ConfigMap) ->
     FlattenedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
         maps:fold(fun
@@ -40,8 +43,8 @@ calculate(ConfigMap) ->
                 throw({error, empty_metric});
             (_, #metric_config{resolution = Resolution}, _) when Resolution =< 0 ->
                 throw({error, wrong_resolution});
-            (MetricsId, Config, InternalAcc) ->
-                InternalAcc#{{TimeSeriesId, MetricsId} => Config}
+            (MetricId, Config, InternalAcc) ->
+                InternalAcc#{{TimeSeriesId, MetricId} => Config}
         end, Acc, MetricsConfigs)
     end, #{}, ConfigMap),
 

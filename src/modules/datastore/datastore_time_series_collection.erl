@@ -14,7 +14,8 @@
 -author("Michal Wrzeszcz").
 
 %% API
--export([create/3, update/4, update/5, update_many/3, list_windows/3, list_windows/4, delete/2]).
+-export([create/3, add_metrics/4, delete_metrics/3, list_time_series_ids/2, list_metrics_by_time_series/2,
+    update/4, update/5, update_many/3, list_windows/3, list_windows/4, delete/2]).
 
 -type ctx() :: datastore_model:ctx().
 
@@ -22,9 +23,37 @@
 %%% API
 %%%===================================================================
 
--spec create(ctx(), time_series_collection:collection_id(), time_series_collection:collection_config()) -> ok | {error, term()}.
+-spec create(ctx(), time_series_collection:collection_id(), time_series_collection:collection_config()) ->
+    ok | {error, term()}.
 create(Ctx, Id, ConfigMap) ->
-    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4, [?FUNCTION_NAME, [ConfigMap]]).
+    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
+        [?FUNCTION_NAME, [ConfigMap]]).
+
+
+-spec add_metrics(ctx(), time_series_collection:collection_id(), time_series_collection:collection_config(),
+    time_series_collection:add_metrics_option()) -> ok | {error, term()}.
+add_metrics(Ctx, Id, ConfigMapExtension, Options) ->
+    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
+        [?FUNCTION_NAME, [ConfigMapExtension, Options]]).
+
+
+-spec delete_metrics(ctx(), time_series_collection:collection_id(), time_series_collection:request_range()) ->
+    ok | {error, term()}.
+delete_metrics(Ctx, Id, MetricsToDelete) ->
+    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
+        [?FUNCTION_NAME, [MetricsToDelete]]).
+
+
+-spec list_time_series_ids(ctx(), time_series_collection:collection_id()) ->
+    {ok, [time_series_collection:time_series_id()]} | {error, term()}.
+list_time_series_ids(Ctx, Id) ->
+    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4, [?FUNCTION_NAME, []]).
+
+
+-spec list_metrics_by_time_series(ctx(), time_series_collection:collection_id()) ->
+    {ok, time_series_collection:metrics_by_time_series()} | {error, term()}.
+list_metrics_by_time_series(Ctx, Id) ->
+    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4, [?FUNCTION_NAME, []]).
 
 
 %%--------------------------------------------------------------------
@@ -45,8 +74,8 @@ update(Ctx, Id, NewTimestamp, ValueOrUpdateRange) ->
 %% Updates single metric - see time_series_collection:update/6.
 %% @end
 %%--------------------------------------------------------------------
--spec update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp(), time_series_collection:request_range(),
-    ts_windows:value()) -> ok | {error, term()}.
+-spec update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp(),
+    time_series_collection:request_range(), ts_windows:value()) -> ok | {error, term()}.
 update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
         [?FUNCTION_NAME, [NewTimestamp, MetricsToUpdate, NewValue]]).
@@ -61,7 +90,8 @@ update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue) ->
 -spec update_many(ctx(), time_series_collection:collection_id(), [{ts_windows:timestamp(), ts_windows:value()}]) ->
     ok | {error, term()}.
 update_many(Ctx, Id, Measurements) ->
-    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4, [?FUNCTION_NAME, [Measurements]]).
+    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
+        [?FUNCTION_NAME, [Measurements]]).
 
 
 %%--------------------------------------------------------------------
@@ -73,7 +103,8 @@ update_many(Ctx, Id, Measurements) ->
 -spec list_windows(ctx(), time_series_collection:collection_id(), ts_windows:list_options()) ->
     time_series_collection:windows_map() | {error, term()}.
 list_windows(Ctx, Id, Options) ->
-    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4, [?FUNCTION_NAME, [Options]]).
+    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
+        [?FUNCTION_NAME, [Options]]).
 
 
 %%--------------------------------------------------------------------
@@ -82,7 +113,8 @@ list_windows(Ctx, Id, Options) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list_windows(ctx(), time_series_collection:collection_id(), time_series_collection:request_range(),
-    ts_windows:list_options()) -> [ts_windows:window()] | time_series_collection:windows_map() | {error, term()}.
+    ts_windows:list_options()) ->
+    ts_windows:descending_windows_list() | time_series_collection:windows_map() | {error, term()}.
 list_windows(Ctx, Id, RequestedMetrics, Options) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
         [?FUNCTION_NAME, [RequestedMetrics, Options]]).

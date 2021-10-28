@@ -16,11 +16,14 @@
 
 -export([get/3, exists/3]).
 -export([get_links/5, get_links_trees/3]).
--export([time_series_collection_list_windows/3, infinite_log_operation/4]).
+-export([time_series_collection_list/4, infinite_log_operation/4]).
 
 -type tree_id() :: datastore_links:tree_id().
 -type link() :: datastore_links:link().
 -type link_name() :: datastore_links:link_name().
+-type time_series_collection_list_function() :: list_windows | list_time_series_ids | list_metrics_by_time_series.
+-type time_series_collection_list_ok_ans() :: ts_windows:descending_windows_list() | time_series_collection:windows_map() |
+    [time_series_collection:time_series_id()] | time_series_collection:metrics_by_time_series().
 
 %%%===================================================================
 %%% Direct access API
@@ -102,17 +105,11 @@ get_links_trees(FetchNode, Ctx, Key) ->
     end.
 
 
--spec time_series_collection_list_windows(node(), datastore_doc:ctx(), list()) ->
-    ok | {ok, [ts_windows:window()] | time_series_collection:windows_map()} | {error, term()}.
-time_series_collection_list_windows(FetchNode, Ctx, Args) ->
+-spec time_series_collection_list(node(), datastore_doc:ctx(), time_series_collection_list_function(), list()) ->
+    {ok, time_series_collection_list_ok_ans()} | {error, term()}.
+time_series_collection_list(FetchNode, Ctx, ListFunction, Args) ->
     try
-        ListResult = case Args of
-            [Id, Options] ->
-                time_series_collection:list_windows(set_direct_access_ctx(FetchNode, Ctx), Id, Options, undefined);
-            [Id, RequestedMetrics, Options] ->
-                time_series_collection:list_windows(
-                    set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined)
-        end,
+        ListResult = time_series_collection_list_unsafe(FetchNode, Ctx, ListFunction, Args),
         case ListResult of
             {{ok, Result}, _} ->
                 {ok, Result};
@@ -122,7 +119,7 @@ time_series_collection_list_windows(FetchNode, Ctx, Args) ->
     catch
         throw:{fetch_error, not_found} ->
             datastore_router:execute_on_node(
-                FetchNode, datastore_writer, time_series_collection_operation, [Ctx, list_windows, Args])
+                FetchNode, datastore_writer, time_series_collection_operation, [Ctx, ListFunction, Args])
     end.
 
 
@@ -172,3 +169,14 @@ set_direct_access_ctx(FetchNode, #{disc_driver := undefined} = Ctx) when FetchNo
     Ctx;
 set_direct_access_ctx(_FetchNode, Ctx) ->
     Ctx#{disc_driver => undefined, remote_driver => undefined, throw_not_found => true}.
+
+
+%% @private
+-spec time_series_collection_list_unsafe(node(), datastore_doc:ctx(), time_series_collection_list_function(), list()) ->
+    {{ok, time_series_collection_list_ok_ans} | {error, term()}, datastore_doc:batch()}.
+time_series_collection_list_unsafe(FetchNode, Ctx, list_windows, [Id, Options]) ->
+    time_series_collection:list_windows(set_direct_access_ctx(FetchNode, Ctx), Id, Options, undefined);
+time_series_collection_list_unsafe(FetchNode, Ctx, list_windows, [Id, RequestedMetrics, Options]) ->
+    time_series_collection:list_windows(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined);
+time_series_collection_list_unsafe(FetchNode, Ctx, ListFunction, [Id]) ->
+    time_series_collection:ListFunction(set_direct_access_ctx(FetchNode, Ctx), Id, undefined).

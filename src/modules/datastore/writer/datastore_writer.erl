@@ -228,7 +228,7 @@ fetch_links_trees(Ctx, Key) ->
 
 
 -spec time_series_collection_operation(ctx(), atom(), list()) ->
-    ok | {ok, [ts_windows:window()] | time_series_collection:windows_map()} | {error, term()}.
+    ok | {ok, ts_windows:descending_windows_list() | time_series_collection:windows_map()} | {error, term()}.
 time_series_collection_operation(Ctx, Function, [Key | ArgsTail]) ->
     call(Ctx, get_key(Ctx, Key, time_series), time_series_collection, Function, [Key | ArgsTail]).
 
