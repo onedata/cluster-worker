@@ -44,8 +44,11 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([create/4, add_metrics/5, delete_metrics/4, list_time_series_ids/3, list_metrics_by_time_series/3,
-    update/5, update/6, update_many/4, list_windows/4, list_windows/5, delete/3]).
+-export([create/4, delete/3,
+    add_metrics/5, delete_metrics/4,
+    list_time_series_ids/3, list_metrics_by_time_series/3,
+    update/5, check_and_update/5, update/6, check_and_update/6, update_many/4,
+    list_windows/4, list_windows/5]).
 
 -type time_series_id() :: binary().
 -type collection_id() :: binary().
@@ -95,6 +98,10 @@
     catch
         throw:{{error, hub_not_found}, Batch} ->
             {{error, not_found}, Batch};
+        _:{error, time_series_not_found} ->
+            {{error, time_series_not_found}, Batch};
+        _:{error, metric_not_found} ->
+            {{error, metric_not_found}, Batch};
         Error:Reason:Stacktrace ->
             ?error_stacktrace(ErrorLog ++ "~nerror type: ~p, error reason: ~p",
                 ErrorLogArgs ++ [Error, Reason], Stacktrace),
@@ -134,6 +141,18 @@ create(Ctx, Id, ConfigMap, Batch) ->
                 [Id, Error, Reason, ConfigMap], Stacktrace),
             {{error, create_failed}, Batch}
     end.
+
+
+-spec delete(ctx(), collection_id(), batch() ) -> {ok | {error, term()}, batch()}.
+delete(Ctx, Id, Batch) ->
+    ?CATCH_UPDATE_UNEXPECTED_ERRORS(
+        begin
+            {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+            FinalPersistenceCtx = delete_time_series(maps:to_list(TimeSeriesCollectionHeads), true, PersistenceCtx),
+            {ok, ts_persistence:finalize(FinalPersistenceCtx)}
+        end,
+        "Time series collection ~p delete error.", [Id], {{error, delete_failed}, Batch}
+    ).
 
 
 -spec add_metrics(ctx(), collection_id(), collection_config(), add_metrics_option(), batch()) -> 
@@ -177,7 +196,7 @@ delete_metrics(Ctx, Id, MetricsToDelete, Batch) ->
     ?CATCH_UPDATE_UNEXPECTED_ERRORS(
         begin
             {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-            SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToDelete),
+            SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToDelete, false),
             PersistenceCtxAfterDelete = delete_time_series(maps:to_list(SelectedHeads), false, PersistenceCtx),
 
             UpdatedTimeSeriesCollectionHeads = ts_persistence:get_time_series_collection_heads(PersistenceCtxAfterDelete),
@@ -218,13 +237,6 @@ list_metrics_by_time_series(Ctx, Id, Batch) ->
     ).
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Puts metrics value for particular timestamp. It updates all metrics from all time series or only chosen subset
-%% of metrics depending on value of 4th function argument. In second case different measurement values can be specified
-%% (see update_range() type).
-%% @end
-%%--------------------------------------------------------------------
 -spec update(ctx(), collection_id(), ts_windows:timestamp(), ts_windows:value() | update_range(), batch()) ->
     {ok | {error, term()}, batch()}.
 update(Ctx, Id, NewTimestamp, NewValue, Batch) when is_number(NewValue) ->
@@ -236,44 +248,74 @@ update(Ctx, Id, NewTimestamp, NewValue, Batch) when is_number(NewValue) ->
             {ok, ts_persistence:finalize(FinalPersistenceCtx)}
         end,
         "Time series collection ~p update error. Failed to update measurement {~p, ~p}",
-                [Id, NewTimestamp, NewValue], {{error, update_failed}, Batch}
+        [Id, NewTimestamp, NewValue], {{error, update_failed}, Batch}
     );
 
-update(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch) when is_list(MetricsToUpdateWithValues) ->
+update(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch) ->
+    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch, false).
+
+-spec check_and_update(ctx(), collection_id(), ts_windows:timestamp(), update_range(), batch()) ->
+    {ok | {error, term()}, batch()}.
+check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch) ->
+    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch, true).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Puts metrics value for particular timestamp. It updates all metrics from all time series or only chosen subset
+%% of metrics depending on value of 4th function argument. In second case different measurement values can be specified
+%% (see update_range() type).
+%% @end
+%%--------------------------------------------------------------------
+-spec update_internal(ctx(), collection_id(), ts_windows:timestamp(), update_range(), batch(), boolean()) ->
+    {ok | {error, term()}, batch()}.
+update_internal(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch, ReturnErrorIfMetricIfMissing)
+    when is_list(MetricsToUpdateWithValues) ->
     ?CATCH_UPDATE_UNEXPECTED_ERRORS(
         begin
             {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
             FinalPersistenceCtx = lists:foldl(fun({MetricsToUpdate, NewValue}, Acc) ->
-                SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToUpdate),
+                SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToUpdate, ReturnErrorIfMetricIfMissing),
                 update_time_series(maps:to_list(SelectedHeads), NewTimestamp, NewValue, Acc)
             end, PersistenceCtx, MetricsToUpdateWithValues),
             {ok, ts_persistence:finalize(FinalPersistenceCtx)}
         end,
         "Time series collection ~p update error. Failed to update values ~p for timestamp ~p",
-                [Id, MetricsToUpdateWithValues, NewTimestamp], {{error, update_failed}, Batch}
+        [Id, MetricsToUpdateWithValues, NewTimestamp], {{error, update_failed}, Batch}
     );
 
-update(Ctx, Id, NewTimestamp, {MetricsToUpdate, NewValue}, Batch) ->
-    update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch).
+update_internal(Ctx, Id, NewTimestamp, {MetricsToUpdate, NewValue}, Batch, ThrowIfMissing) ->
+    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, ThrowIfMissing).
 
+
+-spec update(ctx(), collection_id(), ts_windows:timestamp(), request_range() , ts_windows:value(), batch()) ->
+    {ok | {error, term()}, batch()}.
+update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
+    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, false).
+
+-spec check_and_update(ctx(), collection_id(), ts_windows:timestamp(), request_range() , ts_windows:value(), batch()) ->
+    {ok | {error, term()}, batch()}.
+check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
+    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, true).
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Puts metrics value for particular timestamp. Updated value is the same for all metrics provided in 4th argument.
 %% @end
 %%--------------------------------------------------------------------
--spec update(ctx(), collection_id(), ts_windows:timestamp(), request_range() , ts_windows:value(), batch()) ->
-    {ok | {error, term()}, batch()}.
-update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
+-spec update_internal(ctx(), collection_id(), ts_windows:timestamp(), request_range() , ts_windows:value(), batch(),
+    boolean()) -> {ok | {error, term()}, batch()}.
+update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, ReturnErrorIfMetricIfMissing) ->
     ?CATCH_UPDATE_UNEXPECTED_ERRORS(
         begin
             {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-            SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToUpdate),
+            SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToUpdate, ReturnErrorIfMetricIfMissing),
             FinalPersistenceCtx = update_time_series(maps:to_list(SelectedHeads), NewTimestamp, NewValue, PersistenceCtx),
             {ok, ts_persistence:finalize(FinalPersistenceCtx)}
         end,
         "Time series collection ~p update error. Failed to update measurement {~p, ~p} for metrics ~p",
-                [Id, NewTimestamp, NewValue, MetricsToUpdate], {{error, update_failed}, Batch}
+        [Id, NewTimestamp, NewValue, MetricsToUpdate], {{error, update_failed}, Batch}
     ).
 
 
@@ -341,18 +383,6 @@ list_windows(Ctx, Id, RequestedMetrics, Options, Batch) ->
     ).
 
 
--spec delete(ctx(), collection_id(), batch() ) -> {ok | {error, term()}, batch()}.
-delete(Ctx, Id, Batch) ->
-    ?CATCH_UPDATE_UNEXPECTED_ERRORS(
-        begin
-            {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-            FinalPersistenceCtx = delete_time_series(maps:to_list(TimeSeriesCollectionHeads), true, PersistenceCtx),
-            {ok, ts_persistence:finalize(FinalPersistenceCtx)}
-        end,
-        "Time series collection ~p delete error.", [Id], {{error, delete_failed}, Batch}
-    ).
-
-
 %%=====================================================================
 %% Internal functions
 %%=====================================================================
@@ -403,7 +433,7 @@ delete_overridden_metrics(TimeSeriesCollectionHeads, ExistingConfigMap, ConfigMa
         end
     end, [], ConfigMapExtension),
 
-    SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToDelete),
+    SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToDelete, false),
     delete_time_series(maps:to_list(SelectedHeads), false, PersistenceCtx).
 
 
@@ -429,19 +459,20 @@ reconfigure_metrics(NewConfigMap, ConfigMapExtension, DocSplittingStrategies, Pe
     end, PersistenceCtx, NewConfigMap).
 
 
--spec select_heads(ts_hub:time_series_collection_heads(), request_range()) ->
+-spec select_heads(ts_hub:time_series_collection_heads(), request_range(), boolean()) ->
     ts_hub:time_series_collection_heads().
-select_heads(_TimeSeriesCollectionHeads, []) ->
+select_heads(_TimeSeriesCollectionHeads, [], _ThrowIfMissing) ->
     #{};
 
-select_heads(TimeSeriesCollectionHeads, [{TimeSeriesId, MetricIds} | Tail]) ->
-    Ans = select_heads(TimeSeriesCollectionHeads, Tail),
+select_heads(TimeSeriesCollectionHeads, [{TimeSeriesId, MetricIds} | Tail], ThrowIfMissing) ->
+    Ans = select_heads(TimeSeriesCollectionHeads, Tail, ThrowIfMissing),
     case maps:get(TimeSeriesId, TimeSeriesCollectionHeads, undefined) of
         undefined ->
             Ans;
         TimeSeries ->
             FilteredTimeSeries = lists:foldl(fun(MetricId, Acc) ->
                 case maps:get(MetricId, TimeSeries, undefined) of
+                    undefined when ThrowIfMissing -> throw({error, metric_not_found});
                     undefined -> Acc;
                     Metric -> maps:put(MetricId, Metric, Acc)
                 end
@@ -453,15 +484,16 @@ select_heads(TimeSeriesCollectionHeads, [{TimeSeriesId, MetricIds} | Tail]) ->
             end
     end;
 
-select_heads(TimeSeriesCollectionHeads, [TimeSeriesId | Tail]) ->
-    Ans = select_heads(TimeSeriesCollectionHeads, Tail),
+select_heads(TimeSeriesCollectionHeads, [TimeSeriesId | Tail], ThrowIfMissing) ->
+    Ans = select_heads(TimeSeriesCollectionHeads, Tail, ThrowIfMissing),
     case maps:get(TimeSeriesId, TimeSeriesCollectionHeads, undefined) of
+        undefined when ThrowIfMissing -> throw({error, time_series_not_found});
         undefined -> Ans;
         TimeSeries -> maps:put(TimeSeriesId, TimeSeries, Ans)
     end;
 
-select_heads(TimeSeriesCollectionHeads, ToBeIncluded) ->
-    select_heads(TimeSeriesCollectionHeads, [ToBeIncluded]).
+select_heads(TimeSeriesCollectionHeads, ToBeIncluded, ThrowIfMissing) ->
+    select_heads(TimeSeriesCollectionHeads, [ToBeIncluded], ThrowIfMissing).
 
 
 -spec get_config_map(ts_hub:time_series_collection_heads()) -> collection_config().

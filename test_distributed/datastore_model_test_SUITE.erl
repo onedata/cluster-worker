@@ -1101,7 +1101,26 @@ time_series_test(Config) ->
 
         % Test getting all metrics
         ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, #{}])),
-        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, maps:keys(ExpectedMap), #{}]))
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, maps:keys(ExpectedMap), #{}])),
+
+        % Test if adding measurement to not existing metric or time series does not result in error for both update functions
+        ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_update, [Id, 1, <<"TS", 2>>, 1])),
+        ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_update, [Id, 1, {<<"TS", 1>>, <<"M", 10>>}, 1])),
+        ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_update, [Id, 1, {<<"TS", 2>>, 1}])),
+        ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_update, [Id, 1, {{<<"TS", 1>>, <<"M", 10>>}, 1}])),
+
+        % Test if adding measurement to not existing metric or time series results in error for both check_and_update functions
+        ?assertEqual({error, time_series_not_found},
+            rpc:call(Worker, Model, time_series_collection_check_and_update, [Id, 1, <<"TS", 2>>, 1])),
+        ?assertEqual({error, metric_not_found},
+            rpc:call(Worker, Model, time_series_collection_check_and_update, [Id, 1, {<<"TS", 1>>, <<"M", 10>>}, 1])),
+        ?assertEqual({error, time_series_not_found},
+            rpc:call(Worker, Model, time_series_collection_check_and_update, [Id, 1, {<<"TS", 2>>, 1}])),
+        ?assertEqual({error, metric_not_found},
+            rpc:call(Worker, Model, time_series_collection_check_and_update, [Id, 1, {{<<"TS", 1>>, <<"M", 10>>}, 1}])),
+
+        % Test if adding measurement to not existing metric or time series has not changed collection
+        ?assertMatch({ok, ExpectedMap}, rpc:call(Worker, Model, time_series_collection_list_windows, [Id, #{}]))
     end, ?TEST_MODELS).
 
 
