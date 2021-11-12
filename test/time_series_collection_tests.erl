@@ -25,6 +25,8 @@
 -define(LIST_ALL(Id, Batch), time_series_collection:list_windows(#{}, Id, #{}, Batch)).
 -define(LIST_OK_ANS(Expected), {{ok, Expected}, _}).
 
+-define(MAX_DOC_SIZE, 200).
+
 %%%===================================================================
 %%% Setup and teardown
 %%%===================================================================
@@ -49,7 +51,7 @@ ts_test_() ->
 
 setup() ->
     % TODO VFS-8539 - set time_series_max_doc_size to 100
-    application:set_env(?CLUSTER_WORKER_APP_NAME, time_series_max_doc_size, 200),
+    application:set_env(?CLUSTER_WORKER_APP_NAME, time_series_max_doc_size, ?MAX_DOC_SIZE),
     meck:new([datastore_doc_batch, datastore_doc], [passthrough, no_history]),
     meck:expect(datastore_doc_batch, init, fun() -> #{} end),
     meck:expect(datastore_doc, save, fun(_Ctx, Key, Doc, Batch) -> {{ok, Doc}, Batch#{Key => Doc}} end),
