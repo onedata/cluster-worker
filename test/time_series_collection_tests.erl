@@ -50,7 +50,6 @@ ts_test_() ->
 
 
 setup() ->
-    % TODO VFS-8539 - set time_series_max_doc_size to 100
     application:set_env(?CLUSTER_WORKER_APP_NAME, time_series_max_doc_size, ?MAX_DOC_SIZE),
     meck:new([datastore_doc_batch, datastore_doc], [passthrough, no_history]),
     meck:expect(datastore_doc_batch, init, fun() -> #{} end),
