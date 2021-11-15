@@ -78,7 +78,7 @@
 
 -type ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
--type error_handling_mode() :: fail_function | ignore.
+-type error_handling_mode() :: fail_if_metric_is_missing | ignore_missing_metrics.
 
 -define(CATCH_LIST_UNEXPECTED_ERRORS(Expr, ErrorLog, ErrorLogArgs, ErrorReturnValue),
     try
@@ -197,7 +197,7 @@ delete_metrics(Ctx, Id, MetricsToDelete, Batch) ->
     ?CATCH_UPDATE_UNEXPECTED_ERRORS(
         begin
             {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-            SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToDelete, ignore),
+            SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToDelete, ignore_missing_metrics),
             PersistenceCtxAfterDelete = delete_time_series(maps:to_list(SelectedHeads), false, PersistenceCtx),
 
             UpdatedTimeSeriesCollectionHeads = ts_persistence:get_time_series_collection_heads(PersistenceCtxAfterDelete),
@@ -253,12 +253,12 @@ update(Ctx, Id, NewTimestamp, NewValue, Batch) when is_number(NewValue) ->
     );
 
 update(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch) ->
-    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch, ignore).
+    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch, ignore_missing_metrics).
 
 -spec check_and_update(ctx(), collection_id(), ts_windows:timestamp(), update_range(), batch()) ->
     {ok | {error, term()}, batch()}.
 check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch) ->
-    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch, fail_function).
+    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch, fail_if_metric_is_missing).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -292,12 +292,12 @@ update_internal(Ctx, Id, NewTimestamp, {MetricsToUpdate, NewValue}, Batch, Error
 -spec update(ctx(), collection_id(), ts_windows:timestamp(), request_range() , ts_windows:value(), batch()) ->
     {ok | {error, term()}, batch()}.
 update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
-    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, ignore).
+    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, ignore_missing_metrics).
 
 -spec check_and_update(ctx(), collection_id(), ts_windows:timestamp(), request_range() , ts_windows:value(), batch()) ->
     {ok | {error, term()}, batch()}.
 check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
-    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, fail_function).
+    update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, fail_if_metric_is_missing).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -434,7 +434,7 @@ delete_overridden_metrics(TimeSeriesCollectionHeads, ExistingConfigMap, ConfigMa
         end
     end, [], ConfigMapExtension),
 
-    SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToDelete, ignore),
+    SelectedHeads = select_heads(TimeSeriesCollectionHeads, MetricsToDelete, ignore_missing_metrics),
     delete_time_series(maps:to_list(SelectedHeads), false, PersistenceCtx).
 
 
@@ -473,7 +473,7 @@ select_heads(TimeSeriesCollectionHeads, [{TimeSeriesId, MetricIds} | Tail], Erro
         TimeSeries ->
             FilteredTimeSeries = lists:foldl(fun(MetricId, Acc) ->
                 case maps:get(MetricId, TimeSeries, undefined) of
-                    undefined when ErrorHandlingMode =:= fail_function -> throw({error, metric_not_found});
+                    undefined when ErrorHandlingMode =:= fail_if_metric_is_missing -> throw({error, metric_not_found});
                     undefined -> Acc;
                     Metric -> maps:put(MetricId, Metric, Acc)
                 end
@@ -488,7 +488,7 @@ select_heads(TimeSeriesCollectionHeads, [{TimeSeriesId, MetricIds} | Tail], Erro
 select_heads(TimeSeriesCollectionHeads, [TimeSeriesId | Tail], ErrorHandlingMode) ->
     Ans = select_heads(TimeSeriesCollectionHeads, Tail, ErrorHandlingMode),
     case maps:get(TimeSeriesId, TimeSeriesCollectionHeads, undefined) of
-        undefined when ErrorHandlingMode =:= fail_function -> throw({error, time_series_not_found});
+        undefined when ErrorHandlingMode =:= fail_if_metric_is_missing -> throw({error, time_series_not_found});
         undefined -> Ans;
         TimeSeries -> maps:put(TimeSeriesId, TimeSeries, Ans)
     end;
