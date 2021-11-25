@@ -11,7 +11,7 @@
 %%% originally in the infinite_log.
 %%% @end
 %%%-------------------------------------------------------------------
--module(json_based_infinite_log_model).
+-module(json_infinite_log_model).
 -author("Michal Stanisz").
 -author("Lukasz Opiola").
 
@@ -22,6 +22,7 @@
 -export([create/1, create/2]).
 -export([destroy/1]).
 -export([append/2]).
+-export([default_start_index/1]).
 -export([list_and_postprocess/3]).
 
 %% datastore_model callbacks
@@ -82,6 +83,11 @@ destroy(Id) ->
 -spec append(id(), entry_content()) -> ok | {error, term()}.
 append(Id, EntryValue) ->
     datastore_infinite_log:append(?CTX, Id, json_utils:encode(EntryValue)).
+
+
+-spec default_start_index(exclusive | inclusive) -> entry_index().
+default_start_index(exclusive) -> <<"-1">>;
+default_start_index(inclusive) -> <<"0">>.
 
 
 -spec list_and_postprocess(id(), listing_opts(), listing_postprocessor(MappedEntry)) ->
