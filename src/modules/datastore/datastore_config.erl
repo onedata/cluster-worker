@@ -35,6 +35,7 @@
     node_internal_services,
     infinite_log_sentinel,
     infinite_log_node,
+    json_infinite_log_model,
     ts_hub,
     ts_metric_data_node,
     % Model used for performance testing (mocked models cannot be used as they affect performance)

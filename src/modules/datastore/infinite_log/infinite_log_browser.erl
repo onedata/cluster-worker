@@ -39,7 +39,9 @@
 % indicates if listing has ended
 -type progress_marker() :: more | done.
 -type listing_result() :: {progress_marker(), entry_series()}.
--export_type([listing_opts/0, listing_result/0]).
+
+-export_type([direction/0, offset/0, limit/0]).
+-export_type([listing_opts/0, progress_marker/0, listing_result/0]).
 
 %%%-------------------------------------------------------------------
 %%% internal definitions
