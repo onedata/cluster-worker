@@ -14,8 +14,11 @@
 -author("Michal Wrzeszcz").
 
 %% API
--export([create/3, add_metrics/4, delete_metrics/3, list_time_series_ids/2, list_metrics_by_time_series/2,
-    update/4, update/5, update_many/3, list_windows/3, list_windows/4, delete/2]).
+-export([create/3, delete/2,
+    add_metrics/4, delete_metrics/3,
+    list_time_series_ids/2, list_metrics_by_time_series/2,
+    update/4, check_and_update/4, update/5, check_and_update/5, update_many/3,
+    list_windows/3, list_windows/4]).
 
 -type ctx() :: datastore_model:ctx().
 
@@ -28,6 +31,11 @@
 create(Ctx, Id, ConfigMap) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
         [?FUNCTION_NAME, [ConfigMap]]).
+
+
+-spec delete(ctx(), time_series_collection:collection_id()) -> ok | {error, term()}.
+delete(Ctx, Id) ->
+    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4, [?FUNCTION_NAME, []]).
 
 
 -spec add_metrics(ctx(), time_series_collection:collection_id(), time_series_collection:collection_config(),
@@ -59,7 +67,8 @@ list_metrics_by_time_series(Ctx, Id) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Puts metrics value for particular timestamp for all metrics from all time series or chosen subset
-%% of metrics - see time_series_collection:update/5.
+%% of metrics - see time_series_collection:update/5. If updated metric or time series is missing,
+%% the function ignores it and updates only existing ones.
 %% @end
 %%--------------------------------------------------------------------
 -spec update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp(),
@@ -71,12 +80,41 @@ update(Ctx, Id, NewTimestamp, ValueOrUpdateRange) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Updates single metric - see time_series_collection:update/6.
+%% Puts metrics value for particular timestamp for all metrics from all time series or chosen subset
+%% of metrics - see time_series_collection:check_and_update/5. If updated metric or time series is missing,
+%% the function returns error.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_and_update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp(),
+    ts_windows:value() | time_series_collection:update_range()) -> ok | {error, term()}.
+check_and_update(Ctx, Id, NewTimestamp, ValueOrUpdateRange) ->
+    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
+        [?FUNCTION_NAME, [NewTimestamp, ValueOrUpdateRange]]).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Puts metrics value for particular timestamp. Updated value is the same for all metrics provided in 4th argument - see
+%% time_series_collection:update/6. If updated metric or time series is missing, the function ignores it and updates
+%% only existing ones.
 %% @end
 %%--------------------------------------------------------------------
 -spec update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp(),
     time_series_collection:request_range(), ts_windows:value()) -> ok | {error, term()}.
 update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue) ->
+    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
+        [?FUNCTION_NAME, [NewTimestamp, MetricsToUpdate, NewValue]]).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Puts metrics value for particular timestamp. Updated value is the same for all metrics provided in 4th argument - see
+%% time_series_collection:check_and_update/6. If updated metric or time series is missing, the function returns error.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_and_update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp(),
+    time_series_collection:request_range(), ts_windows:value()) -> ok | {error, term()}.
+check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
         [?FUNCTION_NAME, [NewTimestamp, MetricsToUpdate, NewValue]]).
 
@@ -118,8 +156,3 @@ list_windows(Ctx, Id, Options) ->
 list_windows(Ctx, Id, RequestedMetrics, Options) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
         [?FUNCTION_NAME, [RequestedMetrics, Options]]).
-
-
--spec delete(ctx(), time_series_collection:collection_id()) -> ok | {error, term()}.
-delete(Ctx, Id) ->
-    datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4, [?FUNCTION_NAME, []]).

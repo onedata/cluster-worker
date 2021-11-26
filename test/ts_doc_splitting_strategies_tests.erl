@@ -17,12 +17,35 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("modules/datastore/ts_metric_config.hrl").
 -include("modules/datastore/datastore_time_series.hrl").
+-include("global_definitions.hrl").
+
+
+-define(MAX_DOC_SIZE, 2000).
+
+
+%%%===================================================================
+%%% Setup
+%%%===================================================================
+
+splitting_strategies_test_() ->
+    {foreach,
+        fun setup/0,
+        [
+            fun single_doc_splitting_strategies_create/0,
+            fun multiple_metrics_splitting_strategies_create/0
+        ]
+    }.
+
+
+setup() ->
+    application:set_env(?CLUSTER_WORKER_APP_NAME, time_series_max_doc_size, ?MAX_DOC_SIZE).
+
 
 %%%===================================================================
 %%% Tests
 %%%===================================================================
 
-single_doc_splitting_strategies_create_test() ->
+single_doc_splitting_strategies_create() ->
     Id = datastore_key:new(),
     Batch = datastore_doc_batch:init(),
     ConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0}}},
@@ -42,7 +65,7 @@ single_doc_splitting_strategies_create_test() ->
         max_windows_in_head_doc = 2000, max_windows_in_tail_doc = 2000, max_docs_count = 8}).
 
 
-multiple_metrics_splitting_strategies_create_test() ->
+multiple_metrics_splitting_strategies_create() ->
     multiple_metrics_splitting_strategies_create_testcase(10, 20, 30,
         #splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 10, max_windows_in_tail_doc = 0},
         #splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 20, max_windows_in_tail_doc = 0},

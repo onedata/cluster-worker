@@ -89,7 +89,10 @@ start_link(URL, Auth, SupportedVersions, PushCallback, Opts) ->
         {with_http_cookies, ClientAuth, HttpCookies} -> {ClientAuth, HttpCookies};
         ClientAuth -> {ClientAuth, []}
     end,
-    case websocket_client:start_link(URL, Cookies, ?MODULE, [], Opts) of
+    Headers = lists:map(fun({CookieKey, CookieValue}) ->
+        {<<"Cookie">>, <<CookieKey/binary, "=", CookieValue/binary>>}
+    end, Cookies),
+    case websocket_client:start_link(URL, Headers, ?MODULE, [], Opts) of
         {ok, Pid} ->
             Pid ! {init, self(), SupportedVersions, ProtocolAuth, PushCallback},
             receive
