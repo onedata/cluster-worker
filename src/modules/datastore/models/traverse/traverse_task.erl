@@ -509,11 +509,16 @@ get_additional_data(Pool, TaskId) ->
             Other
     end.
 
--spec update_additional_data(ctx(), traverse:pool(), traverse:id(), traverse:status()) ->
+-spec update_additional_data(ctx(), traverse:pool(), traverse:id(), datastore_model:diff()) -> 
     {ok, doc()} | {error, term()}.
-update_additional_data(ExtendedCtx, Pool, TaskId, NewAdditionalData) ->
-    Diff = fun(Task) ->
-        {ok, Task#traverse_task{additional_data = NewAdditionalData}}
+update_additional_data(ExtendedCtx, Pool, TaskId, UpdateFun) ->
+    Diff = fun(#traverse_task{additional_data = AD} = Task) ->
+        case UpdateFun(AD) of
+            {ok, NewAD} ->
+                {ok, Task#traverse_task{additional_data = NewAD}};
+            {error, _} = Error -> 
+                Error
+        end
     end,
     datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskId), Diff).
 

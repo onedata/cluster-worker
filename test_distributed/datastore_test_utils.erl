@@ -182,9 +182,17 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_time_series_collection:update(Ctx, Id, NewTimestamp, ValueOrUpdateRange)
         end},
+        {time_series_collection_check_and_update, fun(Id, NewTimestamp, ValueOrUpdateRange) ->
+            Ctx = get_ctx(Model),
+            datastore_time_series_collection:check_and_update(Ctx, Id, NewTimestamp, ValueOrUpdateRange)
+        end},
         {time_series_collection_update, fun(Id, NewTimestamp, MetricsToUpdate, NewValue) ->
             Ctx = get_ctx(Model),
             datastore_time_series_collection:update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue)
+        end},
+        {time_series_collection_check_and_update, fun(Id, NewTimestamp, MetricsToUpdate, NewValue) ->
+            Ctx = get_ctx(Model),
+            datastore_time_series_collection:check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue)
         end},
         {time_series_collection_update_many, fun(Id, Measurements) ->
             Ctx = get_ctx(Model),

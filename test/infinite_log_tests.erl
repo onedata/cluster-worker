@@ -909,7 +909,7 @@ signum(X) when X > 0 -> 1.
 
 
 mock_datastore_doc() ->
-    meck:new(datastore_doc, [passthrough]),
+    meck:new(datastore_doc, [passthrough, no_history]),
     meck:expect(datastore_doc, fetch,
         fun(_Ctx, Id, Batch) ->
             {node_cache:get({?MODULE, Id}, {error, not_found}), Batch}
