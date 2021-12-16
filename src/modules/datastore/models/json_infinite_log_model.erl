@@ -24,6 +24,7 @@
 -export([append/2]).
 -export([default_start_index/1]).
 -export([list_and_postprocess/3]).
+-export([browse_content/2]).
 
 %% datastore_model callbacks
 -export([get_ctx/0]).
@@ -32,10 +33,22 @@
 -type entry_index() :: binary().
 -type entry_content() :: json_utils:json_map().
 -type entry() :: {entry_index(), {infinite_log:timestamp(), entry_content()}}.
+% log entry in a format suitable for external APIs (ready to be encoded to json)
+% #{
+%     <<"isLast">> => boolean(),
+%     <<"logEntries">> => [
+%         #{
+%             <<"index">> => entry_index(),
+%             <<"timestamp">> => infinite_log:timestamp(),
+%             <<"content">> => json_utils:json_map()
+%         }
+%     ]
+% }
+-type browse_result() :: json_utils:json_map().
 
-%% Redefinition of infinite log browser listing opts to allow binary indices
-%% and listing exclusively from an index.
-%% @formatter:off
+% Redefinition of infinite log browser listing opts to allow binary indices
+% and listing exclusively from an index.
+% @formatter:off
 -type listing_opts() :: #{
     direction => infinite_log_browser:direction(),
     start_from => undefined |
@@ -45,13 +58,13 @@
     offset => infinite_log_browser:offset(),
     limit => infinite_log_browser:limit()
 }.
-%% @formatter:on
+% @formatter:on
 
-%% Mapping function that will be applied to each listed infinite log
-%% entry before the result is returned.
+% Mapping function that will be applied to each listed infinite log
+% entry before the result is returned.
 -type listing_postprocessor(MappedEntry) :: fun((entry()) -> MappedEntry).
 
--export_type([id/0, entry_index/0, entry/0, listing_opts/0, listing_postprocessor/1]).
+-export_type([id/0, entry_index/0, entry/0, browse_result/0, listing_opts/0, listing_postprocessor/1]).
 
 -define(CTX, #{model => ?MODULE}).
 
@@ -94,10 +107,31 @@ default_start_index(inclusive) -> <<"0">>.
     {ok, {infinite_log_browser:progress_marker(), [MappedEntry]}} | {error, term()}.
 list_and_postprocess(Id, Opts, ListingPostprocessor) ->
     case datastore_infinite_log:list(?CTX, Id, prepare_listing_opts(Opts)) of
-        {ok, {Marker, EntrySeries}} ->
-            {ok, {Marker, postprocess_entries(EntrySeries, ListingPostprocessor)}};
+        {ok, {ProgressMarker, EntrySeries}} ->
+            {ok, {ProgressMarker, postprocess_entries(EntrySeries, ListingPostprocessor)}};
         {error, _} = Error ->
             Error
+    end.
+
+
+-spec browse_content(id(), listing_opts()) ->
+    {ok, browse_result()} | errors:error().
+browse_content(Id, Opts) ->
+    ListingPostprocessor = fun({IndexBin, {Timestamp, EntryContent}}) ->
+        #{
+            <<"index">> => IndexBin,
+            <<"timestamp">> => Timestamp,
+            <<"content">> => EntryContent
+        }
+    end,
+    case list_and_postprocess(Id, Opts, ListingPostprocessor) of
+        {ok, {ProgressMarker, EntrySeries}} ->
+            {ok, #{
+                <<"logEntries">> => EntrySeries,
+                <<"isLast">> => ProgressMarker =:= done
+            }};
+        {error, not_found} ->
+            ?ERROR_NOT_FOUND
     end.
 
 %%%===================================================================
