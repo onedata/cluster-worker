@@ -50,7 +50,7 @@ single_doc_splitting_strategies_create() ->
     Batch = datastore_doc_batch:init(),
     ConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0}}},
     ?assertEqual({{error, empty_metric}, Batch}, time_series_collection:create(#{}, Id, ConfigMap, Batch)),
-    ConfigMap2 = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = 0}}},
+    ConfigMap2 = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = -1}}},
     ?assertEqual({{error, wrong_resolution}, Batch}, time_series_collection:create(#{}, Id, ConfigMap2, Batch)),
 
     single_doc_splitting_strategies_create_testcase(10, #splitting_strategy{

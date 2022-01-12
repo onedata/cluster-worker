@@ -41,7 +41,7 @@ calculate(ConfigMap) ->
         maps:fold(fun
             (_, #metric_config{retention = Retention}, _) when Retention =< 0 ->
                 throw({error, empty_metric});
-            (_, #metric_config{resolution = Resolution}, _) when Resolution =< 0 ->
+            (_, #metric_config{resolution = Resolution}, _) when Resolution < 0 ->
                 throw({error, wrong_resolution});
             (MetricId, Config, InternalAcc) ->
                 InternalAcc#{{TimeSeriesId, MetricId} => Config}
