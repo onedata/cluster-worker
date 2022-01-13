@@ -74,8 +74,8 @@
 
 -spec create(infinite_log:log_opts()) -> {ok, id()} | {error, term()}.
 create(Opts) ->
-    Id = datastore_key:new(),
-    case create(Id, Opts) of
+    Id = maps:get(id, Opts, datastore_key:new()),
+    case create(Id, maps:remove(id, Opts)) of
         ok ->
             {ok, Id};
         {error, _} = Error ->
