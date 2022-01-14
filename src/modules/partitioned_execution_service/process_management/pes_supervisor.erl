@@ -6,9 +6,11 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Supervisor for pes_server processes. There can be several
-%%% pes_supervisors. In such a case single supervisor is responsible
-%%% for a range of keys (see pes_router.erl).
+%%% Supervisor for pes_server processes. It can be used as root supervisor
+%%% when single processes' group is required by executor
+%%% (see pes_executor_behaviour:get_server_groups_count/0) or as processes'
+%%% group's supervisor when more then one group is required (group supervisors
+%%% are managed internally by pes framework - see pes_process_manager.erl).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(pes_supervisor).
@@ -19,10 +21,13 @@
 
 
 %% API
--export([start_link/1, spec/1]).
+-export([start_link/1, child_spec/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
+
+%% Spec exported to allow usage of pes_supervisor as root supervisor
+-export([spec/0, children_spec/0]).
 
 
 -type name() :: atom().
@@ -37,8 +42,8 @@ start_link(Name) ->
     supervisor:start_link({local, Name}, ?MODULE, []).
 
 
--spec spec(name()) -> supervisor:child_spec().
-spec(Name) ->
+-spec child_spec(name()) -> supervisor:child_spec().
+child_spec(Name) ->
     #{
         id => Name,
         start => {pes_supervisor, start_link, [Name]},
@@ -59,16 +64,14 @@ init(_Args) ->
 
 
 %%%===================================================================
-%%% Internal functions
+%%% Spec exported to allow usage of pes_supervisor as root supervisor
 %%%===================================================================
 
-%% @private
 -spec spec() -> supervisor:sup_flags().
 spec() ->
     #{strategy => simple_one_for_one, intensity => 1, period => 5}.
 
 
-%% @private
 -spec children_spec() -> [supervisor:child_spec()].
 children_spec() ->
     [#{

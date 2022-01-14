@@ -6,25 +6,24 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Callback module used for testing of partition execution service
-%%% operating in async mode. The state of callback is map storing
-%%% integer that can be changed by requests and data needed to test
-%%% internal calls.
+%%% Executor used for testing of PES operating in async mode. The state
+%%% is map storing integer that can be changed by requests and data
+%%% needed to test internal calls.
 %%% @end
 %%%-------------------------------------------------------------------
--module(pes_async_callback).
+-module(pes_async_executor).
 -author("Michal Wrzeszcz").
 
 
--behavior(pes_callback).
+-behavior(pes_executor_behaviour).
 
 
 -include("global_definitions.hrl").
 
 
 %% Callbacks
--export([init/0, terminate/2, supervisors_namespace/0,
-    handle_call/2, handle_cast/2, handle_info/2, get_mode/0]).
+-export([init/0, terminate/2, get_root_supervisor/0,
+    handle_call/2, handle_cast/2, get_mode/0]).
 
 
 %%%===================================================================
@@ -51,8 +50,8 @@ terminate(Reason, State) ->
     end.
 
 
-supervisors_namespace() ->
-    [pes_test_supervisor].
+get_root_supervisor() ->
+    pes_test_supervisor.
 
 
 handle_call(get_value, #{value := Value} = State) ->
@@ -65,16 +64,16 @@ handle_call(wait_and_increment_value, #{value := Value} = State) ->
 handle_call(crash_call, _State) ->
     throw(call_error);
 handle_call(send_internal_message, State) ->
-    self() ! test_internal_message,
+    pes:self_cast(test_internal_message),
     {call_ok, State};
 handle_call({call_key, Key}, State) ->
-    Ans = pes:sync_call(?MODULE, Key, get_value),
+    Ans = pes:call(?MODULE, Key, get_value),
     {Ans, State};
-handle_call({async_call_key, Key, PidToAnswer}, State) ->
-    {wait, Ref, _} = pes:async_call(?MODULE, Key, get_value),
-    {call_ok, State#{wait_ref => Ref, notify_pid => PidToAnswer}};
-handle_call({wait, Promise}, State) ->
-    Ans = pes:wait(Promise),
+handle_call({submit_for_key, Key, PidToAnswer}, State) ->
+    {await, Ref, _} = pes:submit(?MODULE, Key, get_value),
+    {call_ok, State#{await_ref => Ref, notify_pid => PidToAnswer}};
+handle_call({await, Promise}, State) ->
+    Ans = pes:await(Promise),
     {Ans, State};
 handle_call(_Request, State) ->
     {call_ok, State}.
@@ -84,20 +83,12 @@ handle_cast(decrement_value, #{value := Value} = State) ->
     State#{value => Value - 1};
 handle_cast(crash_cast, _State) ->
     throw(call_error);
-handle_cast(_Request, State) ->
-    State.
-
-
-handle_info(increment_value, #{value := Value} = State) ->
-    State#{value => Value + 1};
-handle_info(crash_send, _State) ->
-    throw(send_error);
-handle_info(test_internal_message, #{value := Value} = State) ->
+handle_cast(test_internal_message, #{value := Value} = State) ->
     State#{value => Value + 100};
-handle_info({Ref, Ans}, #{wait_ref := Ref, notify_pid := NotifyPid} = State) ->
+handle_cast({Ref, Ans}, #{await_ref := Ref, notify_pid := NotifyPid} = State) ->
     NotifyPid ! {internal_call_ans, Ans},
     maps:without([notify_pid, ref], State);
-handle_info(_Request, State) ->
+handle_cast(_Request, State) ->
     State.
 
 

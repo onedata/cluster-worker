@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Macros and records defining messages used by partition execution service.
+%%% Macros and records defining messages used by PES.
 %%% @end
 %%%-------------------------------------------------------------------
 
@@ -18,20 +18,21 @@
 %%% Type of calls to pes_server
 %%%===================================================================
 
--define(PES_SYNC_CALL(Request), {pes_sync_call, Request}).
--define(PES_ASYNC_CALL(Request), {pes_async_call, Request}).
--define(PES_ASYNC_CALL_IGNORE_ANS(Request), {pes_async_call_ignore_ans, Request}).
+-define(PES_CALL(Request), {pes_call, Request}).
+-define(PES_SUBMIT(Request), {pes_submit, Request}).
+-define(PES_CHECK_CAST(Request), {pes_check_cast, Request}).
 
 
 %%%===================================================================
-%%% Wrapping used to send requests from pes_server to pes_server_slave
+%%% Wrappers used to send requests from pes_server to pes_server_slave
 %%%===================================================================
 
 -record(pes_slave_request, {
     request :: term(),
-    handler :: pes_server:request_handler(),
-    from :: {pid(), Tag :: term()} | undefined % filed used to send answer to calling process - undefined when
-                                               % answer is not required to be sent
+    callback :: pes_server:execution_callback(),
+    from :: {pid(), Tag :: term()} | undefined % field used to send answer to calling process - undefined when
+                                               % answer is not required to be sent ; the field is set using
+                                               % argument `From` of gen_server:handle_call function
 }).
 
 

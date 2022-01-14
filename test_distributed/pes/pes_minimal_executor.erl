@@ -6,23 +6,23 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Callback module implementing only required callbacks of
-%%% pes_callback behaviour to be used during ct tests.
-%%% The state of callback is a number that can be incremented.
+%%% Executor implementing only required callbacks of
+%%% pes_executor_behaviour behaviour to be used during ct tests.
+%%% The state is a number that can be incremented.
 %%% @end
 %%%-------------------------------------------------------------------
--module(pes_minimal_callback).
+-module(pes_minimal_executor).
 -author("Michal Wrzeszcz").
 
 
--behavior(pes_callback).
+-behavior(pes_executor_behaviour).
 
 
 -include("global_definitions.hrl").
 
 
 %% Callbacks
--export([init/0, supervisors_namespace/0, handle_call/2]).
+-export([init/0, get_root_supervisor/0, handle_call/2]).
 
 
 %%%===================================================================
@@ -36,8 +36,8 @@ init() ->
     end.
 
 
-supervisors_namespace() ->
-    [pes_test_supervisor].
+get_root_supervisor() ->
+    pes_test_supervisor.
 
 
 handle_call(get_value, State) ->
@@ -50,13 +50,13 @@ handle_call(wait_and_increment_value, State) ->
 handle_call(crash_call, _State) ->
     throw(call_error);
 handle_call({call_key, Key}, State) ->
-    Ans = pes:sync_call(?MODULE, Key, get_value),
+    Ans = pes:call(?MODULE, Key, get_value),
     {Ans, State};
-handle_call({async_call_key, Key}, State) ->
-    Ans = pes:async_call(?MODULE, Key, get_value),
+handle_call({submit_for_key, Key}, State) ->
+    Ans = pes:submit(?MODULE, Key, get_value),
     {Ans, State};
-handle_call({wait, Promise}, State) ->
-    Ans = pes:wait(Promise),
+handle_call({await, Promise}, State) ->
+    Ans = pes:await(Promise),
     {Ans, State};
 handle_call(_Request, State) ->
     {call_ok, State}.

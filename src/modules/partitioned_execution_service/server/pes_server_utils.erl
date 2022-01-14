@@ -17,7 +17,7 @@
 
 
 %% API
--export([mark_process_as_pes_server/0, mark_process_as_pes_server_slave/0, mark_process_is_terminating/0]).
+-export([mark_process_as_pes_server/0, mark_process_as_pes_server_slave/0, mark_process_terminating/0]).
 -export([can_execute_call/0, can_execute_wait/0]).
 -export([call_optional_callback/5]).
 
@@ -45,8 +45,8 @@ mark_process_as_pes_server_slave() ->
     ok.
 
 
--spec mark_process_is_terminating() -> ok.
-mark_process_is_terminating() ->
+-spec mark_process_terminating() -> ok.
+mark_process_terminating() ->
     put(?MARKER, pes_termination),
     ok.
 
@@ -74,18 +74,18 @@ can_execute_wait() ->
 %%% Helper API for calling optional callbacks
 %%%===================================================================
 
--spec call_optional_callback(pes:callback_module(), atom(), list(), function(), error_handling_mode()) -> term().
-call_optional_callback(CallbackModule, FunName, FunArgs, FallbackFun, ErrorHandlingMode) ->
-    case {erlang:function_exported(CallbackModule, FunName, length(FunArgs)), ErrorHandlingMode} of
+-spec call_optional_callback(pes:executor(), atom(), list(), function(), error_handling_mode()) -> term().
+call_optional_callback(Executor, FunName, FunArgs, FallbackFun, ErrorHandlingMode) ->
+    case {erlang:function_exported(Executor, FunName, length(FunArgs)), ErrorHandlingMode} of
         {true, do_not_catch_errors} ->
-            apply(CallbackModule, FunName, FunArgs);
+            apply(Executor, FunName, FunArgs);
         {true, _} ->
             try
-                apply(CallbackModule, FunName, FunArgs)
+                apply(Executor, FunName, FunArgs)
             catch
                 Error:Reason:Stacktrace ->
-                    ?error_stacktrace("PES optional callback ~p error ~p:~p for callback module ~p",
-                        [FunName, Error, Reason, CallbackModule], Stacktrace),
+                    ?error_stacktrace("PES optional callback ~p error ~p:~p for executor ~p",
+                        [FunName, Error, Reason, Executor], Stacktrace),
                     case ErrorHandlingMode of
                         execute_fallback_on_error -> apply(FallbackFun, FunArgs);
                         catch_and_return_error -> {error, Reason}

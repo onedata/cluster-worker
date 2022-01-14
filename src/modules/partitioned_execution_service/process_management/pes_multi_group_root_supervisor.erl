@@ -6,12 +6,11 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Supervisor used during partition execution service tests
-%%% (see pes_test_SUITE) when supervision tree for pes_servers
-%%% is used instead of single supervisor.
+%%% Root supervisor to be used if more then one processes' group is required
+%%% by executor (see pes_executor_behaviour:get_server_groups_count/0)
 %%% @end
 %%%-------------------------------------------------------------------
--module(pes_root_supervisor).
+-module(pes_multi_group_root_supervisor).
 -author("Michal Wrzeszcz").
 
 
