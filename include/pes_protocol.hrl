@@ -15,19 +15,28 @@
 
 
 %%%===================================================================
-%%% Type of calls to pes_server
+%%% Type of messages to pes_server
 %%%===================================================================
 
 -define(PES_CALL(Request), {pes_call, Request}).
 -define(PES_SUBMIT(Request), {pes_submit, Request}).
--define(PES_CHECK_CAST(Request), {pes_check_cast, Request}).
+-define(PES_ACKNOWLEDGED_CAST(Request), {pes_acknowledged_cast, Request}).
+-define(PES_CAST(Request), {pes_cast, Request}).
+-define(PES_SELF_CAST(Request), {pes_self_cast, Request}).
+
+
+%%%===================================================================
+%%% Macro for async answers
+%%%===================================================================
+
+-define(SUBMIT_RESULT(Tag, Response), {submit_result, Tag, Response}).
 
 
 %%%===================================================================
 %%% Wrappers used to send requests from pes_server to pes_server_slave
 %%%===================================================================
 
--record(pes_slave_request, {
+-record(pes_slave_task, {
     request :: term(),
     callback :: pes_server:execution_callback(),
     from :: {pid(), Tag :: term()} | undefined % field used to send answer to calling process - undefined when
@@ -36,8 +45,8 @@
 }).
 
 
--record(pes_slave_request_batch, {
-    requests :: [pes_server_slave:pes_slave_request()]
+-record(pes_slave_task_batch, {
+    tasks :: [pes_server_slave:pes_slave_task()]
 }).
 
 

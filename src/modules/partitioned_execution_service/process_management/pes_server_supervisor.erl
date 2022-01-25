@@ -7,13 +7,13 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Supervisor for pes_server processes. It can be used as root supervisor
-%%% when single processes' group is required by executor
-%%% (see pes_executor_behaviour:get_server_groups_count/0) or as processes'
-%%% group's supervisor when more then one group is required (group supervisors
-%%% are managed internally by pes framework - see pes_process_manager.erl).
+%%% when single supervisor is configured by plug-in
+%%% (see pes_plugin_behaviour:get_supervisor_count/0). If many supervisors
+%%% are required, pes_server_supervisors are managed internally by pes
+%%% framework - see pes_process_manager.erl.
 %%% @end
 %%%-------------------------------------------------------------------
--module(pes_supervisor).
+-module(pes_server_supervisor).
 -author("Michal Wrzeszcz").
 
 
@@ -21,13 +21,13 @@
 
 
 %% API
--export([start_link/1, child_spec/1]).
+-export([start_link/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
 
-%% Spec exported to allow usage of pes_supervisor as root supervisor
--export([spec/0, children_spec/0]).
+%% Supervisor spec
+-export([sup_flags/0, child_specs/0]).
 
 
 -type name() :: atom().
@@ -37,21 +37,9 @@
 %%% API functions
 %%%===================================================================
 
--spec start_link(Name :: name()) -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
+-spec start_link(name()) -> {ok, pid()} | ignore | {error, term()}.
 start_link(Name) ->
     supervisor:start_link({local, Name}, ?MODULE, []).
-
-
--spec child_spec(name()) -> supervisor:child_spec().
-child_spec(Name) ->
-    #{
-        id => Name,
-        start => {pes_supervisor, start_link, [Name]},
-        restart => permanent,
-        shutdown => infinity,
-        type => supervisor,
-        modules => [pes_supervisor]
-    }.
 
 
 %%%===================================================================
@@ -60,20 +48,20 @@ child_spec(Name) ->
 
 -spec init(Args :: term()) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init(_Args) ->
-    {ok, {spec(), children_spec()}}.
+    {ok, {sup_flags(), child_specs()}}.
 
 
 %%%===================================================================
-%%% Spec exported to allow usage of pes_supervisor as root supervisor
+%%% Supervisor spec
 %%%===================================================================
 
--spec spec() -> supervisor:sup_flags().
-spec() ->
+-spec sup_flags() -> supervisor:sup_flags().
+sup_flags() ->
     #{strategy => simple_one_for_one, intensity => 1, period => 5}.
 
 
--spec children_spec() -> [supervisor:child_spec()].
-children_spec() ->
+-spec child_specs() -> [supervisor:child_spec()].
+child_specs() ->
     [#{
         id => pes_server,
         start => {pes_server, start_link, []},

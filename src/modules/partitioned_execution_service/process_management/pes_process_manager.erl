@@ -6,37 +6,37 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Module responsible for management of pes_servers and pes_supervisors
-%%% tree. pes_process_manager:
+%%% Module responsible for management of pes_servers and 
+%%% pes_server_supervisors tree. pes_process_manager:
 %%% - chooses pes_server for each key (see pes.erl),
-%%% - chooses supervisor for each pes_server.
+%%% - chooses pes_server_supervisors for each pes_server.
 %%%
-%%% Choice of pes_server and supervisor can be customized using
-%%% get_servers_count/1 and get_supervisor_name/1 callbacks.
-%%% Each key is mapped to integer value from 1 to get_servers_count()
-%%% using hash_key/2 function one pes_server is used for for
-%%% each hash. get_supervisor_name/1 determines supervisor for
-%%% each pes_server getting hash as an argument.
+%%% Each PES plug-in can control the number of servers and supervisors using
+%%% optional callbacks in the pes_plugin_behaviour. The key space is
+%%% distributed equally among the servers using a hash function. 
+%%% If needed, servers can be linked to several pes_server_supervisors 
+%%% for performance reasons.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(pes_process_manager).
 -author("Michal Wrzeszcz").
 
 
-%% Executor Init/Teardown API
--export([init_registry/1, cleanup_registry/1, init_supervisors/1, terminate_supervisors/1]).
+-include_lib("ctool/include/errors.hrl").
+
+
+%% Plug-in Init/Teardown API
+-export([init_for_plugin/1, teardown_for_plugin/1]).
 %% Server management API
 -export([start_server/2, get_server/2, get_server_if_initialized/2, delete_key_to_server_mapping/3, fold_servers/3]).
 %%% API for pes_server
--export([register_server/2, report_server_initialized/2, deregister_server/2]).
+-export([register_server/3, report_server_initialized/3, deregister_server/2]).
 
 %% Test API
 -export([hash_key/2, get_supervisor_name/2]).
 
 
 -type key_hash() :: non_neg_integer(). % hashes of keys are used to choose process for key
--type fold_fun() :: fun((pid(), fold_acc()) -> fold_acc()).
--type fold_acc() :: term().
 -export_type([key_hash/0]).
 
 
@@ -44,55 +44,48 @@
 -define(INITIALIZING, initializing).
 -define(INITIALIZED, initialized).
 
+-define(SERVER_SUPERVISOR_NAME(RootSupervisor, Num),
+    list_to_atom(atom_to_list(RootSupervisor) ++ integer_to_list(Num))).
+
 
 % Record storing key_hash -> pes_server mapping together with pes_server status
 -record(entry, {
     key_hash :: key_hash(),
     server :: pid(),
-    server_status :: ?INITIALIZING | ?INITIALIZED | '_' % '_' is used to for select on ets
+    server_status :: ?INITIALIZING | ?INITIALIZED
 }).
 
 
--define(DEFAULT_SERVERS_COUNT, 100).
--define(DEFAULT_SERVER_GROUPS_COUNT, 1).
-
-
 %%%===================================================================
-%%% Executor Init/Teardown API
+%%% Plug-in Init/Teardown API
 %%%===================================================================
 
--spec init_registry(pes:executor()) -> ok.
-init_registry(Executor) ->
+-spec init_for_plugin(pes:plugin()) -> ok.
+init_for_plugin(Plugin) ->
+    {RootSupervisor, ChildSupervisors} = get_supervision_tree(Plugin),
     lists:foreach(fun(Name) ->
         ets:new(Name, [set, public, named_table, {read_concurrency, true}, {keypos, 2}])
-    end, supervisors_namespace(Executor)).
+    end, get_server_supervisors(RootSupervisor, ChildSupervisors)),
 
-
--spec cleanup_registry(pes:executor()) -> ok.
-cleanup_registry(Executor) ->
     lists:foreach(fun(Name) ->
-        ets:delete(Name)
-    end, supervisors_namespace(Executor)).
-
-
--spec init_supervisors(pes:executor()) -> ok.
-init_supervisors(Executor) ->
-    {RootSupervisor, ChildSupervisors} = get_supervision_tree(Executor),
-    lists:foreach(fun(Name) ->
-        case supervisor:start_child(RootSupervisor, pes_supervisor:child_spec(Name)) of
+        case supervisor:start_child(RootSupervisor, pes_sup_tree_supervisor:child_spec(Name)) of
             {ok, _} -> ok;
             {error, {already_started, _}} -> ok
         end
     end, ChildSupervisors).
 
 
--spec terminate_supervisors(pes:executor()) -> ok.
-terminate_supervisors(Executor) ->
-    {RootSupervisor, ChildSupervisors} = get_supervision_tree(Executor),
+-spec teardown_for_plugin(pes:plugin()) -> ok.
+teardown_for_plugin(Plugin) ->
+    {RootSupervisor, ChildSupervisors} = get_supervision_tree(Plugin),
     lists:foreach(fun(Name) ->
         ok = supervisor:terminate_child(RootSupervisor, Name),
         ok = supervisor:delete_child(RootSupervisor, Name)
-    end, ChildSupervisors).
+    end, ChildSupervisors),
+
+    lists:foreach(fun(Name) ->
+        ets:delete(Name)
+    end, get_server_supervisors(RootSupervisor, ChildSupervisors)).
 
 
 %%%===================================================================
@@ -101,30 +94,30 @@ terminate_supervisors(Executor) ->
 %%% to identify pes_servers.
 %%%===================================================================
 
--spec start_server(pes:executor(), pes:key()) -> supervisor:startchild_ret().
-start_server(Executor, Key) ->
-    KeyHash = hash_key(Executor, Key),
-    SupName = get_supervisor_name(Executor, KeyHash),
-    supervisor:start_child(SupName, [Executor, KeyHash]).
+-spec start_server(pes:plugin(), pes:key()) -> supervisor:startchild_ret().
+start_server(Plugin, Key) ->
+    KeyHash = hash_key(Plugin, Key),
+    SupName = get_supervisor_name(Plugin, KeyHash),
+    supervisor:start_child(SupName, [Plugin, KeyHash]).
 
 
--spec get_server(pes:executor(), pes:key()) -> {ok, pid()} | {error, not_found}.
-get_server(Executor, Key) ->
-    KeyHash = hash_key(Executor, Key),
-    SupName = get_supervisor_name(Executor, KeyHash),
+-spec get_server(pes:plugin(), pes:key()) -> {ok, pid()} | not_alive.
+get_server(Plugin, Key) ->
+    KeyHash = hash_key(Plugin, Key),
+    SupName = get_supervisor_name(Plugin, KeyHash),
     case ets:lookup(SupName, KeyHash) of
-        [] -> {error, not_found};
+        [] -> not_alive;
         [#entry{key_hash = KeyHash, server = Pid}] -> {ok, Pid}
     end.
 
 
--spec get_server_if_initialized(pes:executor(), pes:key()) -> {ok, pid()} | {error, not_found}.
-get_server_if_initialized(Executor, Key) ->
-    KeyHash = hash_key(Executor, Key),
-    SupName = get_supervisor_name(Executor, KeyHash),
+-spec get_server_if_initialized(pes:plugin(), pes:key()) -> {ok, pid()} | not_alive.
+get_server_if_initialized(Plugin, Key) ->
+    KeyHash = hash_key(Plugin, Key),
+    SupName = get_supervisor_name(Plugin, KeyHash),
     case ets:lookup(SupName, KeyHash) of
         [#entry{key_hash = KeyHash, server = Pid, server_status = ?INITIALIZED}] -> {ok, Pid};
-        _ -> {error, not_found}
+        _ -> not_alive
     end.
 
 
@@ -135,53 +128,49 @@ get_server_if_initialized(Executor, Key) ->
 %% from the inside of server (such race is impossible in such a case).
 %% @end
 %%--------------------------------------------------------------------
--spec delete_key_to_server_mapping(pes:executor(), pes:key(), pid()) -> ok.
-delete_key_to_server_mapping(Executor, Key, Pid) ->
-    KeyHash = hash_key(Executor, Key),
-    SupName = get_supervisor_name(Executor, KeyHash),
+-spec delete_key_to_server_mapping(pes:plugin(), pes:key(), pid()) -> ok.
+delete_key_to_server_mapping(Plugin, Key, Pid) ->
+    KeyHash = hash_key(Plugin, Key),
+    SupName = get_supervisor_name(Plugin, KeyHash),
     ets:select_delete(SupName, ets:fun2ms(
         fun(#entry{key_hash = KH, server = Server}) when KH =:= KeyHash, Server =:= Pid -> true end)),
-    ets:select_delete(SupName, [{#entry{key_hash = KeyHash, server = Pid, server_status = '_'}, [], [true]}]),
     ok.
 
 
--spec fold_servers(pes:executor(), fold_fun(), fold_acc()) -> fold_acc().
-fold_servers(Executor, Fun, InitialAcc) ->
+-spec fold_servers(pes:plugin(), fun((pid(), Acc) -> Acc), Acc) -> Acc when Acc :: term().
+fold_servers(Plugin, Fun, InitialAcc) ->
     lists:foldl(fun(Name, Acc) ->
-        ets:foldl(fun
-            (#entry{server = Pid}, InternalAcc) ->
-                Fun(Pid, InternalAcc);
-            (_, InternalAcc) ->
-                InternalAcc
+        ets:foldl(fun(#entry{server = Pid}, InternalAcc) ->
+            Fun(Pid, InternalAcc)
         end, Acc, Name)
-    end, InitialAcc, supervisors_namespace(Executor)).
+    end, InitialAcc, get_server_supervisors(Plugin)).
 
 
 %%%===================================================================
 %%% API for pes_server
 %%% NOTE: this API is used by pes_server to report its state and uses
-%%% hashes to identify itself.
+%%% hashes to identify pes_servers.
 %%%===================================================================
 
--spec register_server(pes:executor(), key_hash()) -> ok | {error, already_exists}.
-register_server(Executor, KeyHash) ->
-    SupName = get_supervisor_name(Executor, KeyHash),
-    case ets:insert_new(SupName, #entry{key_hash = KeyHash, server = self(), server_status = ?INITIALIZING}) of
+-spec register_server(pes:plugin(), key_hash(), pid()) -> ok | {error, already_exists}.
+register_server(Plugin, KeyHash, Pid) ->
+    SupName = get_supervisor_name(Plugin, KeyHash),
+    case ets:insert_new(SupName, #entry{key_hash = KeyHash, server = Pid, server_status = ?INITIALIZING}) of
         true -> ok;
         false -> {error, already_exists}
     end.
 
 
--spec report_server_initialized(pes:executor(), key_hash()) -> ok.
-report_server_initialized(Executor, KeyHash) ->
-    SupName = get_supervisor_name(Executor, KeyHash),
-    ets:insert(SupName, #entry{key_hash = KeyHash, server = self(), server_status = ?INITIALIZED}),
+-spec report_server_initialized(pes:plugin(), key_hash(), pid()) -> ok.
+report_server_initialized(Plugin, KeyHash, Pid) ->
+    SupName = get_supervisor_name(Plugin, KeyHash),
+    ets:insert(SupName, #entry{key_hash = KeyHash, server = Pid, server_status = ?INITIALIZED}),
     ok.
 
 
--spec deregister_server(pes:executor(), key_hash()) -> ok.
-deregister_server(Executor, KeyHash) ->
-    SupName = get_supervisor_name(Executor, KeyHash),
+-spec deregister_server(pes:plugin(), key_hash()) -> ok.
+deregister_server(Plugin, KeyHash) ->
+    SupName = get_supervisor_name(Plugin, KeyHash),
     ets:delete(SupName, KeyHash),
     ok.
 
@@ -191,59 +180,61 @@ deregister_server(Executor, KeyHash) ->
 %%%===================================================================
 
 %% @private
--spec hash_key(pes:executor(), pes:key()) -> key_hash().
-hash_key(Executor, KeyToHash) ->
-    HashesSpaceSize = pes_server_utils:call_optional_callback(
-        Executor, get_servers_count, [], fun() -> ?DEFAULT_SERVERS_COUNT end, do_not_catch_errors),
-
+-spec hash_key(pes:plugin(), pes:key()) -> key_hash().
+hash_key(Plugin, KeyToHash) ->
     KeyBin = case is_binary(KeyToHash) of
         true -> KeyToHash;
         false -> crypto:hash(md5, term_to_binary(KeyToHash))
     end,
 
     Id = binary:decode_unsigned(KeyBin),
-    Id rem HashesSpaceSize.
+    Id rem pes_plugin:get_executor_count(Plugin).
 
 
 
 %% @private
--spec get_supervisor_name(pes:executor(), key_hash()) -> pes_supervisor:name().
-get_supervisor_name(Executor, KeyHash) ->
-    SupervisorSpaceSize = pes_server_utils:call_optional_callback(
-        Executor, get_server_groups_count, [], fun() -> ?DEFAULT_SERVER_GROUPS_COUNT end, do_not_catch_errors),
-    RootSupervisor = Executor:get_root_supervisor(),
+-spec get_supervisor_name(pes:plugin(), key_hash()) -> pes_server_supervisor:name().
+get_supervisor_name(Plugin, KeyHash) ->
+    SupervisorCount = pes_plugin:get_supervisor_count(Plugin),
+    RootSupervisor = pes_plugin:get_root_supervisor_name(Plugin),
 
-    case SupervisorSpaceSize of
+    case SupervisorCount of
         1 ->
             RootSupervisor;
         _ ->
-            list_to_atom(atom_to_list(RootSupervisor) ++ integer_to_list(KeyHash rem SupervisorSpaceSize))
+            ?SERVER_SUPERVISOR_NAME(RootSupervisor, KeyHash rem SupervisorCount)
     end.
 
 
 %% @private
--spec supervisors_namespace(pes:executor()) -> [pes_supervisor:name()].
-supervisors_namespace(Executor) ->
-    case get_supervision_tree(Executor) of
-        {RootSupervisor, []} -> [RootSupervisor];
-        {_RootSupervisor, ChildSupervisors} -> ChildSupervisors
-    end.
+-spec get_server_supervisors(pes:plugin()) -> [pes_server_supervisor:name()].
+get_server_supervisors(Plugin) ->
+    {RootSupervisor, ChildSupervisors} = get_supervision_tree(Plugin),
+    get_server_supervisors(RootSupervisor, ChildSupervisors).
 
 
 %% @private
--spec get_supervision_tree(pes:executor()) ->
-    {RootSupervisor :: pes_supervisor:name(), [ChildSupervisor:: pes_supervisor:name()]}.
-get_supervision_tree(Executor) ->
-    SupervisorSpaceSize = pes_server_utils:call_optional_callback(
-        Executor, get_server_groups_count, [], fun() -> ?DEFAULT_SERVER_GROUPS_COUNT end, do_not_catch_errors),
-    RootSupervisor = Executor:get_root_supervisor(),
+-spec get_server_supervisors(RootSupervisor :: pes_server_supervisor:name(),
+    [ChildSupervisor:: pes_server_supervisor:name()]) -> [pes_server_supervisor:name()].
+get_server_supervisors(RootSupervisor, []) ->
+    [RootSupervisor];
+get_server_supervisors(_RootSupervisor, ChildSupervisors) ->
+    ChildSupervisors.
 
-    case SupervisorSpaceSize of
+
+%% @private
+-spec get_supervision_tree(pes:plugin()) ->
+    {RootSupervisor :: pes_server_supervisor:name(), [ChildSupervisor:: pes_server_supervisor:name()]}.
+get_supervision_tree(Plugin) ->
+    SupervisorCount = pes_plugin:get_supervisor_count(Plugin),
+    RootSupervisor = pes_plugin:get_root_supervisor_name(Plugin),
+
+    case SupervisorCount of
         1 ->
             {RootSupervisor, []};
         _ ->
             ChildSupervisors = lists:map(fun(Num) ->
-                list_to_atom(atom_to_list(RootSupervisor) ++ integer_to_list(Num))
-            end, lists:seq(0, SupervisorSpaceSize - 1)),
+                ?SERVER_SUPERVISOR_NAME(RootSupervisor, Num)
+            end, lists:seq(0, SupervisorCount - 1)),
             {RootSupervisor, ChildSupervisors}
     end.

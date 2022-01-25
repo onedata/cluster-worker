@@ -6,11 +6,12 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Root supervisor to be used if more then one processes' group is required
-%%% by executor (see pes_executor_behaviour:get_server_groups_count/0)
+%%% Root supervisor to be used when more than one supervisor is
+%%% configured by plug-in
+%%% (see pes_plugin_behaviour:get_supervisor_count/0).
 %%% @end
 %%%-------------------------------------------------------------------
--module(pes_multi_group_root_supervisor).
+-module(pes_sup_tree_supervisor).
 -author("Michal Wrzeszcz").
 
 
@@ -23,6 +24,8 @@
 %% Supervisor callbacks
 -export([init/1]).
 
+%% Supervisor spec
+-export([sup_flags/0, child_specs/0, child_spec/1]).
 
 -type name() :: atom().
 -export_type([name/0]).
@@ -31,9 +34,9 @@
 %%% API functions
 %%%===================================================================
 
--spec start_link(Name :: name()) -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
+-spec start_link(name()) -> {ok, pid()} | ignore | {error, term()}.
 start_link(Name) ->
-  supervisor:start_link({local, Name}, ?MODULE, []).
+    supervisor:start_link({local, Name}, ?MODULE, []).
 
 
 %%%===================================================================
@@ -42,20 +45,33 @@ start_link(Name) ->
 
 -spec init(Args :: term()) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init(_Args) ->
-  {ok, {spec(), children_spec()}}.
+    {ok, {sup_flags(), child_specs()}}.
 
 
 %%%===================================================================
-%%% Internal functions
+%%% Supervisor spec
+%%% NOTE: supervisor is one_for_one so static list of children
+%%% returned by child_specs/1 is empty. child_spec/1 is used when
+%%% starting children dynamically.
 %%%===================================================================
 
-%% @private
--spec spec() -> supervisor:sup_flags().
-spec() ->
-  #{strategy => one_for_one, intensity => 1, period => 5}.
+-spec sup_flags() -> supervisor:sup_flags().
+sup_flags() ->
+    #{strategy => one_for_one, intensity => 1, period => 5}.
 
 
-%% @private
--spec children_spec() -> [supervisor:child_spec()].
-children_spec() ->
-  [].
+-spec child_specs() -> [supervisor:child_spec()].
+child_specs() ->
+    [].
+
+
+-spec child_spec(name()) -> supervisor:child_spec().
+child_spec(Name) ->
+    #{
+        id => Name,
+        start => {pes_server_supervisor, start_link, [Name]},
+        restart => permanent,
+        shutdown => infinity,
+        type => supervisor,
+        modules => [pes_server_supervisor]
+    }.

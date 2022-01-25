@@ -17,7 +17,7 @@
 %% API
 -export([get_ctx/1, get_basic_ctx/1, get_record_version/1, get_prehooks/1, get_posthooks/1,
     get_default_disk_ctx/0]).
--export([resolve_conflict/4, new_remote_doc/3]).
+-export([resolve_conflict/4, on_remote_doc_created/3]).
 -export([set_defaults/1, set_defaults/2]).
 
 -type model() :: datastore_model:model().
@@ -106,9 +106,9 @@ resolve_conflict(Model, Ctx, Doc, PrevDoc) ->
         default
     end).
 
--spec new_remote_doc(model(), ctx(), doc()) -> ok.
-new_remote_doc(Model, Ctx, Doc) ->
-    model_apply(Model, {new_remote_doc, [Ctx, Doc]}, fun() ->
+-spec on_remote_doc_created(model(), ctx(), doc()) -> ok.
+on_remote_doc_created(Model, Ctx, Doc) ->
+    model_apply(Model, {on_remote_doc_created, [Ctx, Doc]}, fun() ->
         ok
     end).
 

@@ -285,7 +285,7 @@ fetch_deleted(Ctx, Key, Batch, _) ->
     {save, doc(value())} | ignore.
 resolve_conflict(Ctx = #{sync_change := true}, RemoteDoc, #document{revs = []}) ->
     Model = element(1, RemoteDoc#document.value),
-    datastore_model_default:new_remote_doc(Model, Ctx, RemoteDoc),
+    datastore_model_default:on_remote_doc_created(Model, Ctx, RemoteDoc),
     {save, RemoteDoc};
 resolve_conflict(#{sync_change := true}, #document{revs = []}, _LocalDoc) ->
     ignore;
