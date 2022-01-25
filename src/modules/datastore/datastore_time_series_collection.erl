@@ -139,7 +139,7 @@ update_many(Ctx, Id, Measurements) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list_windows(ctx(), time_series_collection:collection_id(), ts_windows:list_options()) ->
-    time_series_collection:windows_map() | {error, term()}.
+    {ok, time_series_collection:windows_map()} | {error, term()}.
 list_windows(Ctx, Id, Options) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
         [?FUNCTION_NAME, [Options]]).
@@ -152,7 +152,7 @@ list_windows(Ctx, Id, Options) ->
 %%--------------------------------------------------------------------
 -spec list_windows(ctx(), time_series_collection:collection_id(), time_series_collection:request_range(),
     ts_windows:list_options()) ->
-    ts_windows:descending_windows_list() | time_series_collection:windows_map() | {error, term()}.
+    {ok, ts_windows:descending_windows_list() | time_series_collection:windows_map()} | {error, term()}.
 list_windows(Ctx, Id, RequestedMetrics, Options) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
         [?FUNCTION_NAME, [RequestedMetrics, Options]]).

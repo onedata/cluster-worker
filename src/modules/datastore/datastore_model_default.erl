@@ -17,7 +17,7 @@
 %% API
 -export([get_ctx/1, get_basic_ctx/1, get_record_version/1, get_prehooks/1, get_posthooks/1,
     get_default_disk_ctx/0]).
--export([resolve_conflict/4]).
+-export([resolve_conflict/4, on_remote_doc_created/3]).
 -export([set_defaults/1, set_defaults/2]).
 
 -type model() :: datastore_model:model().
@@ -104,6 +104,12 @@ get_posthooks(Model) ->
 resolve_conflict(Model, Ctx, Doc, PrevDoc) ->
     model_apply(Model, {resolve_conflict, [Ctx, Doc, PrevDoc]}, fun() ->
         default
+    end).
+
+-spec on_remote_doc_created(model(), ctx(), doc()) -> ok.
+on_remote_doc_created(Model, Ctx, Doc) ->
+    model_apply(Model, {on_remote_doc_created, [Ctx, Doc]}, fun() ->
+        ok
     end).
 
 %%--------------------------------------------------------------------

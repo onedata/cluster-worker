@@ -17,7 +17,7 @@
 -record(metric_config, {
     legend = <<>> :: ts_metric:legend(),
     resolution :: non_neg_integer(),
-    retention :: non_neg_integer(),
+    retention :: pos_integer(),
     aggregator :: ts_windows:aggregator()
 }).
 
