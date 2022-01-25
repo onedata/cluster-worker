@@ -270,6 +270,7 @@ submit_and_await(Plugin, Key, Request) ->
 submit_and_await(Plugin, Key, Request, Options) ->
     case submit(Plugin, Key, Request, Options) of
         {ok, Promise} -> await(Promise);
+        ignored -> ignored;
         {error, Error} -> {error, Error}
     end.
 
