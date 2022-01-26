@@ -37,6 +37,7 @@ ts_test_() ->
         fun teardown/1,
         [
             fun single_metric_single_node/0,
+            fun single_metric_infinite_resolution/0, 
             {timeout, 5, fun single_metric_multiple_nodes/0},
             fun single_time_series_single_node/0,
             {timeout, 5, fun single_time_series_multiple_nodes/0},
@@ -120,6 +121,30 @@ single_metric_single_node() ->
 
     % Get not existing metric and verify answer
     ?assertMatch(?LIST_OK_ANS(undefined), ?LIST(Id, very_bad_arg, Batch6)).
+
+
+single_metric_infinite_resolution() ->
+    Id = datastore_key:new(),
+    TimeSeriesId = <<"TS1">>,
+    MetricId = <<"M1">>,
+    MetricsConfig = #metric_config{resolution = 0, retention = 1, aggregator = sum},
+    ConfigMap = #{TimeSeriesId => #{MetricId => MetricsConfig}},
+    Batch = init(Id, ConfigMap),
+    ?assertEqual({{error, collection_already_exists}, Batch}, time_series_collection:create(#{}, Id, ConfigMap, Batch)),
+    
+    % Prepare time series collection to be used in tests (batch stores collection)
+    Measurements = lists:map(fun(I) -> {I, I/2} end, lists:seq(10, 49) ++ lists:seq(60, 69)),
+    Batch2 = update_many(Id, Measurements, Batch),
+    
+    % Get and verify all windows (measurements are arithmetic sequence so values of windows
+    % are calculated using formula for the sum of an arithmetic sequence)
+    ExpectedGetAns = [{0, {50, 40 * (24.5 + 5)/2 + 10 * (34.5 + 30)/2}}],
+    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns), ?LIST(Id, {TimeSeriesId, MetricId}, Batch2)),
+    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns), ?LIST(Id, {TimeSeriesId, MetricId}, #{start => 1000}, Batch2)),
+    
+    % Get and verify different ranges of windows using single option
+    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns), ?LIST(Id, {TimeSeriesId, MetricId}, #{limit => 2}, Batch2)),
+    ?assertMatch(?LIST_OK_ANS([]), ?LIST(Id, {TimeSeriesId, MetricId}, #{stop => 35}, Batch2)).
 
 
 single_metric_multiple_nodes() ->

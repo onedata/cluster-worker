@@ -33,7 +33,10 @@
 %%% persisted as several datastore documents by ts_persistence module. Thus,
 %%% windows of each metric form linked list of records storing parts of windows set,
 %%% with head of the list treated exceptionally (heads are kept together for all
-%%% metrics while rest of records with windows are kept separately for each metric).
+%%% metrics while rest of records with windows are kept separately for each metric). 
+%%% 
+%%% Metric can also be created with infinite resolution (0), in such a case only one 
+%%% window will need to be kept for this metric.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(time_series_collection).
