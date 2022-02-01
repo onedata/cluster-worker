@@ -52,6 +52,8 @@ single_doc_splitting_strategies_create() ->
     ?assertEqual({{error, empty_metric}, Batch}, time_series_collection:create(#{}, Id, ConfigMap, Batch)),
     ConfigMap2 = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = -1}}},
     ?assertEqual({{error, wrong_resolution}, Batch}, time_series_collection:create(#{}, Id, ConfigMap2, Batch)),
+    ConfigMap3 = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = 0}}},
+    ?assertEqual({{error, wrong_retention}, Batch}, time_series_collection:create(#{}, Id, ConfigMap3, Batch)),
 
     single_doc_splitting_strategies_create_testcase(10, #splitting_strategy{
         max_windows_in_head_doc = 10, max_windows_in_tail_doc = 0, max_docs_count = 1}),
