@@ -62,7 +62,7 @@
 -type windows_map() :: #{full_metric_id() => ts_windows:descending_windows_list()}.
 -type metrics_by_time_series() :: #{time_series_id() => [ts_metric:id()]}.
 
--type time_series_range() :: time_series_id() | [time_series_id()].
+-type time_series_range() :: time_series_id() | [time_series_id()] | all.
 -type metrics_range() :: ts_metric:id() | [ts_metric:id()].
 -type range() :: time_series_id() | {time_series_range(), metrics_range()}.
 -type request_range() :: range() | [range()].
@@ -465,6 +465,10 @@ reconfigure_metrics(NewConfigMap, ConfigMapExtension, DocSplittingStrategies, Pe
 select_heads(_TimeSeriesCollectionHeads, [], _ErrorHandlingMode) ->
     #{};
 
+select_heads(TimeSeriesCollectionHeads, [{all, MetricIds} | Tail], ErrorHandlingMode) ->
+    NewRange = lists:map(fun(TimeSeriesId) -> {TimeSeriesId, MetricIds} end, maps:keys(TimeSeriesCollectionHeads)),
+    select_heads(TimeSeriesCollectionHeads, NewRange ++ Tail, ErrorHandlingMode);
+
 select_heads(TimeSeriesCollectionHeads, [{TimeSeriesId, MetricIds} | Tail], ErrorHandlingMode) ->
     Ans = select_heads(TimeSeriesCollectionHeads, Tail, ErrorHandlingMode),
     case maps:get(TimeSeriesId, TimeSeriesCollectionHeads, undefined) of
@@ -531,6 +535,10 @@ update_metrics([{MetricId, Metric} | Tail], NewTimestamp, NewValue, PersistenceC
     ts_persistence:ctx()) -> {ts_windows:descending_windows_list() | windows_map(), ts_persistence:ctx()}.
 list_time_series_windows(_TimeSeriesCollectionHeads, [], _Options, PersistenceCtx) ->
     {#{}, PersistenceCtx};
+
+list_time_series_windows(TimeSeriesCollectionHeads, [{all, MetricIds} | RequestedMetrics], Options, PersistenceCtx) ->
+    NewRequestedMetrics = lists:map(fun(TimeSeriesId) -> {TimeSeriesId, MetricIds} end, maps:keys(TimeSeriesCollectionHeads)),
+    list_time_series_windows(TimeSeriesCollectionHeads, NewRequestedMetrics ++ RequestedMetrics, Options, PersistenceCtx);
 
 list_time_series_windows(TimeSeriesCollectionHeads, [{TimeSeriesIds, MetricIds} | RequestedMetrics], Options, PersistenceCtx) ->
     {Ans, UpdatedPersistenceCtx} = lists:foldl(fun(TimeSeriesId, Acc) ->
