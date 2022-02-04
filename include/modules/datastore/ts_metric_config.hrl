@@ -16,7 +16,7 @@
 
 -record(metric_config, {
     legend = <<>> :: ts_metric:legend(),
-    resolution :: non_neg_integer(),
+    resolution :: non_neg_integer(), % 0 means infinity
     retention :: pos_integer(),
     aggregator :: ts_windows:aggregator()
 }).

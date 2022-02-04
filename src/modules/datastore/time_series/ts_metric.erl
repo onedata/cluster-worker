@@ -340,6 +340,8 @@ delete_data_nodes(DataNodeKey, #data_node{older_node_key = OlderNodeKey}, Persis
 -spec get_window_id(ts_windows:timestamp() | undefined, config()) -> ts_windows:window_id() | undefined.
 get_window_id(undefined, _) ->
     undefined;
+get_window_id(_Time, #metric_config{resolution = 0}) ->
+    0;
 get_window_id(Time, #metric_config{resolution = Resolution}) ->
     Time - Time rem Resolution.
 

@@ -33,7 +33,10 @@
 %%% persisted as several datastore documents by ts_persistence module. Thus,
 %%% windows of each metric form linked list of records storing parts of windows set,
 %%% with head of the list treated exceptionally (heads are kept together for all
-%%% metrics while rest of records with windows are kept separately for each metric).
+%%% metrics while rest of records with windows are kept separately for each metric). 
+%%% 
+%%% Metric can also be created with infinite resolution (0), in such a case only one 
+%%% window will need to be kept for this metric. Therefore retention should be set to 1.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(time_series_collection).
@@ -135,6 +138,8 @@ create(Ctx, Id, ConfigMap, Batch) ->
             {{error, too_many_metrics}, Batch};
         _:{error, empty_metric} ->
             {{error, empty_metric}, Batch};
+        _:{error, wrong_retention} ->
+            {{error, wrong_retention}, Batch};
         _:{error, wrong_resolution} ->
             {{error, wrong_resolution}, Batch};
         Error:Reason:Stacktrace ->
@@ -177,6 +182,8 @@ add_metrics(Ctx, Id, ConfigMapExtension, Options, Batch) ->
             {{error, too_many_metrics}, Batch};
         _:{error, empty_metric} ->
             {{error, empty_metric}, Batch};
+        _:{error, wrong_retention} ->
+            {{error, wrong_retention}, Batch};
         _:{error, wrong_resolution} ->
             {{error, wrong_resolution}, Batch};
         _:{error, time_series_already_exists} ->
