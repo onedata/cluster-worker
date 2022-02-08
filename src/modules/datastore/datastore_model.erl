@@ -204,14 +204,14 @@ delete(#{disc_driver := undefined} = Ctx, Key, Pred) ->
     delete_all_links(Ctx, Key, Result),
     delete_fold_link(Ctx, Key, Result);
 delete(Ctx, Key, Pred) ->
-    Expiry = case Ctx of
+    CtxWithExpiry = case Ctx of
+        #{expiry := _} ->
+            Ctx;
         #{sync_enabled := true} ->
-            application:get_env(?CLUSTER_WORKER_APP_NAME,
-                document_expiry, ?EXPIRY);
+            couchbase_driver:set_expiry(Ctx, application:get_env(?CLUSTER_WORKER_APP_NAME, document_expiry, ?EXPIRY));
         _ ->
-            1
+            couchbase_driver:set_expiry(Ctx, 1)
     end,
-    CtxWithExpiry = couchbase_driver:set_expiry(Ctx, Expiry),
     Result = datastore_apply(CtxWithExpiry, Key, fun datastore:delete/3, delete, [Pred]),
     delete_all_links(Ctx, Key, Result),
     delete_fold_link(Ctx, Key, Result).

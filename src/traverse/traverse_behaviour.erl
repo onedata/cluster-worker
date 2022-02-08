@@ -106,7 +106,7 @@
 %% Provides sync info that extends datastore context (to sync task documents between environments).
 %% @end
 %%--------------------------------------------------------------------
--callback get_sync_info(traverse:job()) -> {ok, traverse:sync_info()}  | {error, term()}.
+-callback get_sync_info(traverse:job()) -> {ok, traverse:sync_info() | undefined}  | {error, term()}.
 
 %%--------------------------------------------------------------------
 %% @doc
