@@ -15,7 +15,7 @@
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
--include("modules/datastore/ts_metric_config.hrl").
+-include_lib("ctool/include/time_series/common.hrl").
 -include("modules/datastore/datastore_time_series.hrl").
 -include("global_definitions.hrl").
 

@@ -20,15 +20,14 @@
 %% Exported for unit tests
 -export([get_value/2, get_size/1]).
 
--type timestamp() :: time:seconds().
+-type timestamp() :: time_series:time().
 -type value() :: number().
 -type window_id() :: timestamp().
 -type window_value() :: value() | {ValuesCount :: non_neg_integer(), ValuesSum :: value()}.
 -type window() :: {timestamp(), window_value()}.
 -type windows_collection() :: gb_trees:tree(timestamp(), window_value()).
 -type descending_windows_list() :: [window()].
--type aggregator() :: sum | max | min | last | first. % | {gather, Max}. % TODO VFS-8164 - extend functions list
--type insert_strategy() :: {aggregate, aggregator()} | ignore_existing.
+-type insert_strategy() :: {aggregate, time_series:metric_aggregator()} | ignore_existing.
 
 -type list_options() :: #{
     start => timestamp(),
@@ -37,7 +36,7 @@
 }.
 
 -export_type([timestamp/0, value/0, window_id/0, window_value/0, window/0, windows_collection/0,
-    descending_windows_list/0, aggregator/0, insert_strategy/0, list_options/0]).
+    descending_windows_list/0, insert_strategy/0, list_options/0]).
 
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
 
@@ -156,7 +155,7 @@ decode(Term) ->
 %% Internal functions
 %%=====================================================================
 
--spec aggregate(window_value() | undefined, value(), aggregator()) -> window_value().
+-spec aggregate(window_value() | undefined, value(), time_series:metric_aggregator()) -> window_value().
 aggregate(undefined, NewValue, sum) ->
     {1, NewValue};
 aggregate({CurrentCount, CurrentSum}, NewValue, sum) ->

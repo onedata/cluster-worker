@@ -14,7 +14,7 @@
 -module(ts_hub).
 -author("Michal Wrzeszcz").
 
--include("modules/datastore/ts_metric_config.hrl").
+-include_lib("ctool/include/time_series/common.hrl").
 
 %% API
 -export([set_time_series_collection_heads/1, get_time_series_collection_heads/1]).
