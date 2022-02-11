@@ -20,7 +20,7 @@
 %% Exported for unit tests
 -export([get_value/2, get_size/1]).
 
--type timestamp() :: time_series:time().
+-type timestamp() :: time_series:time_unit().
 -type value() :: number().
 -type window_id() :: timestamp().
 -type window_value() :: value() | {ValuesCount :: non_neg_integer(), ValuesSum :: value()}.
@@ -30,9 +30,14 @@
 -type insert_strategy() :: {aggregate, time_series:metric_aggregator()} | ignore_existing.
 
 -type list_options() :: #{
+    % newest timestamp from which descending listing will begin
     start => timestamp(),
+    % oldest timestamp when the listing should stop (unless it hits the limit)
     stop => timestamp(),
+    % maximum number of time windows to be listed
     limit => non_neg_integer()
+    %% @TODO VFS-8941 as limit is optional, it seems that if no limit is specified, the
+    %% listing can return possibly to large list of windows (there should be a cap on that)
 }.
 
 -export_type([timestamp/0, value/0, window_id/0, window_value/0, window/0, windows_collection/0,

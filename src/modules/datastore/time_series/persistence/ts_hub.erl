@@ -73,7 +73,7 @@ get_record_struct(1) ->
     {record, [
         {time_series_collection_heads, #{string => #{string => {record, [
             {config, {record, [
-                {legend, binary},
+                {label, binary},
                 {resolution, integer},
                 {retention, integer},
                 {aggregator, atom}

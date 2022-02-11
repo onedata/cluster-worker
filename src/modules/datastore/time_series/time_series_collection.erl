@@ -113,6 +113,15 @@
     end
 ).
 
+% @TODO VFS-8941 Refine time series listing API and types
+% - request range could use nested maps rather than proplists
+% - results could use nested maps rather than proplists
+% - not found errors could be better
+%   - now we cannot handle them in different ways and we need a lot of casing...
+%   - can we use errors.hrl ?
+% - types are not clear and quite complicated, e.g.
+%   - request range
+%   - full metric id
 
 %%%===================================================================
 %%% API
