@@ -783,6 +783,14 @@ deregister_group_and_check(PoolName, Group, Executor) ->
     end.
 
 -spec get_extended_ctx(callback_module(), job() | undefined) -> ctx().
+get_extended_ctx(CallbackModule, undefined) ->
+    case erlang:function_exported(CallbackModule, get_sync_info, 1) of
+        true ->
+            ?warning("Getting sync info for undefined job for callback module: ~p", [CallbackModule]);
+        _ ->
+            ok
+    end,
+    traverse_task:get_ctx();
 get_extended_ctx(CallbackModule, Job) ->
     {ok, CtxExtension} = case erlang:function_exported(CallbackModule, get_sync_info, 1) of
         true ->
