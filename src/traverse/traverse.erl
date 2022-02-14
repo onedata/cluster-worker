@@ -410,16 +410,15 @@ cancel(PoolName, TaskId, Environment) ->
                 callback_module = CallbackModule,
                 main_job_id = MainJobId
             }} = traverse_task:get_execution_info(Task),
-            case CallbackModule:get_job(MainJobId) of
-                {ok, Job, _, _} ->
-                    ExtendedCtx = get_extended_ctx(CallbackModule, Job),
-                    {ok, Info} = traverse_task:cancel(ExtendedCtx, PoolName, CallbackModule, TaskId, Environment),
-                    case Info of
-                        local_cancel -> task_callback(CallbackModule, on_cancel_init, TaskId, PoolName);
-                        _ -> ok
-                    end;
-                {error, not_found} ->
-                    {error, main_job_not_found}
+            MainJob = case CallbackModule:get_job(MainJobId) of
+                {ok, Job, _, _} -> Job;
+                {error, not_found} -> undefined
+            end,
+            ExtendedCtx = get_extended_ctx(CallbackModule, MainJob),
+            {ok, Info} = traverse_task:cancel(ExtendedCtx, PoolName, CallbackModule, TaskId, Environment),
+            case Info of
+                local_cancel -> task_callback(CallbackModule, on_cancel_init, TaskId, PoolName);
+                _ -> ok
             end;
         Other ->
             Other
@@ -783,7 +782,15 @@ deregister_group_and_check(PoolName, Group, Executor) ->
             {abort, Task}
     end.
 
--spec get_extended_ctx(callback_module(), job()) -> ctx().
+-spec get_extended_ctx(callback_module(), job() | undefined) -> ctx().
+get_extended_ctx(CallbackModule, undefined) ->
+    case erlang:function_exported(CallbackModule, get_sync_info, 1) of
+        true ->
+            ?warning("Getting sync info for undefined job for callback module: ~p", [CallbackModule]);
+        _ ->
+            ok
+    end,
+    traverse_task:get_ctx();
 get_extended_ctx(CallbackModule, Job) ->
     {ok, CtxExtension} = case erlang:function_exported(CallbackModule, get_sync_info, 1) of
         true ->
