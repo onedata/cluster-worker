@@ -43,7 +43,7 @@
 -author("Michal Wrzeszcz").
 
 -include("modules/datastore/datastore_time_series.hrl").
--include("modules/datastore/ts_metric_config.hrl").
+-include_lib("ctool/include/time_series/common.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -113,6 +113,15 @@
     end
 ).
 
+% @TODO VFS-8941 Refine time series listing API and types
+% - request range could use nested maps rather than proplists
+% - results could use nested maps rather than proplists
+% - not found errors could be better
+%   - now we cannot handle them in different ways and we need a lot of casing...
+%   - can we use errors.hrl ?
+% - types are not clear and quite complicated, e.g.
+%   - request range
+%   - full metric id
 
 %%%===================================================================
 %%% API

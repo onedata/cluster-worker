@@ -15,7 +15,7 @@
 -include("datastore_test_utils.hrl").
 -include("global_definitions.hrl").
 -include("datastore_performance_tests_base.hrl").
--include("modules/datastore/ts_metric_config.hrl").
+-include_lib("ctool/include/time_series/common.hrl").
 -include_lib("ctool/include/aai/aai.hrl").
 
 %% export for ct

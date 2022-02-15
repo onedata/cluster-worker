@@ -25,7 +25,7 @@
 -author("Michal Wrzeszcz").
 
 -include("modules/datastore/datastore_time_series.hrl").
--include("modules/datastore/ts_metric_config.hrl").
+-include_lib("ctool/include/time_series/common.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -34,12 +34,11 @@
 
 -type id() :: binary().
 -type metric() :: #metric{}.
--type legend() :: binary().
 -type config() :: #metric_config{}.
 -type splitting_strategy() :: #splitting_strategy{}.
 -type data_node() :: #data_node{}.
 
--export_type([id/0, metric/0, legend/0, config/0, splitting_strategy/0, data_node/0]).
+-export_type([id/0, metric/0, config/0, splitting_strategy/0, data_node/0]).
 
 %%%===================================================================
 %%% API
