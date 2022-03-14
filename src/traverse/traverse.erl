@@ -65,7 +65,7 @@
 -export([init_pool/4, init_pool/5, init_pool_service/5, restart_tasks/3, stop_pool/1, stop_pool_service/1,
     run/3, run/4, cancel/2, cancel/3, on_task_change/2, on_job_change/5]).
 %% Functions executed on pools
--export([execute_master_job/10, execute_slave_job/5]).
+-export([execute_master_job/10, execute_slave_job/5, is_job_cancelled/1]).
 %% For rpc
 -export([run_on_master_pool/10, run_task/3]).
 
@@ -350,6 +350,7 @@ on_task_change(Task, Environment) ->
                         ok ->
                             ok;
                         {ok, remote_cancel, TaskId} ->
+                            broadcast_job_cancellation(PoolName, TaskId),
                             task_callback(CallbackModule, on_cancel_init, TaskId, PoolName),
                             ok
                     end;
@@ -430,8 +431,11 @@ cancel(PoolName, TaskId, Environment) ->
             ExtendedCtx = get_extended_ctx(CallbackModule, MainJob),
             {ok, Info} = traverse_task:cancel(ExtendedCtx, PoolName, CallbackModule, TaskId, Environment),
             case Info of
-                local_cancel -> task_callback(CallbackModule, on_cancel_init, TaskId, PoolName);
-                _ -> ok
+                local_cancel -> 
+                    broadcast_job_cancellation(PoolName, TaskId),
+                    task_callback(CallbackModule, on_cancel_init, TaskId, PoolName);
+                _ -> 
+                    ok
             end;
         Other ->
             Other
@@ -589,6 +593,24 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskId, Job) ->
             ?log_error_with_stacktrace("Slave job ~s of task ~p (module ~p) error ~p:~p",
                 [to_string(CallbackModule, Job), TaskId, CallbackModule, E, R], Stacktrace),
             error
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Based on existence of cancel cast message (see broadcast_job_cancellation/2) determines 
+%% whether given task was cancelled. Must be called from slave/master job process. 
+%% As this message is a worker_pool cast message this function will be executed after job execution is 
+%% finished, which will result in removal of this message from process message queue.
+%% @end
+%%--------------------------------------------------------------------
+-spec is_job_cancelled(id()) -> boolean().
+is_job_cancelled(TaskId) ->
+    receive
+        {'$gen_cast',{cast,{?MODULE, ?FUNCTION_NAME, [TaskId]}}} = Msg -> 
+            self() ! Msg, % resend message so next calls to this function return correct result
+            true
+    after 
+        0 -> false
     end.
 
 %%%===================================================================
@@ -1105,3 +1127,9 @@ schedule_task_and_check_other_waiting(PoolName, Executor, TaskId) ->
 -spec log_error_with_stacktrace(term(), string(), [term()]) -> ok.
 log_error_with_stacktrace(Stacktrace, Format, Args) ->
     ?error(Format ++ "~nStacktrace:~n~p", Args ++ [Stacktrace]).
+
+-spec broadcast_job_cancellation(pool(), id()) -> ok.
+broadcast_job_cancellation(PoolName, TaskId) ->
+    worker_pool:broadcast(?MASTER_POOL_NAME(PoolName), {?MODULE, is_job_cancelled, [TaskId]}),
+    worker_pool:broadcast(?SLAVE_POOL_NAME(PoolName), {?MODULE, is_job_cancelled, [TaskId]}),
+    ok.
