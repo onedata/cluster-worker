@@ -636,12 +636,13 @@ handle_info({nodedown, Node}, State) ->
     {ok, CMNodes} = ?CALL_PLUGIN(cm_nodes, []),
     case lists:member(Node, CMNodes) of
         false ->
-            ?warning("Node manager received unexpected nodedown msg: ~p", [{nodedown, Node}]);
+            ?warning("Node manager received unexpected nodedown msg: ~p", [{nodedown, Node}]),
+            {noreply, State};
         true ->
             ?warning("Node manager received nodedown msg from cluster_manager node: ~p - stopping", [Node]),
-            spawn(fun() -> init:stop() end)
-    end,
-    {noreply, State};
+            init:stop(),
+            {stop, normal, State}
+    end;
 
 handle_info(Request, State) ->
     ?CALL_PLUGIN(handle_info, [Request, State]).
