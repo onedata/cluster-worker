@@ -639,7 +639,7 @@ handle_info({nodedown, Node}, State) ->
             ?warning("Node manager received unexpected nodedown msg: ~p", [{nodedown, Node}]),
             {noreply, State};
         true ->
-            ?warning("Node manager received nodedown msg from cluster_manager node: ~p - stopping", [Node]),
+            ?critical("Connection to cluster manager node (~p) lost, shutting down", [Node]),
             init:stop(),
             {stop, normal, State}
     end;
