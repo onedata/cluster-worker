@@ -20,27 +20,27 @@
 %% Exported for unit tests
 -export([get_value/2, get_size/1]).
 
--type timestamp() :: time_series:time_unit().
+-type timestamp_seconds() :: time_series:time_seconds().
 -type value() :: number().
--type window_id() :: timestamp().
+-type window_id() :: timestamp_seconds().
 -type window_value() :: value() | {ValuesCount :: non_neg_integer(), ValuesSum :: value()}.
--type window() :: {timestamp(), window_value()}.
--type windows_collection() :: gb_trees:tree(timestamp(), window_value()).
+-type window() :: {timestamp_seconds(), window_value()}.
+-type windows_collection() :: gb_trees:tree(timestamp_seconds(), window_value()).
 -type descending_windows_list() :: [window()].
--type insert_strategy() :: {aggregate, time_series:metric_aggregator()} | ignore_existing.
+-type insert_strategy() :: {aggregate, metric_config:aggregator()} | ignore_existing.
 
 -type list_options() :: #{
     % newest timestamp from which descending listing will begin
-    start => timestamp(),
+    start => timestamp_seconds(),
     % oldest timestamp when the listing should stop (unless it hits the limit)
-    stop => timestamp(),
+    stop => timestamp_seconds(),
     % maximum number of time windows to be listed
     limit => non_neg_integer()
     %% @TODO VFS-8941 as limit is optional, it seems that if no limit is specified, the
     %% listing can return possibly to large list of windows (there should be a cap on that)
 }.
 
--export_type([timestamp/0, value/0, window_id/0, window_value/0, window/0, windows_collection/0,
+-export_type([timestamp_seconds/0, value/0, window_id/0, window_value/0, window/0, windows_collection/0,
     descending_windows_list/0, insert_strategy/0, list_options/0]).
 
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
@@ -54,13 +54,13 @@ init() ->
     init_windows_set().
 
 
--spec list(windows_collection(), timestamp() | undefined, list_options()) ->
+-spec list(windows_collection(), timestamp_seconds() | undefined, list_options()) ->
     {ok | {continue, list_options()}, descending_windows_list()}.
 list(Windows, Timestamp, Options) ->
     list_internal(Timestamp, Windows, Options).
 
 
--spec insert_value(windows_collection(), timestamp(), value() | window_value(), insert_strategy()) -> windows_collection().
+-spec insert_value(windows_collection(), timestamp_seconds(), value() | window_value(), insert_strategy()) -> windows_collection().
 insert_value(Windows, WindowToBeUpdatedTimestamp, WindowValue, ignore_existing) ->
     set_value(WindowToBeUpdatedTimestamp, WindowValue, Windows);
 insert_value(Windows, WindowToBeUpdatedTimestamp, NewValue, {aggregate, Aggregator}) ->
@@ -84,7 +84,7 @@ prune_overflowing(Windows, MaxWindowsCount) ->
     end.
 
 
--spec split(windows_collection(), non_neg_integer()) -> {windows_collection(), windows_collection(), timestamp()}.
+-spec split(windows_collection(), non_neg_integer()) -> {windows_collection(), windows_collection(), timestamp_seconds()}.
 split(Windows, SplitPosition) ->
     split_internal(Windows, SplitPosition).
 
@@ -109,8 +109,8 @@ get_remaining_windows_count(Windows, MaxWindowsCount) ->
 %%--------------------------------------------------------------------
 -spec reorganize(windows_collection(), windows_collection(), non_neg_integer(), non_neg_integer()) ->
     ActionsToApplyOnDataNodes :: [{update_previous_data_node, windows_collection()} |
-    {update_current_data_node, timestamp(), windows_collection()} |
-    {split_current_data_node, {windows_collection(), windows_collection(), timestamp()}}].
+    {update_current_data_node, timestamp_seconds(), windows_collection()} |
+    {split_current_data_node, {windows_collection(), windows_collection(), timestamp_seconds()}}].
 reorganize(WindowsInOlderDataNode, WindowsInCurrentDataNode, MaxWindowsInOlderDataNode, SplitPosition) ->
     WindowsInOlderDataNodeCount = get_size(WindowsInOlderDataNode),
     WindowsInCurrentDataNodeCount = get_size(WindowsInCurrentDataNode),
@@ -160,7 +160,7 @@ decode(Term) ->
 %% Internal functions
 %%=====================================================================
 
--spec aggregate(window_value() | undefined, value(), time_series:metric_aggregator()) -> window_value().
+-spec aggregate(window_value() | undefined, value(), metric_config:aggregator()) -> window_value().
 aggregate(undefined, NewValue, sum) ->
     {1, NewValue};
 aggregate({CurrentCount, CurrentSum}, NewValue, sum) ->
@@ -187,7 +187,7 @@ aggregate(CurrentValue, _NewValue, first) ->
 %% to allow easy change of structure if needed
 %%=====================================================================
 
--spec reverse_timestamp(timestamp()) -> timestamp().
+-spec reverse_timestamp(timestamp_seconds()) -> timestamp_seconds().
 reverse_timestamp(Timestamp) ->
     ?EPOCH_INFINITY - Timestamp. % Reversed order of timestamps is required for listing
 
@@ -197,7 +197,7 @@ init_windows_set() ->
     gb_trees:empty().
 
 
--spec get_value(timestamp(), windows_collection()) -> window_value() | undefined.
+-spec get_value(timestamp_seconds(), windows_collection()) -> window_value() | undefined.
 get_value(Timestamp, Windows) ->
     case gb_trees:lookup(reverse_timestamp(Timestamp), Windows) of
         {value, Value} -> Value;
@@ -205,12 +205,12 @@ get_value(Timestamp, Windows) ->
     end.
 
 
--spec set_value(timestamp(), window_value(), windows_collection()) -> windows_collection().
+-spec set_value(timestamp_seconds(), window_value(), windows_collection()) -> windows_collection().
 set_value(Timestamp, Value, Windows) ->
     gb_trees:enter(reverse_timestamp(Timestamp), Value, Windows).
 
 
--spec get_first_timestamp(windows_collection()) -> timestamp().
+-spec get_first_timestamp(windows_collection()) -> timestamp_seconds().
 get_first_timestamp(Windows) ->
     {Timestamp, _} = gb_trees:smallest(Windows),
     reverse_timestamp(Timestamp).
@@ -227,7 +227,7 @@ get_size(Windows) ->
     gb_trees:size(Windows).
 
 
--spec list_internal(timestamp() | undefined, windows_collection(), list_options()) ->
+-spec list_internal(timestamp_seconds() | undefined, windows_collection(), list_options()) ->
     {ok | {continue, list_options()}, descending_windows_list()}.
 list_internal(undefined, Windows, Options) ->
     list_internal(gb_trees:iterator(Windows), Options);
@@ -235,7 +235,7 @@ list_internal(Timestamp, Windows, Options) ->
     list_internal(gb_trees:iterator_from(reverse_timestamp(Timestamp), Windows), Options).
 
 
--spec list_internal(gb_trees:iter(timestamp(), window_value()), list_options()) ->
+-spec list_internal(gb_trees:iter(timestamp_seconds(), window_value()), list_options()) ->
     {ok | {continue, list_options()}, descending_windows_list()}.
 list_internal(_Iterator, #{limit := 0}) ->
     {ok, []};
@@ -260,7 +260,7 @@ list_internal(Iterator, Options) ->
     end.
 
 
--spec split_internal(windows_collection(), non_neg_integer()) -> {windows_collection(), windows_collection(), timestamp()}.
+-spec split_internal(windows_collection(), non_neg_integer()) -> {windows_collection(), windows_collection(), timestamp_seconds()}.
 split_internal(Windows, 0) ->
     {init_windows_set(), Windows, get_first_timestamp(Windows)};
 split_internal(Windows, SplitPosition) ->
