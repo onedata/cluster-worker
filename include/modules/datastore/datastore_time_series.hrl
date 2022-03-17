@@ -23,7 +23,7 @@
     windows = ts_windows:init() :: ts_windows:windows_collection(),
     older_node_key :: ts_metric_data_node:key() | undefined,
     % Timestamp of newest measurement in older data node
-    older_node_timestamp :: ts_windows:timestamp() | undefined
+    older_node_timestamp :: ts_windows:timestamp_seconds() | undefined
 }).
 
 

@@ -71,7 +71,7 @@ list_metrics_by_time_series(Ctx, Id) ->
 %% the function ignores it and updates only existing ones.
 %% @end
 %%--------------------------------------------------------------------
--spec update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp(),
+-spec update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp_seconds(),
     ts_windows:value() | time_series_collection:update_range()) -> ok | {error, term()}.
 update(Ctx, Id, NewTimestamp, ValueOrUpdateRange) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
@@ -85,7 +85,7 @@ update(Ctx, Id, NewTimestamp, ValueOrUpdateRange) ->
 %% the function returns error.
 %% @end
 %%--------------------------------------------------------------------
--spec check_and_update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp(),
+-spec check_and_update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp_seconds(),
     ts_windows:value() | time_series_collection:update_range()) -> ok | {error, term()}.
 check_and_update(Ctx, Id, NewTimestamp, ValueOrUpdateRange) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
@@ -99,7 +99,7 @@ check_and_update(Ctx, Id, NewTimestamp, ValueOrUpdateRange) ->
 %% only existing ones.
 %% @end
 %%--------------------------------------------------------------------
--spec update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp(),
+-spec update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp_seconds(),
     time_series_collection:request_range(), ts_windows:value()) -> ok | {error, term()}.
 update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
@@ -112,7 +112,7 @@ update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue) ->
 %% time_series_collection:check_and_update/6. If updated metric or time series is missing, the function returns error.
 %% @end
 %%--------------------------------------------------------------------
--spec check_and_update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp(),
+-spec check_and_update(ctx(), time_series_collection:collection_id(), ts_windows:timestamp_seconds(),
     time_series_collection:request_range(), ts_windows:value()) -> ok | {error, term()}.
 check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
@@ -125,7 +125,7 @@ check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue) ->
 %% Usage of this function allows reduction of datastore overhead.
 %% @end
 %%--------------------------------------------------------------------
--spec update_many(ctx(), time_series_collection:collection_id(), [{ts_windows:timestamp(), ts_windows:value()}]) ->
+-spec update_many(ctx(), time_series_collection:collection_id(), [{ts_windows:timestamp_seconds(), ts_windows:value()}]) ->
     ok | {error, term()}.
 update_many(Ctx, Id, Measurements) ->
     datastore_model:datastore_apply(Ctx, Id, fun datastore:time_series_collection_operation/4,
