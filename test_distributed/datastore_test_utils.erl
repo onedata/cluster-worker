@@ -138,6 +138,7 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_model:get_links_trees(Ctx, Key)
         end},
+
         {infinite_log_create, fun(Key, Opts) ->
             Ctx = get_ctx(Model),
             datastore_infinite_log:create(Ctx, Key, Opts)
@@ -158,59 +159,33 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_infinite_log:set_ttl(Ctx, Key, Ttl)
         end},
+
         {time_series_collection_create, fun(Id, ConfigMap) ->
             Ctx = get_ctx(Model),
             datastore_time_series_collection:create(Ctx, Id, ConfigMap)
         end},
-        {time_series_collection_add_metrics, fun(Id, ConfigMapExtension, Options) ->
+        {time_series_collection_incorporate_config, fun(Id, ConfigMapExtension) ->
             Ctx = get_ctx(Model),
-            datastore_time_series_collection:add_metrics(Ctx, Id, ConfigMapExtension, Options)
-        end},
-        {time_series_collection_delete_metrics, fun(Id, MetricsToDelete) ->
-            Ctx = get_ctx(Model),
-            datastore_time_series_collection:delete_metrics(Ctx, Id, MetricsToDelete)
-        end},
-        {time_series_collection_list_time_series_ids, fun(Id) ->
-            Ctx = get_ctx(Model),
-            datastore_time_series_collection:list_time_series_ids(Ctx, Id)
-        end},
-        {time_series_collection_list_metrics_by_time_series, fun(Id) ->
-            Ctx = get_ctx(Model),
-            datastore_time_series_collection:list_metrics_by_time_series(Ctx, Id)
-        end},
-        {time_series_collection_update, fun(Id, NewTimestamp, ValueOrUpdateRange) ->
-            Ctx = get_ctx(Model),
-            datastore_time_series_collection:update(Ctx, Id, NewTimestamp, ValueOrUpdateRange)
-        end},
-        {time_series_collection_check_and_update, fun(Id, NewTimestamp, ValueOrUpdateRange) ->
-            Ctx = get_ctx(Model),
-            datastore_time_series_collection:check_and_update(Ctx, Id, NewTimestamp, ValueOrUpdateRange)
-        end},
-        {time_series_collection_update, fun(Id, NewTimestamp, MetricsToUpdate, NewValue) ->
-            Ctx = get_ctx(Model),
-            datastore_time_series_collection:update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue)
-        end},
-        {time_series_collection_check_and_update, fun(Id, NewTimestamp, MetricsToUpdate, NewValue) ->
-            Ctx = get_ctx(Model),
-            datastore_time_series_collection:check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue)
-        end},
-        {time_series_collection_update_many, fun(Id, Measurements) ->
-            Ctx = get_ctx(Model),
-            datastore_time_series_collection:update_many(Ctx, Id, Measurements)
-        end},
-        {time_series_collection_list_windows, fun(Id, Options) ->
-            Ctx = get_ctx(Model),
-            datastore_time_series_collection:list_windows(Ctx, Id, Options)
-        end},
-        {time_series_collection_list_windows, fun(Id, RequestedMetrics, Options) ->
-            Ctx = get_ctx(Model),
-            datastore_time_series_collection:list_windows(Ctx, Id, RequestedMetrics, Options)
+            datastore_time_series_collection:incorporate_config(Ctx, Id, ConfigMapExtension)
         end},
         {time_series_collection_delete, fun(Id) ->
             Ctx = get_ctx(Model),
             datastore_time_series_collection:delete(Ctx, Id)
+        end},
+        {time_series_collection_get_layout, fun(Id) ->
+            Ctx = get_ctx(Model),
+            datastore_time_series_collection:get_layout(Ctx, Id)
+        end},
+        {time_series_collection_consume_measurements, fun(Id, ConsumeSpec) ->
+            Ctx = get_ctx(Model),
+            datastore_time_series_collection:consume_measurements(Ctx, Id, ConsumeSpec)
+        end},
+        {time_series_collection_get_slice, fun(Id, SliceLayout, ListWindowsOptions) ->
+            Ctx = get_ctx(Model),
+            datastore_time_series_collection:get_slice(Ctx, Id, SliceLayout, ListWindowsOptions)
         end}
     ]).
+
 
 get_memory_driver(ets_only_model) ->
     ets_driver;

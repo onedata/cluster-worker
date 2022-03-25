@@ -82,9 +82,9 @@ route(Function, [Ctx | Args] = OriginalArgs) ->
 -spec route_time_series_collection_operation(atom(), list()) -> term().
 route_time_series_collection_operation(Function, [Ctx | Args]) when
     % TODO VFS-8540 - handle race with metric adding/deletion
-    % Function =:= list_windows orelse
-    Function =:= list_time_series_ids orelse Function =:= list_metrics_by_time_series ->
-    route_internal(datastore_reader, time_series_collection_list, Ctx, [Function, Args]);
+    % Function =:= get_slice orelse
+    Function =:= get_layout ->
+    route_internal(datastore_reader, time_series_collection_get, Ctx, [Function, Args]);
 route_time_series_collection_operation(Function, [Ctx | Args]) ->
     route_internal(datastore_writer, time_series_collection_operation, Ctx, [Function, Args]).
 
