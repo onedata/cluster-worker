@@ -1113,14 +1113,14 @@ time_series_test(Config) ->
 
         % Test errors when wrong time series or metric is given in the consume spec
         ?assertEqual(
-            ?ERROR_BAD_VALUE_TSC_LAYOUT(#{<<"TS", 2>> => []}),
+            ?ERROR_TSC_MISSING_LAYOUT(#{<<"TS", 2>> => []}),
             rpc:call(Worker, Model, time_series_collection_consume_measurements, [
                 Id, #{<<"TS", 2>> => #{all => [{1, 1}]}}
             ])
         ),
 
         ?assertEqual(
-            ?ERROR_BAD_VALUE_TSC_LAYOUT(#{<<"TS1">> => [<<"M10">>]}),
+            ?ERROR_TSC_MISSING_LAYOUT(#{<<"TS1">> => [<<"M10">>]}),
             rpc:call(Worker, Model, time_series_collection_consume_measurements, [
                 Id, #{<<"TS1">> => #{<<"M10">> => [{1, 1}]}}
             ])
@@ -2264,7 +2264,7 @@ gather_windows(Worker, Model, CollectionId, TimeSeriesName, MetricName, StartTim
     {ok, #{
         TimeSeriesName := #{MetricName := Windows}
     }} = rpc:call(Worker, Model, time_series_collection_get_slice, [
-        CollectionId, #{TimeSeriesName => [MetricName]}, #{startTimestamp => StartTimestamp, windowLimit => 1000}
+        CollectionId, #{TimeSeriesName => [MetricName]}, #{start_timestamp => StartTimestamp, window_limit => 1000}
     ]),
     NewAcc = Acc ++ Windows,
     case length(Windows) of

@@ -173,7 +173,7 @@ invalid_consume_measurements_request() ->
                 <<"M2">> => lists:seq(0, 10, 2)
             }
         }),
-        ?ERROR_BAD_VALUE_TSC_LAYOUT(#{
+        ?ERROR_TSC_MISSING_LAYOUT(#{
             <<"TS1">> => [<<"M4">>],
             <<"TS2">> => [<<"M2">>]
         })
@@ -184,7 +184,7 @@ invalid_consume_measurements_request() ->
                 all => lists:seq(0, 10, 2)
             }
         }),
-        ?ERROR_BAD_VALUE_TSC_LAYOUT(#{
+        ?ERROR_TSC_MISSING_LAYOUT(#{
             <<"TS2">> => []
         })
     ).
@@ -206,7 +206,7 @@ invalid_get_slice_request() ->
             <<"TS2">> => [<<"M2.1">>, <<"M2.3">>],
             <<"TS3">> => []
         }),
-        ?ERROR_BAD_VALUE_TSC_LAYOUT(#{
+        ?ERROR_TSC_MISSING_LAYOUT(#{
             <<"TS1">> => [<<"M1.X">>],
             <<"TS2">> => [<<"M2.3">>],
             <<"TS3">> => []
@@ -258,16 +258,16 @@ single_metric_single_node() ->
     ExpWindows = lists:reverse(lists:map(fun(I) ->
         {I, {5, 2.5 * I + 5}} end, lists:seq(10, 49, 5) ++ lists:seq(60, 69, 5))),
     ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName)),
-    ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName, #{startTimestamp => 1000})),
-    ?assert(compare_windows_list([], TimeSeriesName, MetricName, #{startTimestamp => 1})),
+    ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName, #{start_timestamp => 1000})),
+    ?assert(compare_windows_list([], TimeSeriesName, MetricName, #{start_timestamp => 1})),
 
     ExpWindows2 = lists:sublist(ExpWindows, 2),
-    ?assert(compare_windows_list(ExpWindows2, TimeSeriesName, MetricName, #{windowLimit => 2})),
-    ?assert(compare_windows_list(ExpWindows2, TimeSeriesName, MetricName, #{stopTimestamp => 47})),
+    ?assert(compare_windows_list(ExpWindows2, TimeSeriesName, MetricName, #{window_limit => 2})),
+    ?assert(compare_windows_list(ExpWindows2, TimeSeriesName, MetricName, #{stop_timestamp => 47})),
 
     ExpWindows3 = lists:sublist(ExpWindows, 3, 2),
-    ?assert(compare_windows_list(ExpWindows3, TimeSeriesName, MetricName, #{startTimestamp => 47, windowLimit => 2})),
-    ?assert(compare_windows_list(ExpWindows3, TimeSeriesName, MetricName, #{startTimestamp => 45, stopTimestamp => 36})),
+    ?assert(compare_windows_list(ExpWindows3, TimeSeriesName, MetricName, #{start_timestamp => 47, window_limit => 2})),
+    ?assert(compare_windows_list(ExpWindows3, TimeSeriesName, MetricName, #{start_timestamp => 45, stop_timestamp => 36})),
 
     % Add a new measurement and verify if last window is dropped
     consume_measurements_foreach_metric([{100, 5}]),
@@ -305,9 +305,9 @@ single_metric_infinite_resolution() ->
     % are calculated using formula for the sum of an arithmetic sequence
     ExpWindows = [{0, {50, 40 * (24.5 + 5) / 2 + 10 * (34.5 + 30) / 2}}],
     ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName)),
-    ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName, #{startTimestamp => 1000})),
-    ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName, #{windowLimit => 2})),
-    ?assert(compare_windows_list([], TimeSeriesName, MetricName, #{stopTimestamp => 35})).
+    ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName, #{start_timestamp => 1000})),
+    ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName, #{window_limit => 2})),
+    ?assert(compare_windows_list([], TimeSeriesName, MetricName, #{stop_timestamp => 35})).
 
 
 single_metric_multiple_nodes() ->
@@ -326,12 +326,12 @@ single_metric_multiple_nodes() ->
     ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName)),
 
     ExpWindows2 = lists:sublist(ExpWindows, 101, 400),
-    ?assert(compare_windows_list(ExpWindows2, TimeSeriesName, MetricName, #{startTimestamp => 1800, windowLimit => 400})),
-    ?assert(compare_windows_list(ExpWindows2, TimeSeriesName, MetricName, #{startTimestamp => 1800, stopTimestamp => 1002})),
+    ?assert(compare_windows_list(ExpWindows2, TimeSeriesName, MetricName, #{start_timestamp => 1800, window_limit => 400})),
+    ?assert(compare_windows_list(ExpWindows2, TimeSeriesName, MetricName, #{start_timestamp => 1800, stop_timestamp => 1002})),
 
     ExpWindows3 = lists:sublist(ExpWindows, 301, 400),
-    ?assert(compare_windows_list(ExpWindows3, TimeSeriesName, MetricName, #{startTimestamp => 1400, windowLimit => 400})),
-    ?assert(compare_windows_list(ExpWindows3, TimeSeriesName, MetricName, #{startTimestamp => 1400, stopTimestamp => 602})),
+    ?assert(compare_windows_list(ExpWindows3, TimeSeriesName, MetricName, #{start_timestamp => 1400, window_limit => 400})),
+    ?assert(compare_windows_list(ExpWindows3, TimeSeriesName, MetricName, #{start_timestamp => 1400, stop_timestamp => 602})),
 
     % Verify if windows are stored using multiple datastore documents
     ?assertEqual(5, maps:size(get_current_batch())),

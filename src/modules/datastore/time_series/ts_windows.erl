@@ -31,11 +31,11 @@
 
 -type list_options() :: #{
     % newest timestamp from which descending listing will begin
-    startTimestamp => timestamp_seconds(),
-    % oldest timestamp when the listing should stop (unless it hits the windowLimit)
-    stopTimestamp => timestamp_seconds(),
+    start_timestamp => timestamp_seconds(),
+    % oldest timestamp when the listing should stop (unless it hits the window_limit)
+    stop_timestamp => timestamp_seconds(),
     % maximum number of time windows to be listed
-    windowLimit => non_neg_integer()
+    window_limit => non_neg_integer()
 }.
 
 -export_type([timestamp_seconds/0, value/0, window_id/0, window_value/0, window/0, windows_collection/0,
@@ -57,7 +57,7 @@ init() ->
     {ok | {continue, list_options()}, descending_windows_list()}.
 list(Windows, Timestamp, Options) ->
     SanitizedOptions = maps:map(fun
-        (windowLimit, Limit) -> min(Limit, ?MAX_WINDOW_LIMIT);
+        (window_limit, Limit) -> min(Limit, ?MAX_WINDOW_LIMIT);
         (_, Other) -> Other
     end, Options),
     list_internal(Timestamp, Windows, SanitizedOptions).
@@ -240,7 +240,7 @@ list_internal(Timestamp, Windows, Options) ->
 
 -spec list_internal(gb_trees:iter(timestamp_seconds(), window_value()), list_options()) ->
     {ok | {continue, list_options()}, descending_windows_list()}.
-list_internal(_Iterator, #{windowLimit := 0}) ->
+list_internal(_Iterator, #{window_limit := 0}) ->
     {ok, []};
 list_internal(Iterator, Options) ->
     case gb_trees:next(Iterator) of
@@ -249,12 +249,12 @@ list_internal(Iterator, Options) ->
         {Key, Value, NextIterator} ->
             Timestamp = reverse_timestamp(Key),
             case Options of
-                #{stopTimestamp := StopTimestamp} when Timestamp < StopTimestamp ->
+                #{stop_timestamp := StopTimestamp} when Timestamp < StopTimestamp ->
                     {ok, []};
-                #{stopTimestamp := StopTimestamp} when Timestamp =:= StopTimestamp ->
+                #{stop_timestamp := StopTimestamp} when Timestamp =:= StopTimestamp ->
                     {ok, [{Timestamp, Value}]};
-                #{windowLimit := Limit} ->
-                    {FinishOrContinue, List} = list_internal(NextIterator, Options#{windowLimit := Limit - 1}),
+                #{window_limit := Limit} ->
+                    {FinishOrContinue, List} = list_internal(NextIterator, Options#{window_limit := Limit - 1}),
                     {FinishOrContinue, [{Timestamp, Value} | List]};
                 _ ->
                     {FinishOrContinue, List} = list_internal(NextIterator, Options),

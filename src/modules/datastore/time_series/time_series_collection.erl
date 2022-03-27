@@ -94,7 +94,7 @@
         _ ->
             ErrorRef = str_utils:rand_hex(5),
             ?error_stacktrace(
-                "[~p:~p] Unexpected error (ref. ~s): ~w:~p~nArgs: ~p",
+                "[~p:~p] Unexpected error (ref. ~s):~n~w:~p~nArgs: ~p",
                 [?MODULE, ?FUNCTION_NAME, ErrorRef, Class, Reason, FunctionArgs],
                 Stacktrace
             ),
@@ -320,5 +320,5 @@ assert_is_sub_layout(ReferenceLayout, AllegedSubLayout) ->
                 end
         end
     end, AllegedSubLayout),
-    maps_utils:is_empty(MissingLayout) orelse throw(?ERROR_BAD_VALUE_TSC_LAYOUT(MissingLayout)),
+    maps_utils:is_empty(MissingLayout) orelse throw(?ERROR_TSC_MISSING_LAYOUT(MissingLayout)),
     ok.

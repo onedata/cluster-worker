@@ -108,30 +108,30 @@ get_test() ->
     ?assertEqual(?LIST_ALL_RESULT(lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2)),
         ts_windows:list(Windows, MeasurementsCount - 2, #{})),
 
-    ?assertEqual({ok, []}, ts_windows:list(Windows, MeasurementsCount - 2, #{windowLimit => 0})),
-    ?assertEqual({{continue, #{windowLimit => 1}}, lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2)},
-        ts_windows:list(Windows, MeasurementsCount - 2, #{windowLimit => MeasurementsCount - 1})),
+    ?assertEqual({ok, []}, ts_windows:list(Windows, MeasurementsCount - 2, #{window_limit => 0})),
+    ?assertEqual({{continue, #{window_limit => 1}}, lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2)},
+        ts_windows:list(Windows, MeasurementsCount - 2, #{window_limit => MeasurementsCount - 1})),
     ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 5)},
-        ts_windows:list(Windows, MeasurementsCount - 2, #{windowLimit => 5})),
+        ts_windows:list(Windows, MeasurementsCount - 2, #{window_limit => 5})),
     ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 8)},
-        ts_windows:list(Windows, MeasurementsCount - 2, #{windowLimit => 8})),
+        ts_windows:list(Windows, MeasurementsCount - 2, #{window_limit => 8})),
 
-    ?assertEqual({ok, []}, ts_windows:list(Windows, MeasurementsCount - 2, #{stopTimestamp => MeasurementsCount - 1})),
+    ?assertEqual({ok, []}, ts_windows:list(Windows, MeasurementsCount - 2, #{stop_timestamp => MeasurementsCount - 1})),
     ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 1)},
-        ts_windows:list(Windows, MeasurementsCount - 2, #{stopTimestamp => MeasurementsCount - 2})),
-    ?assertEqual({{continue, #{stopTimestamp => 0}}, lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2)},
-        ts_windows:list(Windows, MeasurementsCount - 2, #{stopTimestamp => 0})),
+        ts_windows:list(Windows, MeasurementsCount - 2, #{stop_timestamp => MeasurementsCount - 2})),
+    ?assertEqual({{continue, #{stop_timestamp => 0}}, lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2)},
+        ts_windows:list(Windows, MeasurementsCount - 2, #{stop_timestamp => 0})),
     ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2)},
-        ts_windows:list(Windows, MeasurementsCount - 2, #{stopTimestamp => 1})),
+        ts_windows:list(Windows, MeasurementsCount - 2, #{stop_timestamp => 1})),
     ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 4)},
-        ts_windows:list(Windows, MeasurementsCount - 2, #{stopTimestamp => 5})),
+        ts_windows:list(Windows, MeasurementsCount - 2, #{stop_timestamp => 5})),
 
     ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 4)},
-        ts_windows:list(Windows, MeasurementsCount - 2, #{windowLimit => 5, stopTimestamp => 5})),
+        ts_windows:list(Windows, MeasurementsCount - 2, #{window_limit => 5, stop_timestamp => 5})),
     ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 5)},
-        ts_windows:list(Windows, MeasurementsCount - 2, #{windowLimit => 5, stopTimestamp => 1})),
-    ?assertEqual({{continue, #{windowLimit => 2, stopTimestamp => 0}}, lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2)},
-        ts_windows:list(Windows, MeasurementsCount - 2, #{windowLimit => MeasurementsCount, stopTimestamp => 0})).
+        ts_windows:list(Windows, MeasurementsCount - 2, #{window_limit => 5, stop_timestamp => 1})),
+    ?assertEqual({{continue, #{window_limit => 2, stop_timestamp => 0}}, lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2)},
+        ts_windows:list(Windows, MeasurementsCount - 2, #{window_limit => MeasurementsCount, stop_timestamp => 0})).
 
 
 split_test() ->

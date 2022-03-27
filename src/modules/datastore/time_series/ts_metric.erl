@@ -109,7 +109,7 @@ list_windows(#metric{
     head_data = Data,
     config = Config
 }, Options, PersistenceCtx) ->
-    Window = get_window_id(maps:get(startTimestamp, Options, undefined), Config),
+    Window = get_window_id(maps:get(start_timestamp, Options, undefined), Config),
     list_windows_internal(Data, Window, Options, PersistenceCtx).
 
 
