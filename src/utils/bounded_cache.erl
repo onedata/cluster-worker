@@ -27,7 +27,7 @@
 
 %% Basic cache API
 -export([get_or_calculate/4, get_or_calculate/5, get/2,
-    calculate_and_cache/4, calculate_and_cache/5, cache/4,
+    calculate_and_cache/4, calculate_and_cache/5, cache/4, cache/5,
     invalidate/1, get_timestamp/0]).
 %% Cache management API
 -export([init_group_manager/0, init_cache/2, init_group/2, cache_exists/1, terminate_cache/1, check_cache_size/1]).
@@ -169,13 +169,17 @@ calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp) ->
             Other
     end.
 
+-spec cache(cache(), key(), value(), timestamp()) -> ok.
+cache(Cache, Key, Value, Timestamp) ->
+    cache(Cache, Key, Value, Timestamp, false).
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Caches value if invalidation has not been done after timestamp.
 %% @end
 %%--------------------------------------------------------------------
--spec cache(cache(), key(), value(), timestamp()) -> ok.
-cache(Cache, Key, Value, Timestamp) ->
+-spec cache(cache(), key(), value(), timestamp(), boolean()) -> ok.
+cache(Cache, Key, Value, Timestamp, Override) ->
     % Insert value with timestamp
     case ets:insert_new(Cache, #cache_item{
         key = Key,
@@ -197,9 +201,19 @@ cache(Cache, Key, Value, Timestamp) ->
                     ok
             end;
         _ ->
-            case ets:lookup(Cache, Key) of
-                [#cache_item{timestamp = ItemTimestamp, timestamp_check = 0}] when ItemTimestamp < Timestamp ->
+            case {ets:lookup(Cache, Key), Override} of
+                {
+                    [#cache_item{timestamp = ItemTimestamp, timestamp_check = 0}],
+                    _
+                } when ItemTimestamp < Timestamp ->
                     % Old value from insert interrupted by invalidation - delete and retry
+                    ets:delete(Cache, Key),
+                    cache(Cache, Key, Value, Timestamp);
+                {
+                    [#cache_item{timestamp = ItemTimestamp, timestamp_check = ItemTimestamp}],
+                    true
+                } when ItemTimestamp < Timestamp ->
+                    % Prev value tu be overridden
                     ets:delete(Cache, Key),
                     cache(Cache, Key, Value, Timestamp);
                 _ ->
