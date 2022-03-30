@@ -579,12 +579,19 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
 -spec execute_slave_job(pool(), callback_module(), ctx(), id(), job()) -> ok | error.
 execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskId, Job) ->
     try
-        case CallbackModule:do_slave_job(Job, TaskId) of
-            ok ->
+        case traverse_task:is_cancelled(PoolName, TaskId) of
+            true -> 
                 ok;
-            {ok, Description} ->
-                {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskId, Description),
-                ok;
+            false ->
+                case CallbackModule:do_slave_job(Job, TaskId) of
+                    ok ->
+                        ok;
+                    {ok, Description} ->
+                        {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskId, Description),
+                        ok;
+                    {error, _} ->
+                        error
+                end;
             {error, _} ->
                 error
         end
