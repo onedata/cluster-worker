@@ -52,7 +52,7 @@ init(Config,  DocSplittingStrategy) ->
     }.
 
 
--spec update(metric(), ts_windows:timestamp(), ts_windows:value(), ts_persistence:ctx()) ->
+-spec update(metric(), ts_windows:timestamp_seconds(), ts_windows:value(), ts_persistence:ctx()) ->
     ts_persistence:ctx().
 update(#metric{
     config = #metric_config{aggregator = Aggregator} = Config,
@@ -336,7 +336,7 @@ delete_data_nodes(DataNodeKey, #data_node{older_node_key = OlderNodeKey}, Persis
     delete_data_nodes(OlderNodeKey, OlderDataNode, UpdatedPersistenceCtx2).
 
 
--spec get_window_id(ts_windows:timestamp() | undefined, config()) -> ts_windows:window_id() | undefined.
+-spec get_window_id(ts_windows:timestamp_seconds() | undefined, config()) -> ts_windows:window_id() | undefined.
 get_window_id(undefined, _) ->
     undefined;
 get_window_id(_Time, #metric_config{resolution = 0}) ->
@@ -371,7 +371,7 @@ get_max_windows_and_split_position(
 
 
 -spec split_node(ts_metric_data_node:key(), data_node(), ts_windows:windows_collection(), ts_windows:windows_collection(),
-    ts_windows:timestamp(), non_neg_integer(), splitting_strategy(), ts_persistence:ctx()) ->
+    ts_windows:timestamp_seconds(), non_neg_integer(), splitting_strategy(), ts_persistence:ctx()) ->
     {ts_metric_data_node:key() | undefined, data_node() | undefined, ts_persistence:ctx()}.
 split_node(DataNodeKey, Data, Windows1, _Windows2, SplitTimestamp, MaxCount,
     #splitting_strategy{max_docs_count = MaxCount}, PersistenceCtx) ->

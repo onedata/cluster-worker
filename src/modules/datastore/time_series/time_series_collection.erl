@@ -254,7 +254,7 @@ list_metrics_by_time_series(Ctx, Id, Batch) ->
     ).
 
 
--spec update(ctx(), collection_id(), ts_windows:timestamp(), ts_windows:value() | update_range(), batch()) ->
+-spec update(ctx(), collection_id(), ts_windows:timestamp_seconds(), ts_windows:value() | update_range(), batch()) ->
     {ok | {error, term()}, batch()}.
 update(Ctx, Id, NewTimestamp, NewValue, Batch) when is_number(NewValue) ->
     ?CATCH_UPDATE_UNEXPECTED_ERRORS(
@@ -271,7 +271,7 @@ update(Ctx, Id, NewTimestamp, NewValue, Batch) when is_number(NewValue) ->
 update(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch) ->
     update_internal(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch, ignore_missing_metrics).
 
--spec check_and_update(ctx(), collection_id(), ts_windows:timestamp(), update_range(), batch()) ->
+-spec check_and_update(ctx(), collection_id(), ts_windows:timestamp_seconds(), update_range(), batch()) ->
     {ok | {error, term()}, batch()}.
 check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch) ->
     update_internal(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch, fail_if_metric_is_missing).
@@ -284,7 +284,7 @@ check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch) ->
 %% (see update_range() type).
 %% @end
 %%--------------------------------------------------------------------
--spec update_internal(ctx(), collection_id(), ts_windows:timestamp(), update_range(), batch(), error_handling_mode()) ->
+-spec update_internal(ctx(), collection_id(), ts_windows:timestamp_seconds(), update_range(), batch(), error_handling_mode()) ->
     {ok | {error, term()}, batch()}.
 update_internal(Ctx, Id, NewTimestamp, MetricsToUpdateWithValues, Batch, ErrorHandlingMode)
     when is_list(MetricsToUpdateWithValues) ->
@@ -305,12 +305,12 @@ update_internal(Ctx, Id, NewTimestamp, {MetricsToUpdate, NewValue}, Batch, Error
     update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, ErrorHandlingMode).
 
 
--spec update(ctx(), collection_id(), ts_windows:timestamp(), request_range() , ts_windows:value(), batch()) ->
+-spec update(ctx(), collection_id(), ts_windows:timestamp_seconds(), request_range() , ts_windows:value(), batch()) ->
     {ok | {error, term()}, batch()}.
 update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
     update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, ignore_missing_metrics).
 
--spec check_and_update(ctx(), collection_id(), ts_windows:timestamp(), request_range() , ts_windows:value(), batch()) ->
+-spec check_and_update(ctx(), collection_id(), ts_windows:timestamp_seconds(), request_range() , ts_windows:value(), batch()) ->
     {ok | {error, term()}, batch()}.
 check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
     update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, fail_if_metric_is_missing).
@@ -321,7 +321,7 @@ check_and_update(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
 %% Puts metrics value for particular timestamp. Updated value is the same for all metrics provided in 4th argument.
 %% @end
 %%--------------------------------------------------------------------
--spec update_internal(ctx(), collection_id(), ts_windows:timestamp(), request_range() , ts_windows:value(), batch(),
+-spec update_internal(ctx(), collection_id(), ts_windows:timestamp_seconds(), request_range() , ts_windows:value(), batch(),
     error_handling_mode()) -> {ok | {error, term()}, batch()}.
 update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, ErrorHandlingMode) ->
     ?CATCH_UPDATE_UNEXPECTED_ERRORS(
@@ -342,7 +342,7 @@ update_internal(Ctx, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch, ErrorHa
 %% Usage of this function allows reduction of datastore overhead.
 %% @end
 %%--------------------------------------------------------------------
--spec update_many(ctx(), collection_id(), [{ts_windows:timestamp(), ts_windows:value()}], batch()) ->
+-spec update_many(ctx(), collection_id(), [{ts_windows:timestamp_seconds(), ts_windows:value()}], batch()) ->
     {ok | {error, term()}, batch()}.
 update_many(_Ctx, _Id, [], Batch) ->
     {ok, Batch};
@@ -526,7 +526,7 @@ get_config_map(TimeSeriesCollectionHeads) ->
     end, TimeSeriesCollectionHeads).
 
 
--spec update_time_series([{time_series_id(), ts_hub:time_series_heads()}], ts_windows:timestamp(),
+-spec update_time_series([{time_series_id(), ts_hub:time_series_heads()}], ts_windows:timestamp_seconds(),
     ts_windows:value(), ts_persistence:ctx()) -> ts_persistence:ctx().
 update_time_series([], _NewTimestamp, _NewValue, PersistenceCtx) ->
     PersistenceCtx;
@@ -537,7 +537,7 @@ update_time_series([{TimeSeriesId, TimeSeries} | Tail], NewTimestamp, NewValue, 
     update_time_series(Tail, NewTimestamp, NewValue, UpdatedPersistenceCtx).
 
 
--spec update_metrics([{ts_metric:id(), ts_metric:metric()}], ts_windows:timestamp(),
+-spec update_metrics([{ts_metric:id(), ts_metric:metric()}], ts_windows:timestamp_seconds(),
     ts_windows:value(), ts_persistence:ctx()) -> ts_persistence:ctx().
 update_metrics([], _NewTimestamp, _NewValue, PersistenceCtx) ->
     PersistenceCtx;
