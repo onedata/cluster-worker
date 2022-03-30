@@ -172,6 +172,14 @@
     log_error_with_stacktrace(Stacktrace, Format, Args)
 ).
 
+
+%% Message broadcasted to all workers on pool (see broadcast_job_cancellation/2). 
+%% Its existence in message queue determines whether given task was cancelled.
+%% As this message is a worker_pool cast message `is_job_cancelled` function will be executed 
+%% after job execution is finished, which will result in removal of this message from process message queue.
+-define(CANCELLATION_MESSAGE(TaskId), {?MODULE, is_job_cancelled, [TaskId]}).
+-define(CANCELLATION_MESSAGE_MATCHER(TaskId), {'$gen_cast', {cast, ?CANCELLATION_MESSAGE(TaskId)}}).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -580,9 +588,9 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
 execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskId, Job) ->
     try
         case traverse_task:is_cancelled(PoolName, TaskId) of
-            true -> 
+            {ok, true} -> 
                 ok;
-            false ->
+            {ok, false} ->
                 case CallbackModule:do_slave_job(Job, TaskId) of
                     ok ->
                         ok;
@@ -613,8 +621,12 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskId, Job) ->
 -spec is_job_cancelled(id()) -> boolean().
 is_job_cancelled(TaskId) ->
     receive
-        {'$gen_cast',{cast,{?MODULE, ?FUNCTION_NAME, [TaskId]}}} = Msg -> 
-            self() ! Msg, % resend message so next calls to this function return correct result
+        ?CANCELLATION_MESSAGE_MATCHER(TaskId) = Msg -> 
+            % Resend message so next calls to this function from the same job return correct result. 
+            % After job execution finishes this message will be handled by worker_pool resulting in 
+            % its removal from message queue. It is enough as following jobs queued on worker pool 
+            % check whether task is cancelled before execution.
+            self() ! Msg, 
             true
     after 
         0 -> false
@@ -1137,6 +1149,6 @@ log_error_with_stacktrace(Stacktrace, Format, Args) ->
 
 -spec broadcast_job_cancellation(pool(), id()) -> ok.
 broadcast_job_cancellation(PoolName, TaskId) ->
-    worker_pool:broadcast(?MASTER_POOL_NAME(PoolName), {?MODULE, is_job_cancelled, [TaskId]}),
-    worker_pool:broadcast(?SLAVE_POOL_NAME(PoolName), {?MODULE, is_job_cancelled, [TaskId]}),
+    worker_pool:broadcast(?MASTER_POOL_NAME(PoolName), ?CANCELLATION_MESSAGE(TaskId)),
+    worker_pool:broadcast(?SLAVE_POOL_NAME(PoolName), ?CANCELLATION_MESSAGE(TaskId)),
     ok.
