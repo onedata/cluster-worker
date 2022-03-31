@@ -63,6 +63,7 @@
     worker := boolean()
 }.
 -type in_critical_section() :: boolean().
+-type conflict_resolution_policy() :: override_if_exists | ignore_if_exists.
 
 -export_type([additional_info/0, cache/0, group/0, cache_options/0, group_options/0,
     callback/0, timestamp/0, value/0]).
@@ -171,15 +172,15 @@ calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp) ->
 
 -spec cache(cache(), key(), value(), timestamp()) -> ok.
 cache(Cache, Key, Value, Timestamp) ->
-    cache(Cache, Key, Value, Timestamp, false).
+    cache(Cache, Key, Value, Timestamp, ignore_if_exists).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Caches value if invalidation has not been done after timestamp.
 %% @end
 %%--------------------------------------------------------------------
--spec cache(cache(), key(), value(), timestamp(), boolean()) -> ok.
-cache(Cache, Key, Value, Timestamp, Override) ->
+-spec cache(cache(), key(), value(), timestamp(), conflict_resolution_policy()) -> ok.
+cache(Cache, Key, Value, Timestamp, ConflictResolutionPolicy) ->
     % Insert value with timestamp
     case ets:insert_new(Cache, #cache_item{
         key = Key,
@@ -201,7 +202,7 @@ cache(Cache, Key, Value, Timestamp, Override) ->
                     ok
             end;
         _ ->
-            case {ets:lookup(Cache, Key), Override} of
+            case {ets:lookup(Cache, Key), ConflictResolutionPolicy} of
                 {
                     [#cache_item{timestamp = ItemTimestamp, timestamp_check = 0}],
                     _
@@ -211,7 +212,7 @@ cache(Cache, Key, Value, Timestamp, Override) ->
                     cache(Cache, Key, Value, Timestamp);
                 {
                     [#cache_item{timestamp = ItemTimestamp, timestamp_check = ItemTimestamp}],
-                    true
+                    override_if_exists
                 } when ItemTimestamp < Timestamp ->
                     % Prev value tu be overridden
                     ets:delete(Cache, Key),
