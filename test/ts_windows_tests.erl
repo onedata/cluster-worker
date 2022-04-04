@@ -18,7 +18,7 @@
 -include_lib("ctool/include/hashing/consistent_hashing.hrl").
 
 -define(LIST_ALL(Windows), ts_windows:list(Windows, undefined, #{})).
--define(LIST_ALL_RESULT(List), {{continue, #{}}, List}).
+-define(LIST_ALL_RESULT(List), {{continue, #{window_limit => 1000 - length(List)}}, List}).
 
 %%%===================================================================
 %%% Tests
@@ -119,7 +119,7 @@ get_test() ->
     ?assertEqual({ok, []}, ts_windows:list(Windows, MeasurementsCount - 2, #{stop_timestamp => MeasurementsCount - 1})),
     ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 1)},
         ts_windows:list(Windows, MeasurementsCount - 2, #{stop_timestamp => MeasurementsCount - 2})),
-    ?assertEqual({{continue, #{stop_timestamp => 0}}, lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2)},
+    ?assertEqual({{continue, #{stop_timestamp => 0, window_limit => 992}}, lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2)},
         ts_windows:list(Windows, MeasurementsCount - 2, #{stop_timestamp => 0})),
     ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2)},
         ts_windows:list(Windows, MeasurementsCount - 2, #{stop_timestamp => 1})),

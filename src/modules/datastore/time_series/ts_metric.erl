@@ -171,7 +171,7 @@ reconfigure(#metric{
         splitting_strategy = NewDocSplittingStrategy
     },
     PersistenceCtxAfterInit = ts_persistence:insert_metric(NewMetric, PersistenceCtx),
-    {_, ExistingWindows} = ts_windows:list(ExistingWindowsSet, undefined, #{}),
+    {_, ExistingWindows} = ts_windows:list_all(ExistingWindowsSet),
     DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtxAfterInit),
     prepend_sorted_windows(DataNodeKey, NewDocSplittingStrategy, ExistingWindows, PersistenceCtxAfterInit);
 reconfigure(#metric{

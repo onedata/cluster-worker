@@ -13,7 +13,7 @@
 -author("Michal Wrzeszcz").
 
 %% API
--export([init/0, list/3, insert_value/4, prepend_windows_list/2, prune_overflowing/2, split/2,
+-export([init/0, list/3, list_all/1, insert_value/4, prepend_windows_list/2, prune_overflowing/2, split/2,
     is_size_exceeded/2, get_remaining_windows_count/2, reorganize/4]).
 %% Encoding/decoding  API
 -export([encode/1, decode/1]).
@@ -56,11 +56,19 @@ init() ->
 -spec list(windows_collection(), timestamp_seconds() | undefined, list_options()) ->
     {ok | {continue, list_options()}, descending_windows_list()}.
 list(Windows, Timestamp, Options) ->
-    SanitizedOptions = maps:map(fun
-        (window_limit, Limit) -> min(Limit, ?MAX_WINDOW_LIMIT);
-        (_, Other) -> Other
-    end, Options),
-    list_internal(Timestamp, Windows, SanitizedOptions).
+    SanitizedWindowLimit = case maps:find(window_limit, Options) of
+        error ->
+            ?MAX_WINDOW_LIMIT;
+        {ok, Limit} ->
+            min(Limit, ?MAX_WINDOW_LIMIT)
+    end,
+    list_internal(Timestamp, Windows, Options#{window_limit => SanitizedWindowLimit}).
+
+
+%% @doc should be used only internally as the complete window list can be large
+-spec list_all(windows_collection()) -> {ok | {continue, list_options()}, descending_windows_list()}.
+list_all(Windows) ->
+    list_internal(undefined, Windows, #{}).
 
 
 -spec insert_value(windows_collection(), timestamp_seconds(), value() | window_value(), insert_strategy()) -> windows_collection().

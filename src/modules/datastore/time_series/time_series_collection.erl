@@ -22,7 +22,7 @@
 %%% (window can be created using several measurements).
 %%% See ts_windows:insert_value/4 to see possible aggregation functions.
 %%%
-%%% Consult @see tsc_structure module for more information about the structure of
+%%% @see tsc_structure module for more information about the structure of
 %%% time series collection as perceived by higher level modules.
 %%%
 %%% The module delegates operations on single metric to ts_metric module
@@ -64,12 +64,27 @@
 -type metric_name() :: binary().
 -export_type([time_series_name/0, metric_name/0]).
 
-%% @see tsc_structure
+%% Different aspects of a time series collection (e.g. config, slice, consume spec)
+%% use the same structure of two-level nested maps, but with different types of values
+%% assigned to each metric. Time series and metrics are identified by their names.
+%% A structure holding values of an arbitrary type 'Type' looks like the following:
+%% #{
+%%    <<"TS1">> => #{
+%%       <<"M1">> => Value1 :: Type
+%%       <<"M2">> => Value2 :: Type
+%%    },
+%%    <<"TS2">> => ...
+%% }
 -type structure(MetricKeyType, ValueType) :: #{time_series_name() => #{MetricKeyType => ValueType}}.
 -type structure(ValueType) :: structure(metric_name(), ValueType).
 -export_type([structure/2, structure/1]).
 
-%% @see tsc_structure
+%% Layout is used to express a summary of a time series collection structure,
+%% holding the list of metric names per time series name:
+%% #{
+%%    <<"TS1">> => [<<"M1">>, <<"M2">>],
+%%    <<"TS2">> => ...
+%% }
 -type layout() :: #{time_series_name() => [metric_name()]}.
 -export_type([layout/0]).
 
@@ -136,8 +151,7 @@ delete(Ctx, Id, Batch) ->
         {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
 
         UpdatedPersistenceCtx = tsc_structure:fold(fun(TimeSeriesName, MetricName, _, PersistenceCtxAcc) ->
-            UpdatedPersistenceCtxAcc = ts_metric:delete_data_nodes(TimeSeriesName, MetricName, PersistenceCtxAcc),
-            ts_metric:delete(TimeSeriesName, MetricName, UpdatedPersistenceCtxAcc)
+            ts_metric:delete_data_nodes(TimeSeriesName, MetricName, PersistenceCtxAcc)
         end, PersistenceCtx, TimeSeriesCollectionHeads),
 
         FinalPersistenceCtx = ts_persistence:delete_hub(UpdatedPersistenceCtx),
@@ -218,7 +232,7 @@ get_slice(Ctx, Id, SliceLayout, ListWindowsOptions, Batch) ->
         ActualLayout = tsc_structure:to_layout(TimeSeriesCollectionHeads),
         assert_is_sub_layout(ActualLayout, SliceLayout),
 
-        {Slice, FinalPersistenceCtx} = tsc_structure:mapfold_from_layout(fun(TimeSeriesName, MetricName, PersistenceCtxAcc) ->
+        {Slice, FinalPersistenceCtx} = tsc_structure:buildfold_from_layout(fun(TimeSeriesName, MetricName, PersistenceCtxAcc) ->
             {_Windows, _UpdatedPersistenceCtxAcc} = ts_metric:list_windows(
                 TimeSeriesName, MetricName, ListWindowsOptions, PersistenceCtxAcc
             )
@@ -292,14 +306,12 @@ reconfigure(PreviousConfig, NewConfig, DocSplittingStrategies, PersistenceCtx) -
 %% @private
 -spec expand_consume_spec(consume_spec(), ts_hub:time_series_collection_heads()) -> consume_spec().
 expand_consume_spec(ConsumeSpec, TimeSeriesCollectionHeads) ->
-    maps:map(fun(TimeSeriesName, MeasurementsPerMetric) ->
-        case MeasurementsPerMetric of
-            #{all := Measurements} ->
-                TimeSeriesConfig = maps:get(TimeSeriesName, TimeSeriesCollectionHeads, #{}),
-                maps:map(fun(_MetricName, _MetricConfig) -> Measurements end, TimeSeriesConfig);
-            _ ->
-                MeasurementsPerMetric
-        end
+    maps:map(fun
+        (TimeSeriesName, #{all := Measurements}) ->
+            TimeSeriesConfig = maps:get(TimeSeriesName, TimeSeriesCollectionHeads, #{}),
+            maps:map(fun(_MetricName, _MetricConfig) -> Measurements end, TimeSeriesConfig);
+        (_TimeSeriesName, MeasurementsPerMetric) ->
+            MeasurementsPerMetric
     end, ConsumeSpec).
 
 

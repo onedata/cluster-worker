@@ -6,29 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Types and functions related to the structure of time series collection.
-%%% Different aspects of a time series collection (e.g. config, slice, consume spec)
-%%% use the same structure of two-level nested maps, but with different types
-%%% of values assigned to each metric. This module provides an abstraction for
-%%% processing these structures and gathers all the concepts that the time series
-%%% collection external API is based on.
-%%%
-%%% Time series and metrics are identified by their names. A structure
-%%% holding values of an arbitrary type 'Type' looks like the following:
-%%% #{
-%%%    TimeSeries1 => #{
-%%%       Metric1 => Value1 :: Type
-%%%       Metric2 => Value2 :: Type
-%%%    },
-%%%    TimeSeries2 => ...
-%%% }
-%%%
-%%% Time series collections also use the concept of layout, which is a list
-%%% of metric names per time series name:
-%%% #{
-%%%    TimeSeries1 => [Metric1, Metric2],
-%%%    TimeSeries2 => ...
-%%% }
+%%% Utilities operating on the time series collection structure.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(tsc_structure).
@@ -37,7 +15,7 @@
 
 %% API
 -export([has/3, foreach/2, map/2, fold/3, merge_with/3]).
--export([to_layout/1, build_from_layout/2, mapfold_from_layout/3]).
+-export([to_layout/1, build_from_layout/2, buildfold_from_layout/3]).
 
 
 % merely wrappers for shorter specs
@@ -45,6 +23,7 @@
 -type metric_name() :: time_series_collection:metric_name().
 -type structure(ValueType) :: time_series_collection:structure(ValueType).
 -type layout() :: time_series_collection:layout().
+
 
 %%%===================================================================
 %%% API
@@ -112,13 +91,13 @@ build_from_layout(BuildFun, Structure) ->
     end, Structure).
 
 
--spec mapfold_from_layout(fun((time_series_name(), metric_name(), Acc) -> {Type, Acc}), Acc, layout()) ->
+-spec buildfold_from_layout(fun((time_series_name(), metric_name(), Acc) -> {Type, Acc}), Acc, layout()) ->
     {structure(Type), Acc}.
-mapfold_from_layout(MapFoldFun, InitialAcc, Layout) ->
-    maps:fold(fun(TimeSeriesName, MetricNames, {OuterMapAcc, OuterFoldAcc}) ->
-        {InnerMapResult, InnerFoldResult} = lists:foldl(fun(MetricName, {InnerMapAcc, InnerFoldAcc}) ->
-            {MappedValue, UpdatedInnerFoldAcc} = MapFoldFun(TimeSeriesName, MetricName, InnerFoldAcc),
-            {InnerMapAcc#{MetricName => MappedValue}, UpdatedInnerFoldAcc}
+buildfold_from_layout(BuildFoldFun, InitialFoldAcc, Layout) ->
+    maps:fold(fun(TimeSeriesName, MetricNames, {StructureAcc, OuterFoldAcc}) ->
+        {InnerMapResult, InnerFoldResult} = lists:foldl(fun(MetricName, {PerMetricAcc, InnerFoldAcc}) ->
+            {MappedValue, UpdatedInnerFoldAcc} = BuildFoldFun(TimeSeriesName, MetricName, InnerFoldAcc),
+            {PerMetricAcc#{MetricName => MappedValue}, UpdatedInnerFoldAcc}
         end, {#{}, OuterFoldAcc}, MetricNames),
-        {OuterMapAcc#{TimeSeriesName => InnerMapResult}, InnerFoldResult}
-    end, {#{}, InitialAcc}, Layout).
+        {StructureAcc#{TimeSeriesName => InnerMapResult}, InnerFoldResult}
+    end, {#{}, InitialFoldAcc}, Layout).

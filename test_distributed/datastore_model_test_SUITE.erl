@@ -83,7 +83,7 @@
     time_series_test/1,
     multinode_time_series_test/1,
     time_series_document_fetch_test/1,
-    config_incorporation_test/1
+    time_series_config_incorporation_test/1
 ]).
 
 % for rpc
@@ -146,7 +146,7 @@ all() ->
         time_series_test,
         multinode_time_series_test,
         time_series_document_fetch_test,
-        config_incorporation_test
+        time_series_config_incorporation_test
     ], [
         links_performance,
         create_get_performance,
@@ -1154,6 +1154,12 @@ multinode_time_series_test(Config) ->
 
         ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
 
+        % window_limit should default to 1000 if not provided
+%%        {ok, #{
+%%            <<"TS0">> := #{<<"M1">> := Windows}
+%%        }} = rpc:call(Worker, Model, time_series_collection_get_slice, [Id, #{<<"TS0">> => [<<"M1">>]}, #{}]),
+%%        ?assertEqual(1000, length(Windows)),
+
         % Verify if delete clears all documents from datastore
         ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [Id])),
         ?assertEqual([], get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys)
@@ -1208,7 +1214,7 @@ time_series_document_fetch_test(Config) ->
     end, ?TEST_CACHED_MODELS).
 
 
-config_incorporation_test(Config) ->
+time_series_config_incorporation_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         InitialKeys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)),

@@ -82,14 +82,10 @@ upgrade_record(1, {?MODULE, TimeSeriesCollectionHeads}
             SplittingStrategy,
             DataNode
         } = OldMetric,
-        #metric{
-            config = #metric_config{
-                resolution = Resolution,
-                retention = Retention,
-                aggregator = Aggregator
-            },
-            splitting_strategy = SplittingStrategy,
-            head_data = DataNode
+        {metric,
+            {metric_config, Resolution, Retention, Aggregator},
+            SplittingStrategy,
+            DataNode
         }
     end, TimeSeriesCollectionHeads)}}.
 
@@ -118,7 +114,7 @@ get_record_struct(2) ->
     {record, [DataRecordStruct]} = ts_metric_data_node:get_record_struct(1),
     {record, [
         {time_series_collection_heads, #{string => #{string => {record, [
-            {config, {custom, string, {persistent_record, encode, decode, metric_config}}},
+            {config, {custom, string, {persistent_record, encode, decode, metric_config}}}, % changed field
             {splitting_strategy, {record, [
                 {max_docs_count, integer},
                 {max_windows_in_head_doc, integer},
