@@ -180,7 +180,7 @@ incorporate_config(Ctx, Id, ConfigToIncorporate, Batch) ->
             Config
         end, TimeSeriesCollectionHeads),
 
-        NewConfig = merge_configs(PreviousConfig, ConfigToIncorporate),
+        NewConfig = integrate_config_with_extension(PreviousConfig, ConfigToIncorporate),
         case NewConfig of
             PreviousConfig ->
                 {ok, ts_persistence:finalize(PersistenceCtx)};
@@ -274,8 +274,8 @@ sanitize_config(Config) ->
 
 
 %% @private
--spec merge_configs(config(), config()) -> config().
-merge_configs(First, Second) ->
+-spec integrate_config_with_extension(config(), config()) -> config().
+integrate_config_with_extension(BaseConfig, Extension) ->
     tsc_structure:merge_with(fun(TimeSeriesName, MetricName, FirstMetricConfig, SecondMetricConfig) ->
         case FirstMetricConfig =:= SecondMetricConfig of
             true ->
@@ -285,7 +285,7 @@ merge_configs(First, Second) ->
                     TimeSeriesName, MetricName, FirstMetricConfig, SecondMetricConfig
                 ))
         end
-    end, First, Second).
+    end, BaseConfig, Extension).
 
 
 -spec reconfigure(config(), config(), ts_doc_splitting_strategies:splitting_strategies_map(), ts_persistence:ctx()) ->
