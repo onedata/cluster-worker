@@ -175,6 +175,8 @@
 
 %% Message broadcasted to all workers on pool (see broadcast_job_cancellation/2). 
 %% Its existence in message queue determines whether given task was cancelled.
+%% Message and matcher structure is determined by worker_pool broadcast message format and its 
+%% underlying implementation.
 %% As this message is a worker_pool cast message `is_job_cancelled` function will be executed 
 %% after job execution is finished, which will result in removal of this message from process message queue.
 -define(CANCELLATION_MESSAGE(TaskId), {?MODULE, is_job_cancelled, [TaskId]}).
@@ -623,7 +625,7 @@ is_job_cancelled(TaskId) ->
     receive
         ?CANCELLATION_MESSAGE_MATCHER(TaskId) = Msg -> 
             % Resend message so next calls to this function from the same job return correct result. 
-            % After job execution finishes this message will be handled by worker_pool resulting in 
+            % After job execution finish this message will be handled by worker_pool resulting in 
             % its removal from message queue. It is enough as following jobs queued on worker pool 
             % check whether task is cancelled before execution.
             self() ! Msg, 

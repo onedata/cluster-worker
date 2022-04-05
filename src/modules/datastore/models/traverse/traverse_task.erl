@@ -464,15 +464,15 @@ is_enqueued(#document{value = #traverse_task{
 }}) ->
     Enqueued and not Canceled.
 
--spec is_cancelled(doc()) -> {ok, boolean()}.
+-spec is_cancelled(doc()) -> boolean().
 is_cancelled(#document{value = #traverse_task{canceled = Cancelled}}) ->
-    {ok, Cancelled}.
+    Cancelled.
 
 -spec is_cancelled(traverse:pool(), traverse:id()) -> {ok, boolean()} | {error, term()}.
 is_cancelled(Pool, TaskId) ->
     case get(Pool, TaskId) of
         {ok, Doc} ->
-            is_cancelled(Doc);
+            {ok, is_cancelled(Doc)};
         Other ->
             Other
     end.
