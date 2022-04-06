@@ -1154,12 +1154,6 @@ multinode_time_series_test(Config) ->
 
         ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
 
-        % window_limit should default to 1000 if not provided
-%%        {ok, #{
-%%            <<"TS0">> := #{<<"M1">> := Windows}
-%%        }} = rpc:call(Worker, Model, time_series_collection_get_slice, [Id, #{<<"TS0">> => [<<"M1">>]}, #{}]),
-%%        ?assertEqual(1000, length(Windows)),
-
         % Verify if delete clears all documents from datastore
         ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [Id])),
         ?assertEqual([], get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys)
@@ -1269,6 +1263,12 @@ time_series_config_incorporation_test(Config) ->
             }
         },
         ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
+
+        % window_limit should default to 1000 if not provided
+        {ok, #{
+            <<"TS1">> := #{<<"M1">> := Windows}
+        }} = rpc:call(Worker, Model, time_series_collection_get_slice, [Id, #{<<"TS1">> => [<<"M1">>]}, #{}]),
+        ?assertEqual(1000, length(Windows)),
 
         % Verify if delete clears all documents from datastore
         ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [Id])),
