@@ -15,21 +15,21 @@
 -author("Michal Wrzeszcz").
 
 -include_lib("ctool/include/time_series/common.hrl").
+-include("modules/datastore/datastore_time_series.hrl").
 
 %% API
 -export([set_time_series_collection_heads/1, get_time_series_collection_heads/1]).
 %% datastore_model callbacks
--export([get_ctx/0, get_record_struct/1]).
+-export([get_ctx/0, get_record_version/0, upgrade_record/2, get_record_struct/1]).
 
 -record(ts_hub, {
     time_series_collection_heads :: time_series_collection_heads()
 }).
 
 -type record() :: #ts_hub{}.
--type time_series_heads() :: #{ts_metric:id() => ts_metric:metric()}.
--type time_series_collection_heads() :: #{time_series_collection:time_series_id() => time_series_heads()}.
+-type time_series_collection_heads() :: time_series_collection:structure(ts_metric:record()).
 
--export_type([time_series_heads/0, time_series_collection_heads/0]).
+-export_type([time_series_collection_heads/0]).
 
 % Context used only by datastore to initialize internal structures.
 % Context provided via time_series_collection module functions
@@ -66,6 +66,30 @@ get_time_series_collection_heads(#ts_hub{time_series_collection_heads = TimeSeri
 get_ctx() ->
     ?CTX.
 
+
+-spec get_record_version() -> datastore_model:record_version().
+get_record_version() ->
+    2.
+
+
+-spec upgrade_record(datastore_model:record_version(), datastore_model:record()) ->
+    {datastore_model:record_version(), datastore_model:record()}.
+upgrade_record(1, {?MODULE, TimeSeriesCollectionHeads}
+) ->
+    {2, {?MODULE, tsc_structure:map(fun(_TimeSeriesName, _MetricName, OldMetric) ->
+        {metric,
+            {metric_config, _Label, Resolution, Retention, Aggregator},
+            SplittingStrategy,
+            DataNode
+        } = OldMetric,
+        {metric,
+            {metric_config, Resolution, Retention, Aggregator},
+            SplittingStrategy,
+            DataNode
+        }
+    end, TimeSeriesCollectionHeads)}}.
+
+
 -spec get_record_struct(datastore_model:record_version()) ->
     datastore_model:record_struct().
 get_record_struct(1) ->
@@ -78,6 +102,19 @@ get_record_struct(1) ->
                 {retention, integer},
                 {aggregator, atom}
             ]}},
+            {splitting_strategy, {record, [
+                {max_docs_count, integer},
+                {max_windows_in_head_doc, integer},
+                {max_windows_in_tail_doc, integer}
+            ]}},
+            DataRecordStruct
+        ]}}}}
+    ]};
+get_record_struct(2) ->
+    {record, [DataRecordStruct]} = ts_metric_data_node:get_record_struct(1),
+    {record, [
+        {time_series_collection_heads, #{string => #{string => {record, [
+            {config, {custom, string, {persistent_record, encode, decode, metric_config}}}, % changed field
             {splitting_strategy, {record, [
                 {max_docs_count, integer},
                 {max_windows_in_head_doc, integer},

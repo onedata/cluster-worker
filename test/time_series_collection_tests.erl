@@ -16,14 +16,10 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("ctool/include/time_series/common.hrl").
+-include_lib("ctool/include/test/test_utils.hrl").
 -include("modules/datastore/datastore_time_series.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include("global_definitions.hrl").
-
--define(LIST(Id, Requested, Batch), ?LIST(Id, Requested, #{}, Batch)).
--define(LIST(Id, Requested, Options, Batch), time_series_collection:list_windows(#{}, Id, Requested, Options, Batch)).
--define(LIST_ALL(Id, Batch), time_series_collection:list_windows(#{}, Id, #{}, Batch)).
--define(LIST_OK_ANS(Expected), {{ok, Expected}, _}).
 
 -define(MAX_DOC_SIZE, 200).
 
@@ -36,16 +32,22 @@ ts_test_() ->
         fun setup/0,
         fun teardown/1,
         [
+            fun empty_collection_creation/0,
+            fun metric_config_sanitization/0,
+            fun invalid_incorporate_config_request_with_conflicting_metric_config/0,
+            fun invalid_consume_measurements_request/0,
+            fun invalid_get_slice_request/0,
+            fun errors_when_collection_does_not_exist/0,
+            fun get_layout_request/0,
             fun single_metric_single_node/0,
-            fun single_metric_infinite_resolution/0, 
+            fun single_metric_infinite_resolution/0,
             {timeout, 5, fun single_metric_multiple_nodes/0},
             fun single_time_series_single_node/0,
             {timeout, 5, fun single_time_series_multiple_nodes/0},
             fun multiple_time_series_single_node/0,
             {timeout, 5, fun multiple_time_series_multiple_nodes/0},
             fun update_subset/0,
-            {timeout, 5, fun metric_adding_and_deleting/0},
-            fun errors_when_collection_does_not_exist/0
+            {timeout, 5, fun lifecycle_with_config_incorporation/0}
         ]
     }.
 
@@ -71,115 +73,268 @@ teardown(_) ->
 %%% Tests
 %%%===================================================================
 
+empty_collection_creation() ->
+    init_test_with_newly_created_collection(#{}),
+
+    ?assertEqual(ok, call_incorporate_config(#{
+        <<"TS1">> => #{
+            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 10, aggregator = max}
+        },
+        <<"TS2">> => #{
+            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 50, aggregator = last},
+            <<"M2">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 2000, aggregator = min}
+        }
+    })),
+    ?assertEqual({ok, #{
+        <<"TS1">> => [<<"M1">>],
+        <<"TS2">> => [<<"M1">>, <<"M2">>]
+    }}, call_get_layout()).
+
+
+metric_config_sanitization() ->
+    VeryLongName = <<"very_very_very_looong_name_with_at_least_50_characters">>,
+    TestCases = [{
+        ?ERROR_BAD_VALUE_NAME(<<"timeSeriesName">>),
+        #{<<1, 2, 3>> => #{<<"M1">> => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = sum}}}
+    }, {
+        ?ERROR_BAD_VALUE_NAME(<<"metricName">>),
+        #{<<"TS1">> => #{VeryLongName => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = sum}}}
+    }, {
+        ?ERROR_BAD_VALUE_NOT_IN_RANGE(<<"retention">>, 1, 1000000),
+        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0, resolution = ?MINUTE_RESOLUTION, aggregator = sum}}}
+    }, {
+        ?ERROR_BAD_VALUE_NOT_IN_RANGE(<<"retention">>, 1, 1000000),
+        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 999999999, resolution = ?MINUTE_RESOLUTION, aggregator = max}}}
+    }, {
+        ?ERROR_BAD_DATA(<<"retention">>, <<"Retention must be set to 1 if resolution is set to 0 (infinite window resolution)">>),
+        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = ?INFINITY_RESOLUTION, aggregator = min}}}
+    }, {
+        ?ERROR_BAD_VALUE_NOT_ALLOWED(<<"resolution">>, ?ALLOWED_METRIC_RESOLUTIONS),
+        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = -1, aggregator = max}}}
+    }, {
+        ?ERROR_BAD_VALUE_NOT_ALLOWED(<<"aggregator">>, ?ALLOWED_METRIC_AGGREGATORS),
+        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = 60, aggregator = bad}}}
+    }],
+    lists:foreach(fun({ExpError, Config}) ->
+        init_batch(),
+        ?assertEqual(ExpError, call_create(datastore_key:new(), Config)),
+
+        init_test_with_newly_created_collection(#{
+            <<"TSX">> => #{
+                <<"MX">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = sum}
+            }
+        }),
+        ?assertEqual(ExpError, call_incorporate_config(Config))
+    end, TestCases).
+
+
+invalid_incorporate_config_request_with_conflicting_metric_config() ->
+    init_test_with_newly_created_collection(#{
+        <<"TS1">> => #{
+            <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = sum}
+        },
+        <<"TS2">> => #{
+            <<"M2">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = last}
+        }
+    }),
+    ?assertEqual(
+        call_incorporate_config(#{
+            <<"TS1">> => #{
+                <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = sum}
+            },
+            <<"TS2">> => #{
+                <<"M2">> => #metric_config{resolution = ?YEAR_RESOLUTION, retention = 10, aggregator = max}
+            }
+        }),
+        ?ERROR_BAD_VALUE_TSC_CONFLICTING_METRIC_CONFIG(<<"TS2">>, <<"M2">>,
+            #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = last},
+            #metric_config{resolution = ?YEAR_RESOLUTION, retention = 10, aggregator = max}
+        )
+    ).
+
+
+invalid_consume_measurements_request() ->
+    init_test_with_newly_created_collection(#{
+        <<"TS1">> => #{
+            <<"M1">> => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 12, aggregator = sum},
+            <<"M2">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 24, aggregator = min},
+            <<"M3">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 36, aggregator = max}
+        }
+    }),
+    ?assertEqual(
+        call_consume_measurements(#{
+            <<"TS1">> => #{
+                <<"M1">> => [{1, 2}],
+                <<"M2">> => lists:seq(1, 100),
+                <<"M3">> => [],
+                <<"M4">> => [{5, 6}, {7, 8}]
+            },
+            <<"TS2">> => #{
+                <<"M2">> => lists:seq(0, 10, 2)
+            }
+        }),
+        ?ERROR_TSC_MISSING_LAYOUT(#{
+            <<"TS1">> => [<<"M4">>],
+            <<"TS2">> => [<<"M2">>]
+        })
+    ),
+    ?assertEqual(
+        call_consume_measurements(#{
+            <<"TS2">> => #{
+                all => lists:seq(0, 10, 2)
+            }
+        }),
+        ?ERROR_TSC_MISSING_LAYOUT(#{
+            <<"TS2">> => []
+        })
+    ).
+
+
+invalid_get_slice_request() ->
+    init_test_with_newly_created_collection(#{
+        <<"TS1">> => #{
+            <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = sum}
+        },
+        <<"TS2">> => #{
+            <<"M2.1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = last},
+            <<"M2.2">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 10, aggregator = max}
+        }
+    }),
+    ?assertEqual(
+        call_get_slice(#{
+            <<"TS1">> => [<<"M1.X">>],
+            <<"TS2">> => [<<"M2.1">>, <<"M2.3">>],
+            <<"TS3">> => []
+        }),
+        ?ERROR_TSC_MISSING_LAYOUT(#{
+            <<"TS1">> => [<<"M1.X">>],
+            <<"TS2">> => [<<"M2.3">>],
+            <<"TS3">> => []
+        })
+    ).
+
+
+get_layout_request() ->
+    init_test_with_newly_created_collection(#{
+        <<"TS1">> => #{
+            <<"M1">> => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = sum}
+        },
+        <<"TS2">> => #{
+            <<"M2.1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = min},
+            <<"M2.2">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 10, aggregator = max}
+        }
+    }),
+    ?assertEqual(ok, call_incorporate_config(#{
+        <<"TS2">> => #{
+            <<"M2.1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = min},
+            <<"M2.2">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 10, aggregator = max},
+            <<"M2.3">> => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = last}
+        },
+        <<"TS3">> => #{
+            <<"M3.1">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 24, aggregator = max}
+        }
+    })),
+    ?assertEqual(call_get_layout(), {ok, #{
+        <<"TS1">> => [<<"M1">>],
+        <<"TS2">> => [<<"M2.1">>, <<"M2.2">>, <<"M2.3">>],
+        <<"TS3">> => [<<"M3.1">>]
+    }}).
+
+
 single_metric_single_node() ->
-    Id = datastore_key:new(),
-    TimeSeriesId = <<"TS1">>,
-    MetricId = <<"M1">>,
-    MetricsConfig = #metric_config{resolution = 10, retention = 5, aggregator = sum},
-    ConfigMap = #{TimeSeriesId => #{MetricId => MetricsConfig}},
-    Batch = init(Id, ConfigMap),
-    ?assertEqual({{error, collection_already_exists}, Batch}, time_series_collection:create(#{}, Id, ConfigMap, Batch)),
+    TimeSeriesName = <<"TS1">>,
+    MetricName = <<"M1">>,
+    init_test_with_newly_created_collection(#{
+        TimeSeriesName => #{
+            MetricName => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 10, aggregator = sum}
+        }
+    }),
 
-    % Prepare time series collection to be used in tests (batch stores collection)
-    Measurements = lists:map(fun(I) -> {I, I/2} end, lists:seq(10, 49) ++ lists:seq(60, 69)),
-    Batch2 = update_many(Id, Measurements, Batch),
+    Measurements = lists:map(fun(I) -> {I, I / 2} end, lists:seq(10, 49) ++ lists:seq(60, 69)),
+    consume_measurements_foreach_metric(Measurements),
 
-    % Get and verify all windows (measurements are arithmetic sequence so values of windows
-    % are calculated using formula for the sum of an arithmetic sequence)
-    ExpectedGetAns = lists:reverse(lists:map(fun(N) -> {N, {10, 5 * N + 22.5}} end, lists:seq(10, 40, 10) ++ [60])),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns), ?LIST(Id, {TimeSeriesId, MetricId}, Batch2)),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns), ?LIST(Id, {TimeSeriesId, MetricId}, #{start => 1000}, Batch2)),
-    ?assertMatch(?LIST_OK_ANS([]), ?LIST(Id, {TimeSeriesId, MetricId}, #{start => 1}, Batch2)),
+    % Measurements are arithmetic sequence so values of windows
+    % are calculated using formula for the sum of an arithmetic sequence
+    ExpWindows = lists:reverse(lists:map(fun(I) ->
+        {I, {5, 2.5 * I + 5}} end, lists:seq(10, 49, 5) ++ lists:seq(60, 69, 5))),
+    ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName)),
+    ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName, #{start_timestamp => 1000})),
+    ?assert(compare_windows_list([], TimeSeriesName, MetricName, #{start_timestamp => 1})),
 
-    % Get and verify different ranges of windows using single option
-    ExpectedGetAns2 = lists:sublist(ExpectedGetAns, 2),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns2), ?LIST(Id, {TimeSeriesId, MetricId}, #{limit => 2}, Batch2)),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns2), ?LIST(Id, {TimeSeriesId, MetricId}, #{stop => 35}, Batch2)),
+    ExpWindows2 = lists:sublist(ExpWindows, 2),
+    ?assert(compare_windows_list(ExpWindows2, TimeSeriesName, MetricName, #{window_limit => 2})),
+    ?assert(compare_windows_list(ExpWindows2, TimeSeriesName, MetricName, #{stop_timestamp => 47})),
 
-    % Get and verify different ranges of windows using multiple options
-    ExpectedGetAns3 = lists:sublist(ExpectedGetAns, 2, 2),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns3), ?LIST(Id, {TimeSeriesId, MetricId}, #{start => 45, limit => 2}, Batch2)),
-    GetAns = ?LIST(Id, {TimeSeriesId, MetricId}, #{start => 45, stop => 25}, Batch2),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns3), GetAns),
-    {_, Batch3} = GetAns,
+    ExpWindows3 = lists:sublist(ExpWindows, 3, 2),
+    ?assert(compare_windows_list(ExpWindows3, TimeSeriesName, MetricName, #{start_timestamp => 47, window_limit => 2})),
+    ?assert(compare_windows_list(ExpWindows3, TimeSeriesName, MetricName, #{start_timestamp => 45, stop_timestamp => 36})),
 
-    % Add new measurement and verify if last window is dropped
-    Batch4 = update(Id, 100, 5, Batch3),
-    ExpectedGetAns4 = [{100, {1, 5}} | lists:sublist(ExpectedGetAns, 4)],
-    GetAns2 = ?LIST(Id, {TimeSeriesId, MetricId}, Batch4),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns4), GetAns2),
+    % Add a new measurement and verify if last window is dropped
+    consume_measurements_foreach_metric([{100, 5}]),
+    ExpWindows4 = [{100, {1, 5}} | lists:sublist(ExpWindows, 9)],
+    ?assert(compare_windows_list(ExpWindows4, TimeSeriesName, MetricName)),
 
-    % Add measurement and verify if nothing changed (measurement is too old)
-    Batch5 = update(Id, 1, 5, Batch4),
-    ?assertEqual(GetAns2, ?LIST(Id, {TimeSeriesId, MetricId}, Batch5)),
+    % Add a measurement and verify if nothing changed (measurement is too old)
+    consume_measurements_foreach_metric([{1, 5}]),
+    ?assert(compare_windows_list(ExpWindows4, TimeSeriesName, MetricName)),
 
     % Add measurement in the middle of existing windows and verify windows
-    Batch6 = update(Id, 53, 5, Batch5),
-    ExpectedGetAns5 = [{100, {1, 5}}] ++ lists:sublist(ExpectedGetAns, 1) ++
-        [{50, {1, 5}}] ++ lists:sublist(ExpectedGetAns, 2, 2),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns5), ?LIST(Id, {TimeSeriesId, MetricId}, Batch6)),
-
-    % Get not existing metric and verify answer
-    ?assertMatch(?LIST_OK_ANS(undefined), ?LIST(Id, very_bad_arg, Batch6)).
+    consume_measurements_foreach_metric([{53, 5}]),
+    ExpWindows5 = lists:flatten([
+        {100, {1, 5}},
+        lists:sublist(ExpWindows, 1, 2),
+        {50, {1, 5}},
+        lists:sublist(ExpWindows, 3, 6)
+    ]),
+    ?assert(compare_windows_list(ExpWindows5, TimeSeriesName, MetricName)).
 
 
 single_metric_infinite_resolution() ->
-    Id = datastore_key:new(),
-    TimeSeriesId = <<"TS1">>,
-    MetricId = <<"M1">>,
-    MetricsConfig = #metric_config{resolution = 0, retention = 1, aggregator = sum},
-    ConfigMap = #{TimeSeriesId => #{MetricId => MetricsConfig}},
-    Batch = init(Id, ConfigMap),
-    ?assertEqual({{error, collection_already_exists}, Batch}, time_series_collection:create(#{}, Id, ConfigMap, Batch)),
-    
-    % Prepare time series collection to be used in tests (batch stores collection)
-    Measurements = lists:map(fun(I) -> {I, I/2} end, lists:seq(10, 49) ++ lists:seq(60, 69)),
-    Batch2 = update_many(Id, Measurements, Batch),
-    
-    % Get and verify all windows (measurements are arithmetic sequence so values of windows
-    % are calculated using formula for the sum of an arithmetic sequence)
-    ExpectedGetAns = [{0, {50, 40 * (24.5 + 5)/2 + 10 * (34.5 + 30)/2}}],
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns), ?LIST(Id, {TimeSeriesId, MetricId}, Batch2)),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns), ?LIST(Id, {TimeSeriesId, MetricId}, #{start => 1000}, Batch2)),
-    
-    % Get and verify different ranges of windows using single option
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns), ?LIST(Id, {TimeSeriesId, MetricId}, #{limit => 2}, Batch2)),
-    ?assertMatch(?LIST_OK_ANS([]), ?LIST(Id, {TimeSeriesId, MetricId}, #{stop => 35}, Batch2)).
+    TimeSeriesName = <<"TS1">>,
+    MetricName = <<"M1">>,
+    init_test_with_newly_created_collection(#{
+        TimeSeriesName => #{
+            MetricName => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = sum}
+        }
+    }),
+
+    Measurements = lists:map(fun(I) -> {I, I / 2} end, lists:seq(10, 49) ++ lists:seq(60, 69)),
+    consume_measurements_foreach_metric(Measurements),
+
+    % Measurements are arithmetic sequence so values of windows
+    % are calculated using formula for the sum of an arithmetic sequence
+    ExpWindows = [{0, {50, 40 * (24.5 + 5) / 2 + 10 * (34.5 + 30) / 2}}],
+    ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName)),
+    ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName, #{start_timestamp => 1000})),
+    ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName, #{window_limit => 2})),
+    ?assert(compare_windows_list([], TimeSeriesName, MetricName, #{stop_timestamp => 35})).
 
 
 single_metric_multiple_nodes() ->
-    Id = datastore_key:new(),
-    TimeSeriesId = <<"TS1">>,
-    MetricId = <<"M1">>,
-    MetricsConfig = #metric_config{resolution = 1, retention = 400, aggregator = max},
-    ConfigMap = #{TimeSeriesId => #{MetricId => MetricsConfig}},
-    Batch = init(Id, ConfigMap),
+    TimeSeriesName = <<"TS1">>,
+    MetricName = <<"M1">>,
+    init_test_with_newly_created_collection(#{
+        TimeSeriesName => #{
+            MetricName => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 400, aggregator = max}
+        }
+    }),
 
-    % Prepare time series collection to be used in tests (batch stores collection)
     Measurements = lists:map(fun(I) -> {2 * I, 4 * I} end, lists:seq(1, 1000)),
-    Batch2 = update_many(Id, Measurements, Batch),
+    consume_measurements_foreach_metric(Measurements),
 
-    % Get and verify all windows
-    ExpectedGetAns = lists:reverse(Measurements),
-    ExpectedMap = #{{TimeSeriesId, MetricId} => ExpectedGetAns},
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns), ?LIST(Id, {TimeSeriesId, MetricId}, Batch2)),
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap), ?LIST(Id, [{TimeSeriesId, MetricId}], Batch2)),
+    ExpWindows = lists:reverse(Measurements),
+    ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName)),
 
-    % Get and verify different ranges of windows
-    ExpectedSublist = lists:sublist(ExpectedGetAns, 101, 400),
-    ?assertMatch(?LIST_OK_ANS(ExpectedSublist),
-        ?LIST(Id, {TimeSeriesId, MetricId}, #{start => 1800, limit => 400}, Batch2)),
-    ?assertMatch(?LIST_OK_ANS(ExpectedSublist),
-        ?LIST(Id, {TimeSeriesId, MetricId}, #{start => 1800, stop => 1002}, Batch2)),
+    ExpWindows2 = lists:sublist(ExpWindows, 101, 400),
+    ?assert(compare_windows_list(ExpWindows2, TimeSeriesName, MetricName, #{start_timestamp => 1800, window_limit => 400})),
+    ?assert(compare_windows_list(ExpWindows2, TimeSeriesName, MetricName, #{start_timestamp => 1800, stop_timestamp => 1002})),
 
-    ExpectedSublist2 = lists:sublist(ExpectedGetAns, 301, 400),
-    ?assertMatch(?LIST_OK_ANS(ExpectedSublist2),
-        ?LIST(Id, {TimeSeriesId, MetricId}, #{start => 1400, limit => 400}, Batch2)),
-    ?assertMatch(?LIST_OK_ANS(ExpectedSublist2),
-        ?LIST(Id, {TimeSeriesId, MetricId}, #{start => 1400, stop => 602}, Batch2)),
+    ExpWindows3 = lists:sublist(ExpWindows, 301, 400),
+    ?assert(compare_windows_list(ExpWindows3, TimeSeriesName, MetricName, #{start_timestamp => 1400, window_limit => 400})),
+    ?assert(compare_windows_list(ExpWindows3, TimeSeriesName, MetricName, #{start_timestamp => 1400, stop_timestamp => 602})),
 
     % Verify if windows are stored using multiple datastore documents
-    ?assertEqual(5, maps:size(Batch2)),
+    ?assertEqual(5, maps:size(get_current_batch())),
     DocsNums = lists:foldl(fun
         (#document{value = {ts_metric_data_node, #data_node{windows = Windows}}}, {HeadsCountAcc, TailsCountAcc}) ->
             ?assertEqual(200, ts_windows:get_size(Windows)),
@@ -189,127 +344,100 @@ single_metric_multiple_nodes() ->
             [#metric{head_data = #data_node{windows = Windows}}] = maps:values(Metrics),
             ?assertEqual(200, ts_windows:get_size(Windows)),
             {HeadsCountAcc + 1, TailsCountAcc}
-    end, {0, 0}, maps:values(Batch2)),
+    end, {0, 0}, maps:values(get_current_batch())),
     ?assertEqual({1, 4}, DocsNums),
 
     % Add new measurements and verify if last windows are dropped
     [NewMeasurement1, NewMeasurement2 | Measurements2Tail] = Measurements2 =
         lists:map(fun(I) -> {2 * I, 4 * I} end, lists:seq(1001, 1200)),
-    Batch3 = update_many(Id, [NewMeasurement2, NewMeasurement1], Batch2),
-    ExpectedGetAns2 = [NewMeasurement2, NewMeasurement1 | lists:sublist(ExpectedGetAns, 800)],
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns2), ?LIST(Id, {TimeSeriesId, MetricId}, Batch3)),
+    consume_measurements_foreach_metric([NewMeasurement2, NewMeasurement1]),
+    ExpWindows4 = [NewMeasurement2, NewMeasurement1 | lists:sublist(ExpWindows, 800)],
+    ?assert(compare_windows_list(ExpWindows4, TimeSeriesName, MetricName)),
 
     % Add new measurements and verify if no window is dropped
     % (windows were dropped during previous update so new windows can be added)
-    Batch4 = update_many(Id, Measurements2Tail, Batch3),
-    ExpectedGetAns3 = lists:sublist(lists:reverse(Measurements ++ Measurements2), 1000),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns3), ?LIST(Id, {TimeSeriesId, MetricId}, Batch4)),
+    consume_measurements_foreach_metric(Measurements2Tail),
+    ExpWindows5 = lists:sublist(lists:reverse(Measurements ++ Measurements2), 1000),
+    ?assert(compare_windows_list(ExpWindows5, TimeSeriesName, MetricName)),
 
     % Add measurement and verify if nothing changed (measurement is too old)
-    Batch5 = update(Id, 1, 0, Batch4),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns3), ?LIST(Id, {TimeSeriesId, MetricId}, Batch5)),
+    consume_measurements_foreach_metric([{1, 0}]),
+    ?assert(compare_windows_list(ExpWindows5, TimeSeriesName, MetricName)),
 
     % Add measurement in the middle of existing windows and verify windows
-    Batch6 = update(Id, 403, 0, Batch5),
-    ExpectedGetAns4 = lists:sublist(ExpectedGetAns3, 900),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns4), ?LIST(Id, {TimeSeriesId, MetricId}, Batch6)),
+    consume_measurements_foreach_metric([{403, 0}]),
+    ExpWindows6 = lists:sublist(ExpWindows5, 900),
+    ?assert(compare_windows_list(ExpWindows6, TimeSeriesName, MetricName)),
 
     % Add measurement after existing windows and verify windows
-    Batch7 = update(Id, 601, 0, Batch6),
-    ExpectedGetAns5 = ExpectedGetAns4 ++ [{601, 0}],
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns5), ?LIST(Id, {TimeSeriesId, MetricId}, Batch7)),
+    consume_measurements_foreach_metric([{601, 0}]),
+    ExpWindows7 = ExpWindows6 ++ [{601, 0}],
+    ?assert(compare_windows_list(ExpWindows7, TimeSeriesName, MetricName)),
 
     % Add measurement that results in datastore documents splitting and verify windows
-    Batch8 = update(Id, 803, 0, Batch7),
-    ExpectedGetAns6 = lists:sublist(ExpectedGetAns5, 799) ++ [{803, 0}] ++ lists:sublist(ExpectedGetAns5, 800, 102),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns6), ?LIST(Id, {TimeSeriesId, MetricId}, Batch8)),
+    consume_measurements_foreach_metric([{803, 0}]),
+    ExpWindows8 = lists:sublist(ExpWindows7, 799) ++ [{803, 0}] ++ lists:sublist(ExpWindows7, 800, 102),
+    ?assert(compare_windows_list(ExpWindows8, TimeSeriesName, MetricName)),
 
-    Batch9 = update(Id, 1603, 0, Batch8),
-    ExpectedGetAns7 = lists:sublist(ExpectedGetAns6, 399) ++ [{1603, 0}] ++ lists:sublist(ExpectedGetAns5, 400, 303),
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns7), ?LIST(Id, {TimeSeriesId, MetricId}, Batch9)),
+    consume_measurements_foreach_metric([{1603, 0}]),
+    ExpWindows9 = lists:sublist(ExpWindows8, 399) ++ [{1603, 0}] ++ lists:sublist(ExpWindows8, 400, 303),
+    ?assert(compare_windows_list(ExpWindows9, TimeSeriesName, MetricName)),
 
-    Batch10 = update(Id, 2401, 0, Batch9),
-    ExpectedGetAns8 = [{2401, 0} | ExpectedGetAns7],
-    ?assertMatch(?LIST_OK_ANS(ExpectedGetAns8), ?LIST(Id, {TimeSeriesId, MetricId}, Batch10)).
+    consume_measurements_foreach_metric([{2401, 0}]),
+    ExpWindows10 = [{2401, 0} | ExpWindows9],
+    ?assert(compare_windows_list(ExpWindows10, TimeSeriesName, MetricName)).
 
 
 single_time_series_single_node() ->
-    Id = datastore_key:new(),
-    TimeSeriesId = <<"TS1">>,
-    MetricsConfigs = lists:foldl(fun(N, Acc) ->
-        MetricsConfig = #metric_config{resolution = N, retention = 60 div N + 10, aggregator = sum},
-        Acc#{<<"M", N>> => MetricsConfig}
-    end, #{}, lists:seq(1, 5)),
-    ConfigMap = #{TimeSeriesId => MetricsConfigs},
-    Batch = init(Id, ConfigMap),
+    TimeSeriesName = <<"TS1">>,
+    MetricConfigs = maps_utils:generate(fun(N) ->
+        {<<"M", (integer_to_binary(N))/binary>>, #metric_config{
+            resolution = ?RAND_ELEMENT([?SECOND_RESOLUTION, ?FIVE_SECONDS_RESOLUTION, ?MINUTE_RESOLUTION]),
+            retention = 60 div N + 10,
+            aggregator = sum}
+        }
+    end, 5),
+    init_test_with_newly_created_collection(#{
+        TimeSeriesName => MetricConfigs
+    }),
 
-    % Prepare time series collection to be used in tests (batch stores collection)
-    MeasurementsCount = 119,
-    Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementsCount)),
-    Batch2 = update_many(Id, Measurements, Batch),
+    MeasurementCount = 119,
+    Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementCount)),
+    consume_measurements_foreach_metric(Measurements),
 
-    % Prepare expected answer (measurements are arithmetic sequence so values of windows
-    % are calculated using formula for the sum of an arithmetic sequence)
-    ExpectedMap = maps:map(fun(_MetricId, #metric_config{resolution = Resolution, retention = Retention}) ->
+    % Measurements are arithmetic sequence so values of windows
+    % are calculated using formula for the sum of an arithmetic sequence
+    ExpWindowsPerMetric = maps:map(fun(_MetricName, #metric_config{resolution = Resolution, retention = Retention}) ->
         lists:sublist(
             lists:reverse(
                 lists:map(fun(N) ->
                     {N, {Resolution, (N + N + Resolution - 1) * Resolution}}
-                end, lists:seq(0, MeasurementsCount, Resolution))
+                end, lists:seq(0, MeasurementCount, Resolution))
             ), Retention)
-    end, MetricsConfigs),
+    end, MetricConfigs),
 
-    % Test getting different subsets of metrics
-    lists:foldl(fun({MetricId, Expected}, GetMetricsAcc) ->
-        ?assertMatch(?LIST_OK_ANS(Expected), ?LIST(Id, {TimeSeriesId, MetricId}, Batch2)),
-
-        UpdatedGetMetrics = [MetricId | GetMetricsAcc],
-        ExpectedAcc = maps:from_list(lists:map(fun(MId) ->
-            {{TimeSeriesId, MId}, maps:get(MId, ExpectedMap)}
-        end, UpdatedGetMetrics)),
-        ExpectedSingleValue = maps:get(MetricId, ExpectedMap),
-        ExpectedSingleValueMap = #{{TimeSeriesId, MetricId} => ExpectedSingleValue},
-
-        ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, {TimeSeriesId, UpdatedGetMetrics}, Batch2)),
-        ?assertMatch(?LIST_OK_ANS(ExpectedSingleValue), ?LIST(Id, {TimeSeriesId, MetricId}, Batch2)),
-        ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, {[TimeSeriesId], UpdatedGetMetrics}, Batch2)),
-        ?assertMatch(?LIST_OK_ANS(ExpectedSingleValueMap), ?LIST(Id, {[TimeSeriesId], MetricId}, Batch2)),
-        ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, [{TimeSeriesId, UpdatedGetMetrics}], Batch2)),
-        ?assertMatch(?LIST_OK_ANS(ExpectedSingleValueMap), ?LIST(Id, [{TimeSeriesId, MetricId}], Batch2)),
-        ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, [{[TimeSeriesId], UpdatedGetMetrics}], Batch2)),
-        ?assertMatch(?LIST_OK_ANS(ExpectedSingleValueMap), ?LIST(Id, [{[TimeSeriesId], MetricId}], Batch2)),
-        MappedUpdatedGetMetrics = lists:map(fun(MId) -> {TimeSeriesId, MId} end, UpdatedGetMetrics),
-        ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, MappedUpdatedGetMetrics, Batch2)),
-
-        UpdatedGetMetrics
-    end, [], maps:to_list(ExpectedMap)),
-
-    % Test getting not existing metric
-    ?assertMatch(?LIST_OK_ANS(undefined), ?LIST(Id, {TimeSeriesId, <<"not_existing">>}, Batch2)),
-    ExpectedWithNotExistingMetrics = (maps:from_list(lists:map(fun(MId) ->
-        {{TimeSeriesId, MId}, maps:get(MId, ExpectedMap)}
-    end, maps:keys(ExpectedMap))))#{{TimeSeriesId, <<"not_existing">>} => undefined},
-    ?assertMatch(?LIST_OK_ANS(ExpectedWithNotExistingMetrics),
-        ?LIST(Id, {TimeSeriesId, [<<"not_existing">> | maps:keys(ExpectedMap)]}, Batch2)).
+    verify_cumulative_slicing(#{TimeSeriesName => ExpWindowsPerMetric}).
 
 
 single_time_series_multiple_nodes() ->
-    Id = datastore_key:new(),
-    TimeSeriesId = <<"TS1">>,
-    MetricsConfigs = lists:foldl(fun(N, Acc) ->
-        MetricsConfig = #metric_config{resolution = 1, retention = 50 * N, aggregator = min},
-        Acc#{<<"M", N>> => MetricsConfig}
-    end, #{}, lists:seq(1, 4)),
-    ConfigMap = #{TimeSeriesId => MetricsConfigs},
-    Batch = init(Id, ConfigMap),
+    TimeSeriesName = <<"TS1">>,
+    MetricConfigs = maps_utils:generate(fun(N) ->
+        {<<"M", (integer_to_binary(N))/binary>>, #metric_config{
+            resolution = ?SECOND_RESOLUTION,
+            retention = 50 * N,
+            aggregator = min}
+        }
+    end, 4),
+    init_test_with_newly_created_collection(#{
+        TimeSeriesName => MetricConfigs
+    }),
 
-    % Prepare time series collection to be used in tests (batch stores collection)
-    MeasurementsCount = 1250,
-    Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
-    Batch2 = update_many(Id, Measurements, Batch),
+    MeasurementCount = 1250,
+    Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementCount)),
+    consume_measurements_foreach_metric(Measurements),
 
     % Verify if windows are stored using multiple datastore documents
-    ?assertEqual(6, maps:size(Batch2)),
+    ?assertEqual(6, maps:size(get_current_batch())),
     TailSizes = [150, 150, 200, 200, 200],
     RemainingTailSizes = lists:foldl(fun
         (#document{value = {ts_metric_data_node, #data_node{windows = Windows}}}, TmpTailSizes) ->
@@ -323,127 +451,67 @@ single_time_series_multiple_nodes() ->
                 ?assertEqual(50, ts_windows:get_size(Windows))
             end, maps:values(MetricsMap)),
             TmpTailSizes
-    end, TailSizes, maps:values(Batch2)),
+    end, TailSizes, maps:values(get_current_batch())),
     ?assertEqual([], RemainingTailSizes),
 
-    ExpectedWindowsCounts = #{50 => 50, 100 => 250, 150 => 350, 200 => 450},
-    ExpectedMap = maps:map(fun(_MetricId, #metric_config{retention = Retention}) ->
-        lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))
-    end, MetricsConfigs),
+    ExpectedWindowCounts = #{50 => 50, 100 => 250, 150 => 350, 200 => 450},
+    ExpWindowsPerMetric = maps:map(fun(_MetricName, #metric_config{retention = Retention}) ->
+        lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowCounts))
+    end, MetricConfigs),
 
-    % Test getting different subsets of metrics
-    lists:foldl(fun({MetricId, Expected}, GetMetricsAcc) ->
-        ?assertMatch(?LIST_OK_ANS(Expected), ?LIST(Id, {TimeSeriesId, MetricId}, Batch2)),
-
-        UpdatedGetMetrics = [MetricId | GetMetricsAcc],
-        ExpectedAcc = maps:from_list(lists:map(fun(MId) ->
-            {{TimeSeriesId, MId}, maps:get(MId, ExpectedMap)}
-        end, UpdatedGetMetrics)),
-
-        ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, {TimeSeriesId, UpdatedGetMetrics}, Batch2)),
-        ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, {[TimeSeriesId], UpdatedGetMetrics}, Batch2)),
-        ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, [{TimeSeriesId, UpdatedGetMetrics}], Batch2)),
-        ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, [{[TimeSeriesId], UpdatedGetMetrics}], Batch2)),
-        MappedUpdatedGetMetrics = lists:map(fun(MId) -> {TimeSeriesId, MId} end, UpdatedGetMetrics),
-        ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, MappedUpdatedGetMetrics, Batch2)),
-
-        UpdatedGetMetrics
-    end, [], maps:to_list(ExpectedMap)).
+    verify_cumulative_slicing(#{TimeSeriesName => ExpWindowsPerMetric}).
 
 
 multiple_time_series_single_node() ->
-    Id = datastore_key:new(),
-    ConfigMap = lists:foldl(fun(N, Acc) ->
-        TimeSeries = <<"TS", (N rem 2)>>,
-        MetricsMap = maps:get(TimeSeries, Acc, #{}),
-        MetricsConfig = #metric_config{resolution = N, retention = 60 div N + 10, aggregator = sum},
-        Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
+    Config = lists:foldl(fun(N, Acc) ->
+        TimeSeriesName = <<"TS", (integer_to_binary(N rem 2))/binary>>,
+        TimeSeriesConfig = maps:get(TimeSeriesName, Acc, #{}),
+        MetricConfig = #metric_config{
+            resolution = ?RAND_ELEMENT([?SECOND_RESOLUTION, ?FIVE_SECONDS_RESOLUTION, ?MINUTE_RESOLUTION]),
+            retention = 60 div N + 10,
+            aggregator = sum
+        },
+        Acc#{TimeSeriesName => TimeSeriesConfig#{<<"M", (integer_to_binary(N div 2))/binary>> => MetricConfig}}
     end, #{}, lists:seq(1, 5)),
-    Batch = init(Id, ConfigMap),
+    init_test_with_newly_created_collection(Config),
 
-    % Prepare time series collection to be used in tests (batch stores collection)
-    MeasurementsCount = 119,
-    Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementsCount)),
-    Batch2 = update_many(Id, Measurements, Batch),
+    MeasurementCount = 119,
+    Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementCount)),
+    consume_measurements_foreach_metric(Measurements),
 
-    % Prepare expected answer (measurements are arithmetic sequence so values of windows
-    % are calculated using formula for the sum of an arithmetic sequence)
-    ExpectedMap = maps:map(fun(_TimeSeriesId, MetricsConfigs) ->
-        maps:map(fun(_MetricId, #metric_config{resolution = Resolution, retention = Retention}) ->
+    % Measurements are arithmetic sequence so values of windows
+    % are calculated using formula for the sum of an arithmetic sequence
+    ExpCompleteSlice = maps:map(fun(_TimeSeriesName, MetricConfigs) ->
+        maps:map(fun(_MetricName, #metric_config{resolution = Resolution, retention = Retention}) ->
             lists:sublist(
                 lists:reverse(
                     lists:map(fun(N) ->
                         {N, {Resolution, (N + N + Resolution - 1) * Resolution}}
-                    end, lists:seq(0, MeasurementsCount, Resolution))
+                    end, lists:seq(0, MeasurementCount, Resolution))
                 ), Retention)
-        end, MetricsConfigs)
-    end, ConfigMap),
+        end, MetricConfigs)
+    end, Config),
 
-    % Test getting different subsets of metrics
-    lists:foreach(fun({TimeSeriesId, Metrics}) ->
-        TimeSeriesExpectedMap = maps:get(TimeSeriesId, ExpectedMap),
-        lists:foldl(fun({MetricId, Expected}, GetMetricsAcc) ->
-            ?assertMatch(?LIST_OK_ANS(Expected), ?LIST(Id, {TimeSeriesId, MetricId}, Batch2)),
+    ?assert(compare_slice(ExpCompleteSlice, tsc_structure:to_layout(Config))),
 
-            UpdatedGetMetrics = [MetricId | GetMetricsAcc],
-            ExpectedAcc = maps:from_list(lists:map(fun(MId) ->
-                {{TimeSeriesId, MId}, maps:get(MId, TimeSeriesExpectedMap)}
-            end, UpdatedGetMetrics)),
-
-            ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, {TimeSeriesId, UpdatedGetMetrics}, Batch2)),
-            ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, {[TimeSeriesId], UpdatedGetMetrics}, Batch2)),
-            ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, [{TimeSeriesId, UpdatedGetMetrics}], Batch2)),
-            ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, [{[TimeSeriesId], UpdatedGetMetrics}], Batch2)),
-            MappedUpdatedGetMetrics = lists:map(fun(MId) -> {TimeSeriesId, MId} end, UpdatedGetMetrics),
-            ?assertMatch(?LIST_OK_ANS(ExpectedAcc), ?LIST(Id, MappedUpdatedGetMetrics, Batch2)),
-
-            UpdatedGetMetrics
-        end, [], maps:to_list(Metrics))
-    end, maps:to_list(ExpectedMap)),
-
-    % Test getting all metrics
-    GetAllArg = maps:to_list(maps:map(fun(_TimeSeriesId, MetricsConfigs) -> maps:keys(MetricsConfigs) end, ConfigMap)),
-    GetAllArg2 = lists:flatten(lists:map(fun({TimeSeriesId, MetricIds}) ->
-        lists:map(fun(MetricId) -> {TimeSeriesId, MetricId} end, MetricIds)
-    end, GetAllArg)),
-    GetAllExpected = maps:from_list(lists:map(fun({TimeSeriesId, MetricId} = Key) ->
-        {Key, maps:get(MetricId, maps:get(TimeSeriesId, ExpectedMap))}
-    end, GetAllArg2)),
-    ?assertMatch(?LIST_OK_ANS(GetAllExpected), ?LIST(Id, GetAllArg, Batch2)),
-    ?assertMatch(?LIST_OK_ANS(GetAllExpected), ?LIST(Id, GetAllArg2, Batch2)),
-
-    % Test getting not existing metric
-    MetricsWithNotExisting = [<<"M", 0>>, <<"M", 1>>, <<"M", 2>>, <<"M", 3>>],
-    GetWithNotExistingArg = [{[<<"TS", 0>>, <<"TS", 1>>, <<"TS", 2>>], MetricsWithNotExisting}],
-    NotExistingTimeSeriesExpectedMap = maps:from_list(lists:map(fun(MId) ->
-        {{<<"TS", 2>>, MId}, undefined}
-    end, MetricsWithNotExisting)),
-    GetAllWithNotExistingExpected = maps:merge(GetAllExpected#{
-        {<<"TS", 0>>, <<"M", 0>>} => undefined,
-        {<<"TS", 0>>, <<"M", 3>>} => undefined,
-        {<<"TS", 1>>, <<"M", 3>>} => undefined
-    }, NotExistingTimeSeriesExpectedMap),
-    ?assertMatch(?LIST_OK_ANS(GetAllWithNotExistingExpected),
-        ?LIST(Id, GetWithNotExistingArg, Batch2)).
+    verify_cumulative_slicing(ExpCompleteSlice).
 
 
 multiple_time_series_multiple_nodes() ->
-    Id = datastore_key:new(),
-    ConfigMap = lists:foldl(fun(N, Acc) ->
-        TimeSeries = <<"TS", (N rem 2)>>,
-        MetricsMap = maps:get(TimeSeries, Acc, #{}),
-        MetricsConfig = #metric_config{resolution = 1, retention = 40 * N, aggregator = last},
-        Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
+    Config = lists:foldl(fun(N, Acc) ->
+        TimeSeriesName = <<"TS", (integer_to_binary(N rem 2))/binary>>,
+        TimeSeriesConfig = maps:get(TimeSeriesName, Acc, #{}),
+        MetricConfig = #metric_config{resolution = ?SECOND_RESOLUTION, retention = 40 * N, aggregator = last},
+        Acc#{TimeSeriesName => TimeSeriesConfig#{<<"M", (integer_to_binary(N div 2))/binary>> => MetricConfig}}
     end, #{}, lists:seq(1, 5)),
-    Batch = init(Id, ConfigMap),
+    init_test_with_newly_created_collection(Config),
 
-    % Prepare time series collection to be used in tests (batch stores collection)
-    MeasurementsCount = 2440,
-    Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
-    Batch2 = update_many(Id, Measurements, Batch),
+    MeasurementCount = 2440,
+    Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementCount)),
+    consume_measurements_foreach_metric(Measurements),
 
     % Verify if windows are stored using multiple datastore documents
-    ?assertEqual(8, maps:size(Batch2)),
+    ?assertEqual(8, maps:size(get_current_batch())),
     TailSizes = [120, 120, 160, 160, 160, 200, 200],
     RemainingTailSizes = lists:foldl(fun
         (#document{value = {ts_metric_data_node, #data_node{windows = Windows}}}, TmpTailSizes) ->
@@ -452,263 +520,194 @@ multiple_time_series_multiple_nodes() ->
             TmpTailSizes -- [Size];
         (#document{value = {ts_hub, TimeSeries}}, TmpTailSizes) ->
             ?assertEqual(2, maps:size(TimeSeries)),
-            MetricsMap0 = maps:get(<<"TS", 0>>, TimeSeries),
-            MetricsMap1 = maps:get(<<"TS", 1>>, TimeSeries),
+            MetricsMap0 = maps:get(<<"TS0">>, TimeSeries),
+            MetricsMap1 = maps:get(<<"TS1">>, TimeSeries),
             ?assertEqual(2, maps:size(MetricsMap0)),
             ?assertEqual(3, maps:size(MetricsMap1)),
             lists:foreach(fun(#metric{head_data = #data_node{windows = Windows}}) ->
                 ?assertEqual(40, ts_windows:get_size(Windows))
             end, maps:values(MetricsMap0) ++ maps:values(MetricsMap1)),
             TmpTailSizes
-    end, TailSizes, maps:values(Batch2)),
+    end, TailSizes, maps:values(get_current_batch())),
     ?assertEqual([], RemainingTailSizes),
 
     % Test getting all metrics
-    ExpectedWindowsCounts = #{40 => 40, 80 => 200, 120 => 280, 160 => 360, 200 => 440},
-    ExpectedMap = maps:map(fun(_TimeSeriesId, MetricsConfigs) ->
-        maps:map(fun(_MetricId, #metric_config{retention = Retention}) ->
-            lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))
-        end, MetricsConfigs)
-    end, ConfigMap),
+    ExpectedWindowCounts = #{40 => 40, 80 => 200, 120 => 280, 160 => 360, 200 => 440},
+    ExpCompleteSlice = tsc_structure:map(fun(_TimeSeriesName, _MetricName, #metric_config{retention = Retention}) ->
+        lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowCounts))
+    end, Config),
 
-    GetAllArg = maps:to_list(maps:map(fun(_TimeSeriesId, MetricsConfigs) -> maps:keys(MetricsConfigs) end, ConfigMap)),
-    GetAllArg2 = lists:flatten(lists:map(fun({TimeSeriesId, MetricIds}) ->
-        lists:map(fun(MetricId) -> {TimeSeriesId, MetricId} end, MetricIds)
-    end, GetAllArg)),
-    GetAllExpected = maps:from_list(lists:map(fun({TimeSeriesId, MetricId} = Key) ->
-        {Key, maps:get(MetricId, maps:get(TimeSeriesId, ExpectedMap))}
-    end, GetAllArg2)),
-    ?assertMatch(?LIST_OK_ANS(GetAllExpected), ?LIST(Id, GetAllArg, Batch2)),
-    ?assertMatch(?LIST_OK_ANS(GetAllExpected), ?LIST(Id, GetAllArg2, Batch2)),
-
-    % Test listing time series ids
-    ListTimeSeriesIdsAns = time_series_collection:list_time_series_ids(#{}, Id, Batch2),
-    ?assertMatch(?LIST_OK_ANS(_), ListTimeSeriesIdsAns),
-    ?LIST_OK_ANS(TimeSeriesIds) = ListTimeSeriesIdsAns,
-    ?assertEqual([<<"TS", 0>>, <<"TS", 1>>], lists:sort(TimeSeriesIds)),
-
-    % Test listing metrics ids
-    ListMetricsIdsAns = time_series_collection:list_metrics_by_time_series(#{}, Id, Batch2),
-    ?assertMatch(?LIST_OK_ANS(_), ListMetricsIdsAns),
-    ?LIST_OK_ANS(MetricsIds) = ListMetricsIdsAns,
-    SortedMetricsIds = lists:sort(lists:map(fun({K, V}) -> {K, lists:sort(V)} end, maps:to_list(MetricsIds))),
-    ?assertEqual([{<<"TS", 0>>, [<<"M",1>>, <<"M",2>>]}, {<<"TS", 1>>, [<<"M",0>>, <<"M",1>>, <<"M",2>>]}],
-        SortedMetricsIds).
+    ?assert(compare_slice(ExpCompleteSlice, tsc_structure:to_layout(Config))).
 
 
 update_subset() ->
-    Id = datastore_key:new(),
-    ConfigMap = lists:foldl(fun(N, Acc) ->
-        TimeSeries = <<"TS", (N rem 2)>>,
-        MetricsMap = maps:get(TimeSeries, Acc, #{}),
-        MetricsConfig = #metric_config{resolution = 1, retention = 100, aggregator = max},
-        Acc#{TimeSeries => MetricsMap#{<<"M", (N div 2)>> => MetricsConfig}}
+    Config = lists:foldl(fun(N, Acc) ->
+        TimeSeriesName = <<"TS", (integer_to_binary(N rem 2))/binary>>,
+        TimeSeriesConfig = maps:get(TimeSeriesName, Acc, #{}),
+        MetricConfig = #metric_config{resolution = ?SECOND_RESOLUTION, retention = 100, aggregator = max},
+        Acc#{TimeSeriesName => TimeSeriesConfig#{<<"M", (integer_to_binary(N div 2))/binary>> => MetricConfig}}
     end, #{}, lists:seq(1, 5)),
-    Batch = init(Id, ConfigMap),
+    init_test_with_newly_created_collection(Config),
 
-    % Update only chosen metrics
-    Batch2 = update(Id, 0, <<"TS", 0>>, 0, Batch),
-    Batch3 = update(Id, 0, <<"TS", 1>>, 1, Batch2),
-    Batch4 = update(Id, 1, [<<"TS", 0>>], 2, Batch3),
-    Batch5 = update(Id, 2, [<<"TS", 1>>], 3, Batch4),
-    Batch6 = update(Id, 3, {<<"TS", 0>>, <<"M", 1>>}, 4, Batch5),
-    Batch7 = update(Id, 4, [{<<"TS", 1>>, [<<"M", 1>>, <<"M", 2>>]}], 5, Batch6),
-    Batch8 = update(Id, 5, [{<<"TS", 0>>, <<"M", 1>>}, {<<"TS", 1>>, <<"M", 0>>}], 6, Batch7),
-    Batch9 = update(Id, 6, [{{<<"TS", 0>>, <<"M", 1>>}, 7}, {[{<<"TS", 1>>, [<<"M", 0>>, <<"M", 1>>]}], 8}], Batch8),
-    Batch10 = update(Id, 7, [{<<"TS", 0>>, 9}, {<<"TS", 1>>, 10}], Batch9),
-
-    % Verify if metrics were updated properly
-    GetAllArg = maps:to_list(maps:map(fun(_TimeSeriesId, MetricsConfigs) -> maps:keys(MetricsConfigs) end, ConfigMap)),
-    GetAllExpected = #{
-        {<<"TS", 0>>, <<"M", 1>>} => [{7, 9}, {6,7}, {5,6}, {3,4}, {1,2}, {0,0}],
-        {<<"TS", 0>>, <<"M", 2>>} => [{7, 9}, {1,2}, {0,0}],
-        {<<"TS", 1>>, <<"M", 0>>} => [{7, 10}, {6,8}, {5,6}, {2,3}, {0,1}],
-        {<<"TS", 1>>, <<"M", 1>>} => [{7, 10}, {6,8}, {4,5}, {2,3}, {0,1}],
-        {<<"TS", 1>>, <<"M", 2>>} => [{7, 10}, {4,5}, {2,3}, {0,1}]
-    },
-    ?assertMatch(?LIST_OK_ANS(GetAllExpected), ?LIST(Id, GetAllArg, Batch10)).
-
-
-metric_adding_and_deleting() ->
-    Id = datastore_key:new(),
-    InitialConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{resolution = 1, retention = 200, aggregator = sum}}},
-    Batch = init(Id, InitialConfigMap),
-
-    % Prepare time series collection to be used in tests (batch stores collection)
-    Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 200)),
-    Batch2 = update_many(Id, Measurements, Batch),
-
-    % Add metric to collection
-    ConfigMapExtension = #{<<"TS1">> => #{<<"M2">> => #metric_config{resolution = 1, retention = 100, aggregator = last}}},
-    Batch3 = extend_collection(Id, ConfigMapExtension, Batch2),
-    ExpectedMap = #{
-        {<<"TS1">>, <<"M1">>} => lists:reverse(lists:map(fun(I) -> {I, {1, 2 * I}} end, lists:seq(1, 200))),
-        {<<"TS1">>, <<"M2">>} => []
-    },
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap), ?LIST_ALL(Id, Batch3)),
-
-    % Add time series to collection
-    ConfigMapExtension2 = #{<<"TS2">> => #{<<"M1">> => #metric_config{resolution = 1, retention = 400, aggregator = last}}},
-    Batch4 = extend_collection(Id, ConfigMapExtension2, Batch3),
-    ExpectedMap2 = ExpectedMap#{
-        {<<"TS2">>, <<"M1">>} => []
-    },
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap2), ?LIST_ALL(Id, Batch4)),
-
-    % Add multiple metrics to collection
-    Batch5 = update_many(Id, Measurements, <<"TS2">>, Batch4),
-    ConfigMapExtension3 = #{
+    consume_measurements(#{<<"TS0">> => #{all => [{0, 0}]}}),
+    consume_measurements(#{<<"TS1">> => #{all => [{0, 1}]}}),
+    consume_measurements(#{<<"TS0">> => #{all => [{1, 2}]}}),
+    consume_measurements(#{<<"TS1">> => #{all => [{2, 3}]}}),
+    consume_measurements(#{<<"TS0">> => #{<<"M1">> => [{3, 4}]}}),
+    consume_measurements(#{
         <<"TS1">> => #{
-            <<"M3">> => #metric_config{resolution = 1, retention = 10, aggregator = max}
+            <<"M1">> => [{4, 5}],
+            <<"M2">> => [{4, 5}]
+        }
+    }),
+    consume_measurements(#{
+        <<"TS0">> => #{<<"M1">> => [{5, 6}]},
+        <<"TS1">> => #{<<"M0">> => [{5, 6}]}
+    }),
+    consume_measurements(#{
+        <<"TS0">> => #{<<"M1">> => [{6, 7}]},
+        <<"TS1">> => #{
+            <<"M0">> => [{6, 8}],
+            <<"M1">> => [{6, 8}]
+        }
+    }),
+    consume_measurements(#{
+        <<"TS0">> => #{all => [{7, 9}]},
+        <<"TS1">> => #{all => [{7, 10}]}
+    }),
+
+    ?assert(compare_slice(#{
+        <<"TS0">> => #{
+            <<"M1">> => [{7, 9}, {6, 7}, {5, 6}, {3, 4}, {1, 2}, {0, 0}],
+            <<"M2">> => [{7, 9}, {1, 2}, {0, 0}]
+        },
+        <<"TS1">> => #{
+            <<"M0">> => [{7, 10}, {6, 8}, {5, 6}, {2, 3}, {0, 1}],
+            <<"M1">> => [{7, 10}, {6, 8}, {4, 5}, {2, 3}, {0, 1}],
+            <<"M2">> => [{7, 10}, {4, 5}, {2, 3}, {0, 1}]
+        }
+    }, tsc_structure:to_layout(Config))).
+
+
+lifecycle_with_config_incorporation() ->
+    init_test_with_newly_created_collection(#{
+        <<"TS1">> => #{
+            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 200, aggregator = sum}
+        }
+    }),
+
+    Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 200)),
+    consume_measurements_foreach_metric(Measurements),
+
+    ?assertEqual(ok, call_incorporate_config(#{
+        <<"TS1">> => #{
+            <<"M2">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 100, aggregator = last}
+        }
+    })),
+    ?assert(compare_complete_slice(#{
+        <<"TS1">> => #{
+            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, {1, 2 * I}} end, lists:seq(1, 200))),
+            <<"M2">> => []
+        }
+    })),
+
+    ?assertEqual(ok, call_incorporate_config(#{
+        <<"TS2">> => #{
+            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 400, aggregator = last}
+        }
+    })),
+    ?assert(compare_complete_slice(#{
+        <<"TS1">> => #{
+            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, {1, 2 * I}} end, lists:seq(1, 200))),
+            <<"M2">> => []
         },
         <<"TS2">> => #{
-            <<"M2">> => #metric_config{resolution = 1, retention = 50, aggregator = last},
-            <<"M3">> => #metric_config{resolution = 1, retention = 2000, aggregator = min}
+            <<"M1">> => []
         }
-    },
-    Batch6 = extend_collection(Id, ConfigMapExtension3, Batch5),
-    ExpectedMap3 = ExpectedMap2#{
-        {<<"TS1">>, <<"M3">>} => [],
-        {<<"TS2">>, <<"M1">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 200))),
-        {<<"TS2">>, <<"M2">>} => [],
-        {<<"TS2">>, <<"M3">>} => []
-    },
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap3), ?LIST_ALL(Id, Batch6)),
+    })),
 
-    % Add measurements to added metrics
+    consume_measurements(#{<<"TS2">> => #{all => Measurements}}),
+
+    ?assertEqual(ok, call_incorporate_config(#{
+        <<"TS1">> => #{
+            <<"M3">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 10, aggregator = max}
+        },
+        <<"TS2">> => #{
+            <<"M2">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 50, aggregator = last},
+            <<"M3">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 2000, aggregator = min}
+        }
+    })),
+    ?assert(compare_complete_slice(#{
+        <<"TS1">> => #{
+            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, {1, 2 * I}} end, lists:seq(1, 200))),
+            <<"M2">> => [],
+            <<"M3">> => []
+        },
+        <<"TS2">> => #{
+            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 200))),
+            <<"M2">> => [],
+            <<"M3">> => []
+        }
+    })),
+
     Measurements2 = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(201, 300)),
-    Batch7 = update_many(Id, Measurements2, {<<"TS2">>, [<<"M1">>, <<"M3">>]}, Batch6),
-    Measurements3 = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(301, 900)),
-    Batch8 = update_many(Id, Measurements3, {<<"TS2">>, <<"M3">>}, Batch7),
-    ExpectedMap4 = ExpectedMap3#{
-        {<<"TS2">>, <<"M1">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 300))),
-        {<<"TS2">>, <<"M3">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(201, 900)))
-    },
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap4), ?LIST_ALL(Id, Batch8)),
+    consume_measurements(#{<<"TS2">> => #{<<"M1">> => Measurements2, <<"M3">> => Measurements2}}),
 
-    % Test errors handling using different add options
-    ConfigMapExtension4 = #{<<"TS2">> => #{
-        <<"M0">> => #metric_config{resolution = 1, retention = 10, aggregator = min},
-        <<"M3">> => #metric_config{resolution = 1, retention = 10, aggregator = max}
-    }},
-    extend_collection_with_error(Id, ConfigMapExtension4, metric_already_exists, Batch8),
-    extend_collection_with_error(Id, ConfigMapExtension4, metric_already_exists,
-        #{metric_conflict_resulution_strategy => fail}, Batch8),
-    extend_collection_with_error(Id, ConfigMapExtension4, metric_already_exists,
-        #{time_series_conflict_resulution_strategy => merge, metric_conflict_resulution_strategy => fail}, Batch8),
-    extend_collection_with_error(Id, ConfigMapExtension4, time_series_already_exists,
-        #{time_series_conflict_resulution_strategy => fail}, Batch8),
-
-    % Test overriding metric
-    ConfigMapExtension5 = #{<<"TS2">> => #{
-        <<"M2">> => #metric_config{resolution = 1, retention = 50, aggregator = last},
-        <<"M3">> => #metric_config{resolution = 1, retention = 1000, aggregator = max},
-        <<"M4">> => #metric_config{resolution = 1, retention = 10, aggregator = min}
-    }},
-    Batch9 = extend_collection(Id, ConfigMapExtension5, #{metric_conflict_resulution_strategy => override}, Batch8),
-    ExpectedMap5 = ExpectedMap4#{
-        {<<"TS2">>, <<"M2">>} => [],
-        {<<"TS2">>, <<"M3">>} => [],
-        {<<"TS2">>, <<"M4">>} => []
-    },
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap5), ?LIST_ALL(Id, Batch9)),
-    Batch10 = extend_collection(Id, ConfigMapExtension5,
-        #{time_series_conflict_resulution_strategy => merge, metric_conflict_resulution_strategy => override}, Batch9),
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap5), ?LIST_ALL(Id, Batch10)),
-    ?assertEqual(Batch9, Batch10),
-
-    % Add measurements to overridden metric
-    Measurements4 = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 2)),
-    Batch11 = update_many(Id, Measurements4, {<<"TS2">>, <<"M3">>}, Batch10),
-    ExpectedMap6 = ExpectedMap5#{
-        {<<"TS2">>, <<"M3">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 2)))
-    },
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap6), ?LIST_ALL(Id, Batch11)),
-
-    % Test time series overriding
-    ConfigMapExtension6 = #{<<"TS1">> => #{
-        <<"M0">> => #metric_config{resolution = 1, retention = 10, aggregator = last},
-        <<"M1">> => #metric_config{resolution = 1, retention = 10, aggregator = max}
-    }},
-    Batch12 = extend_collection(Id, ConfigMapExtension6, #{time_series_conflict_resulution_strategy => override}, Batch11),
-    ExpectedMap7 = (maps:remove({<<"TS1">>, <<"M2">>}, maps:remove({<<"TS1">>, <<"M3">>}, ExpectedMap6)))#{
-        {<<"TS1">>, <<"M0">>} => [],
-        {<<"TS1">>, <<"M1">>} => []
-    },
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap7), ?LIST_ALL(Id, Batch12)),
-    Batch13 = extend_collection(Id, ConfigMapExtension6, #{time_series_conflict_resulution_strategy => override}, Batch12),
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap7), ?LIST_ALL(Id, Batch13)),
-    ?assertEqual(Batch12, Batch13),
-    Batch14 = extend_collection(Id, ConfigMapExtension6,
-        #{time_series_conflict_resulution_strategy => override, metric_conflict_resulution_strategy => override}, Batch13),
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap7), ?LIST_ALL(Id, Batch14)),
-    ?assertEqual(Batch12, Batch14),
-    Batch15 = extend_collection(Id, ConfigMapExtension6,
-        #{time_series_conflict_resulution_strategy => override, metric_conflict_resulution_strategy => fail}, Batch14),
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap7), ?LIST_ALL(Id, Batch15)),
-    ?assertEqual(Batch12, Batch15),
-
-    % Add measurements to overridden metric
-    Batch16 = update_many(Id, Measurements, {<<"TS1">>, <<"M0">>}, Batch15),
-    ExpectedMap8 = ExpectedMap7#{
-        {<<"TS1">>, <<"M0">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(191, 200)))
-    },
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap8), ?LIST_ALL(Id, Batch16)),
-
-    % Verify if windows are stored using multiple datastore documents
-    Documents = lists:sort(maps:values(Batch16)),
-    ?assertMatch([#document{}, #document{}, #document{}], Documents),
-    [#document{value = Record1}, #document{value = Record2}, #document{value = Record3}] = Documents,
-    [{ts_hub, TimeSeries}, {ts_metric_data_node, #data_node{windows = DataNodeWindows1}},
-        {ts_metric_data_node, #data_node{windows = DataNodeWindows2}}] = lists:sort([Record1, Record2, Record3]),
-    % Note: data_nodes were created for metric {<<"TS2">>, <<"M1">>} ; size of node equal 78 is a result of
-    % splitting_strategy when measurements were added
-    % (it would be 60 if doc_splitting_strategy for current batch is used)
-    ?assertEqual([78, 200], lists:sort([ts_windows:get_size(DataNodeWindows1), ts_windows:get_size(DataNodeWindows2)])),
+    Documents = lists:sort(maps:values(get_current_batch())),
+    ?assertMatch([
+        #document{},
+        #document{},
+        #document{},
+        #document{},
+        #document{}
+    ], Documents),
+    [
+        #document{value = Record1},
+        #document{value = Record2},
+        #document{value = Record3},
+        #document{value = Record4},
+        #document{value = Record5}
+    ] = Documents,
+    [
+        {ts_hub, TimeSeries},
+        {ts_metric_data_node, #data_node{windows = DataNodeWindows1}},
+        {ts_metric_data_node, #data_node{windows = DataNodeWindows2}},
+        {ts_metric_data_node, #data_node{windows = DataNodeWindows3}},
+        {ts_metric_data_node, #data_node{windows = DataNodeWindows4}}
+    ] = lists:sort([Record1, Record2, Record3, Record4, Record5]),
+    ?assertEqual([78, 78, 169, 200], lists:sort([
+        ts_windows:get_size(DataNodeWindows1),
+        ts_windows:get_size(DataNodeWindows2),
+        ts_windows:get_size(DataNodeWindows3),
+        ts_windows:get_size(DataNodeWindows4)
+    ])),
     ?assertEqual(2, maps:size(TimeSeries)),
-    verify_time_series_heads(maps:get(<<"TS1">>, TimeSeries), [<<"M0">>, <<"M1">>],
-        [0, 10], [10, 10]),
-    % Note: value 22 is for metric {<<"TS2">>, <<"M1">>} as a result of doc_splitting_strategy when measurements
-    % were added (it would be 40 if splitting_strategy for current batch is used)
-    verify_time_series_heads(maps:get(<<"TS2">>, TimeSeries), [<<"M1">>, <<"M2">>, <<"M3">>, <<"M4">>],
-        [0, 0, 2, 22], [10, 50, 60, 60]),
+    verify_time_series_heads(maps:get(<<"TS1">>, TimeSeries), [<<"M1">>, <<"M2">>, <<"M3">>],
+        [0, 0, 31], [10, 38, 38]),
+    verify_time_series_heads(maps:get(<<"TS2">>, TimeSeries), [<<"M1">>, <<"M2">>, <<"M3">>],
+        [0, 22, 22], [38, 38, 38]),
 
-    % Test metric deletion
-    Batch17 = delete_metrics(Id, {<<"TS2">>, <<"M1">>}, Batch16),
-    ExpectedMap9 = maps:remove({<<"TS2">>, <<"M1">>}, ExpectedMap8),
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap9), ?LIST_ALL(Id, Batch17)),
+    Measurements3 = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(301, 900)),
+    consume_measurements(#{<<"TS2">> => #{<<"M3">> => Measurements3}}),
 
-    % Test measurements adding to remaining metric
-    Batch18 = update_many(Id, Measurements, {<<"TS1">>, <<"M1">>}, Batch17),
-    ExpectedMap10 = ExpectedMap9#{
-        {<<"TS1">>, <<"M1">>} => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(191, 200)))
-    },
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap10), ?LIST_ALL(Id, Batch18)),
-
-    % Test deletion of multiple metrics
-    Batch19 = delete_metrics(Id, [{<<"TS1">>, <<"M1">>}, {<<"TS2">>, <<"M2">>}], Batch18),
-    ExpectedMap11 = maps:remove({<<"TS1">>, <<"M1">>}, maps:remove({<<"TS2">>, <<"M2">>}, ExpectedMap10)),
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap11), ?LIST_ALL(Id, Batch19)),
-
-    % Test time series deletion
-    Batch20 = delete_metrics(Id, <<"TS1">>, Batch19),
-    ExpectedMap12 = maps:remove({<<"TS1">>, <<"M0">>}, ExpectedMap11),
-    ?assertMatch(?LIST_OK_ANS(ExpectedMap12), ?LIST_ALL(Id, Batch20)),
-
-    % Verify documents used to store measurements after deletion
-    Documents2 = lists:sort(maps:values(Batch20)),
-    ?assertMatch([#document{value = {ts_hub, _}}], Documents2),
-    [#document{value = {ts_hub, TimeSeries2}}] = Documents2,
-    ?assertEqual(1, maps:size(TimeSeries2)),
-    verify_time_series_heads(maps:get(<<"TS2">>, TimeSeries2), [<<"M3">>, <<"M4">>],
-        [0, 2], [10, 190]),
+    ?assert(compare_complete_slice(#{
+        <<"TS1">> => #{
+            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, {1, 2 * I}} end, lists:seq(1, 200))),
+            <<"M2">> => [],
+            <<"M3">> => []
+        },
+        <<"TS2">> => #{
+            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 300))),
+            <<"M2">> => [],
+            <<"M3">> => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(201, 900)))
+        }
+    })),
 
     % Verify collection deletion
-    DeleteAns = time_series_collection:delete(#{}, Id, Batch20),
-    ?assertMatch({ok, _}, DeleteAns),
-    {ok, Batch21} = DeleteAns,
-    ?assertEqual({{error, not_found}, Batch21}, ?LIST_ALL(Id, Batch21)),
-    ?assertEqual(#{}, Batch21).
+    {ok, Layout} = call_get_layout(),
+    ?assertEqual(ok, call_delete()),
+    ?assertEqual({error, not_found}, call_get_slice(Layout)),
+    ?assertEqual(#{}, get_current_batch()).
 
 
 errors_when_collection_does_not_exist() ->
@@ -716,85 +715,170 @@ errors_when_collection_does_not_exist() ->
     Batch = datastore_doc_batch:init(),
     Ctx = #{},
 
-    ?assertEqual({{error, not_found}, Batch}, time_series_collection:add_metrics(Ctx, Id, #{}, #{}, Batch)),
-    ?assertEqual({{error, not_found}, Batch}, time_series_collection:delete_metrics(Ctx, Id, [], Batch)),
-    ?assertEqual({{error, not_found}, Batch}, time_series_collection:list_time_series_ids(Ctx, Id, Batch)),
-    ?assertEqual({{error, not_found}, Batch}, time_series_collection:list_metrics_by_time_series(Ctx, Id, Batch)),
-    ?assertEqual({{error, not_found}, Batch}, time_series_collection:update(Ctx, Id, 0, 0, Batch)),
-    ?assertEqual({{error, not_found}, Batch}, time_series_collection:update(Ctx, Id, 0, [], Batch)),
-    ?assertEqual({{error, not_found}, Batch}, time_series_collection:update(Ctx, Id, 0, [], 0, Batch)),
-    ?assertEqual({{error, not_found}, Batch}, time_series_collection:list_windows(Ctx, Id, #{}, Batch)),
-    ?assertEqual({{error, not_found}, Batch}, time_series_collection:list_windows(Ctx, Id, [], #{}, Batch)),
-    ?assertEqual({{error, not_found}, Batch}, time_series_collection:delete(Ctx, Id, Batch)).
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:incorporate_config(Ctx, Id, #{}, Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:delete(Ctx, Id, Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:get_layout(Ctx, Id, Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:consume_measurements(Ctx, Id, #{}, Batch)),
+    ?assertEqual({{error, not_found}, Batch}, time_series_collection:get_slice(Ctx, Id, #{}, #{}, Batch)).
 
 
 %%%===================================================================
 %%% Helper functions
 %%%===================================================================
 
-init(Id, ConfigMap) ->
-    Batch = datastore_doc_batch:init(),
-    InitAns = time_series_collection:create(#{}, Id, ConfigMap, Batch),
-    ?assertMatch({ok, _}, InitAns),
-    {ok, Batch2} = InitAns,
-    Batch2.
+
+set_collection_id(Id) ->
+    put(collection_id, Id).
+
+get_collection_id() ->
+    get(collection_id).
+
+set_current_batch(Batch) ->
+    put(current_batch, Batch).
+
+get_current_batch() ->
+    get(current_batch).
 
 
-update(Id, NewTimestamp, ValueOrUpdateRange, Batch) ->
-    UpdateAns = time_series_collection:update(#{}, Id, NewTimestamp, ValueOrUpdateRange, Batch),
-    ?assertMatch({ok, _}, UpdateAns),
-    {ok, Batch2} = UpdateAns,
-    Batch2.
+init_batch() ->
+    EmptyBatch = datastore_doc_batch:init(),
+    set_current_batch(EmptyBatch).
 
 
-update(Id, NewTimestamp, MetricsToUpdate, NewValue, Batch) ->
-    UpdateAns = time_series_collection:update(#{}, Id, NewTimestamp, MetricsToUpdate, NewValue, Batch),
-    ?assertMatch({ok, _}, UpdateAns),
-    {ok, Batch2} = UpdateAns,
-    Batch2.
+call_create(Id, Config) ->
+    {Result, NewBatch} = time_series_collection:create(#{}, Id, Config, get_current_batch()),
+    case Result of
+        {error, _} ->
+            ?assertEqual(NewBatch, get_current_batch());
+        ok ->
+            set_current_batch(NewBatch),
+            set_collection_id(Id)
+    end,
+    Result.
 
 
-update_many(Id, Measurements, Batch) ->
-    lists:foldl(fun({NewTimestamp, ValueOrUpdateRange}, Acc) ->
-        update(Id, NewTimestamp, ValueOrUpdateRange, Acc)
-    end, Batch, Measurements).
+call_delete() ->
+    {Result, NewBatch} = time_series_collection:delete(#{}, get_collection_id(), get_current_batch()),
+    case Result of
+        {error, _} ->
+            ?assertEqual(NewBatch, get_current_batch());
+        ok ->
+            set_current_batch(NewBatch)
+    end,
+    Result.
 
 
-update_many(Id, Measurements, MetricsToUpdate, Batch) ->
-    lists:foldl(fun({NewTimestamp, NewValue}, Acc) ->
-        update(Id, NewTimestamp, MetricsToUpdate, NewValue, Acc)
-    end, Batch, Measurements).
+call_incorporate_config(Config) ->
+    {Result, NewBatch} = time_series_collection:incorporate_config(#{}, get_collection_id(), Config, get_current_batch()),
+    case Result of
+        {error, _} ->
+            ?assertEqual(NewBatch, get_current_batch());
+        ok ->
+            % config incorporation should be idempotent
+            ?assertEqual({Result, NewBatch}, time_series_collection:incorporate_config(
+                #{}, get_collection_id(), Config, NewBatch
+            )),
+            set_current_batch(NewBatch)
+    end,
+    Result.
 
 
-extend_collection(Id, ConfigMapExtension, Batch) ->
-    extend_collection(Id, ConfigMapExtension, #{}, Batch).
-
-extend_collection(Id, ConfigMapExtension, Options, Batch) ->
-    AddAns = time_series_collection:add_metrics(#{}, Id, ConfigMapExtension, Options, Batch),
-    ?assertMatch({ok, _}, AddAns),
-    {ok, Batch2} = AddAns,
-    Batch2.
-
-
-extend_collection_with_error(Id, ConfigMapExtension, Reason, Batch) ->
-    extend_collection_with_error(Id, ConfigMapExtension, Reason, #{}, Batch).
-
-extend_collection_with_error(Id, ConfigMapExtension, Reason, Options, Batch) ->
-    AddAns = time_series_collection:add_metrics(#{}, Id, ConfigMapExtension, Options, Batch),
-    ?assertMatch({{error, Reason}, _}, AddAns),
-    {_, Batch2} = AddAns,
-    ?assertEqual(Batch, Batch2).
+call_get_layout() ->
+    {Result, NewBatch} = time_series_collection:get_layout(#{}, get_collection_id(), get_current_batch()),
+    case Result of
+        {error, _} ->
+            ?assertEqual(NewBatch, get_current_batch());
+        {ok, _} ->
+            set_current_batch(NewBatch)
+    end,
+    Result.
 
 
-delete_metrics(Id, MetricsToDelete, Batch) ->
-    DeleteAns = time_series_collection:delete_metrics(#{}, Id, MetricsToDelete, Batch),
-    ?assertMatch({ok, _}, DeleteAns),
-    {ok, Batch2} = DeleteAns,
-    Batch2.
+call_consume_measurements(ConsumeSpec) ->
+    {Result, NewBatch} = time_series_collection:consume_measurements(#{}, get_collection_id(), ConsumeSpec, get_current_batch()),
+    case Result of
+        {error, _} ->
+            ?assertEqual(NewBatch, get_current_batch());
+        ok ->
+            set_current_batch(NewBatch)
+    end,
+    Result.
 
 
-verify_time_series_heads(MetricsMap, ExpectedMetricIds, ExpectedMetricsMapSizes, ExpectedMetricsMaxWindowsInHead) ->
-    ?assertEqual(ExpectedMetricIds, lists:sort(maps:keys(MetricsMap))),
+call_get_slice(SliceLayout) ->
+    call_get_slice(SliceLayout, #{}).
+
+call_get_slice(SliceLayout, ListWindowsOptions) ->
+    {Result, NewBatch} = time_series_collection:get_slice(#{}, get_collection_id(), SliceLayout, ListWindowsOptions, get_current_batch()),
+    case Result of
+        {error, _} ->
+            ?assertEqual(NewBatch, get_current_batch());
+        {ok, _} ->
+            set_current_batch(NewBatch)
+    end,
+    Result.
+
+
+init_test_with_newly_created_collection(Config) ->
+    init_batch(),
+
+    Id = datastore_key:new(),
+    ?assertEqual(ok, call_create(Id, Config)),
+
+    ?assertEqual({error, already_exists}, call_create(Id, Config)).
+
+
+consume_measurements(ConsumeSpec) ->
+    ?assertMatch(ok, call_consume_measurements(ConsumeSpec)).
+
+
+consume_measurements_foreach_metric(Measurements) ->
+    {ok, Layout} = call_get_layout(),
+    ConsumeSpec = tsc_structure:build_from_layout(fun(_TimeSeriesName, _MetricName) -> Measurements end, Layout),
+    consume_measurements(ConsumeSpec).
+
+
+compare_complete_slice(ExpectedSlice) ->
+    {ok, Layout} = call_get_layout(),
+    compare_slice(ExpectedSlice, Layout, #{}).
+
+compare_slice(ExpectedSlice, SliceLayout) ->
+    compare_slice(ExpectedSlice, SliceLayout, #{}).
+
+compare_slice(ExpectedSlice, SliceLayout, ListWindowsOptions) ->
+    Result = call_get_slice(SliceLayout, ListWindowsOptions),
+    ?assertMatch({ok, _}, Result),
+    {ok, Slice} = Result,
+    AreSlicesEqual = Slice =:= ExpectedSlice,
+    AreSlicesEqual orelse eunit_utils:debug_log("ExpectedSlice: ~p~nActualSlice  : ~p", [ExpectedSlice, Slice]),
+    AreSlicesEqual.
+
+
+compare_windows_list(ExpectedWindows, TimeSeriesName, MetricName) ->
+    compare_windows_list(ExpectedWindows, TimeSeriesName, MetricName, #{}).
+
+compare_windows_list(ExpectedWindows, TimeSeriesName, MetricName, Options) ->
+    SliceLayout = #{TimeSeriesName => [MetricName]},
+    ExpectedSlice = #{TimeSeriesName => #{MetricName => ExpectedWindows}},
+    compare_slice(ExpectedSlice, SliceLayout, Options).
+
+
+verify_cumulative_slicing(ExpCompleteSlice) ->
+    maps:foreach(fun(TimeSeriesName, ExpWindowsPerMetric) ->
+        maps:fold(fun(CurrentMetricName, ExpWindows, MetricsToCheckAcc) ->
+            ?assert(compare_windows_list(ExpWindows, TimeSeriesName, CurrentMetricName)),
+
+            UpdatedMetricsToCheckAcc = [CurrentMetricName | MetricsToCheckAcc],
+            ExpectedSlice = #{TimeSeriesName => maps:with(UpdatedMetricsToCheckAcc, ExpWindowsPerMetric)},
+            ?assert(compare_slice(ExpectedSlice, #{TimeSeriesName => UpdatedMetricsToCheckAcc})),
+
+            UpdatedMetricsToCheckAcc
+        end, [], ExpWindowsPerMetric)
+    end, ExpCompleteSlice).
+
+
+verify_time_series_heads(MetricsMap, ExpectedMetricNames, ExpectedMetricsMapSizes, ExpectedMetricsMaxWindowsInHead) ->
+    ?assertEqual(ExpectedMetricNames, lists:sort(maps:keys(MetricsMap))),
     {MetricsMapSizes, MetricsMaxWindowsInHead} = lists:unzip(lists:map(fun(#metric{
         head_data = #data_node{windows = Windows},
         splitting_strategy = #splitting_strategy{max_windows_in_head_doc = MaxWindowsInHead}

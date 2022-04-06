@@ -21,9 +21,10 @@
 %% API
 -export([calculate/1]).
 
--type flat_config_map() :: #{time_series_collection:full_metric_id() => ts_metric:config()}.
--type windows_count_map() :: #{time_series_collection:full_metric_id() => non_neg_integer()}.
--type splitting_strategies_map() :: #{time_series_collection:full_metric_id() => ts_metric:splitting_strategy()}.
+-type metric_selector() :: {time_series_collection:time_series_name(), time_series_collection:metric_name()}.
+-type flat_config_map() :: #{metric_selector() => metric_config:record()}.
+-type windows_count_map() :: #{metric_selector() => non_neg_integer()}.
+-type splitting_strategies_map() :: #{metric_selector() => ts_metric:splitting_strategy()}.
 
 -export_type([splitting_strategies_map/0]).
 
@@ -35,20 +36,13 @@
 %% API
 %%=====================================================================
 
--spec calculate(time_series_collection:collection_config()) -> splitting_strategies_map().
-calculate(ConfigMap) ->
-    FlattenedMap = maps:fold(fun(TimeSeriesId, MetricsConfigs, Acc) ->
-        maps:fold(fun
-            (_, #metric_config{retention = Retention}, _) when Retention =< 0 ->
-                throw({error, empty_metric});
-            (_, #metric_config{resolution = 0, retention = Retention}, _) when Retention > 1 ->
-                throw({error, wrong_retention});
-            (_, #metric_config{resolution = Resolution}, _) when Resolution < 0 ->
-                throw({error, wrong_resolution});
-            (MetricId, Config, InternalAcc) ->
-                InternalAcc#{{TimeSeriesId, MetricId} => Config}
-        end, Acc, MetricsConfigs)
-    end, #{}, ConfigMap),
+-spec calculate(time_series_collection:config()) -> splitting_strategies_map().
+calculate(Config) when map_size(Config) == 0 ->
+    #{};
+calculate(Config) ->
+    FlattenedMap = tsc_structure:fold(fun(TimeSeriesName, MetricName, MetricConfig, Acc) ->
+        Acc#{{TimeSeriesName, MetricName} => MetricConfig}
+    end, #{}, Config),
 
     MaxValuesInDoc = ?MAX_VALUES_IN_DOC,
     MaxWindowsInHeadMap = calculate_windows_in_head_doc_count(FlattenedMap),
@@ -88,7 +82,7 @@ calculate_windows_in_head_doc_count(FlattenedMap) ->
     MaxValuesInHead = ?MAX_VALUES_IN_DOC,
     case maps:size(FlattenedMap) > MaxValuesInHead of
         true ->
-            throw({error, too_many_metrics});
+            throw(?ERROR_TSC_TOO_MANY_METRICS(MaxValuesInHead));
         false ->
             NotFullyStoredInHead = maps:map(fun(_, _) -> 0 end, FlattenedMap),
             calculate_windows_in_head_doc_count(#{}, NotFullyStoredInHead, MaxValuesInHead, FlattenedMap)
@@ -114,7 +108,7 @@ calculate_windows_in_head_doc_count(FullyStoredInHead, NotFullyStoredInHead, Rem
     end.
 
 
--spec update_windows_in_head_doc_count([time_series_collection:full_metric_id()], windows_count_map(),
+-spec update_windows_in_head_doc_count([metric_selector()], windows_count_map(),
     windows_count_map(), flat_config_map(), non_neg_integer(), non_neg_integer()) ->
     {windows_count_map(), windows_count_map(), non_neg_integer()}.
 update_windows_in_head_doc_count(_MetricsKeys, FullyStoredInHead, NotFullyStoredInHead, _FlattenedMap, _LimitUpdate, 0) ->

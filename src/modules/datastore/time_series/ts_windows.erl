@@ -13,7 +13,7 @@
 -author("Michal Wrzeszcz").
 
 %% API
--export([init/0, list/3, insert_value/4, prepend_windows_list/2, prune_overflowing/2, split/2,
+-export([init/0, list/3, list_all/1, insert_value/4, prepend_windows_list/2, prune_overflowing/2, split/2,
     is_size_exceeded/2, get_remaining_windows_count/2, reorganize/4]).
 %% Encoding/decoding  API
 -export([encode/1, decode/1]).
@@ -31,19 +31,18 @@
 
 -type list_options() :: #{
     % newest timestamp from which descending listing will begin
-    start => timestamp_seconds(),
-    % oldest timestamp when the listing should stop (unless it hits the limit)
-    stop => timestamp_seconds(),
+    start_timestamp => timestamp_seconds(),
+    % oldest timestamp when the listing should stop (unless it hits the window_limit)
+    stop_timestamp => timestamp_seconds(),
     % maximum number of time windows to be listed
-    limit => non_neg_integer()
-    %% @TODO VFS-8941 as limit is optional, it seems that if no limit is specified, the
-    %% listing can return possibly to large list of windows (there should be a cap on that)
+    window_limit => non_neg_integer()
 }.
 
 -export_type([timestamp_seconds/0, value/0, window_id/0, window_value/0, window/0, windows_collection/0,
     descending_windows_list/0, insert_strategy/0, list_options/0]).
 
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
+-define(MAX_WINDOW_LIMIT, 1000).
 
 %%%===================================================================
 %%% API
@@ -57,7 +56,19 @@ init() ->
 -spec list(windows_collection(), timestamp_seconds() | undefined, list_options()) ->
     {ok | {continue, list_options()}, descending_windows_list()}.
 list(Windows, Timestamp, Options) ->
-    list_internal(Timestamp, Windows, Options).
+    SanitizedWindowLimit = case maps:find(window_limit, Options) of
+        error ->
+            ?MAX_WINDOW_LIMIT;
+        {ok, Limit} ->
+            min(Limit, ?MAX_WINDOW_LIMIT)
+    end,
+    list_internal(Timestamp, Windows, Options#{window_limit => SanitizedWindowLimit}).
+
+
+%% @doc should be used only internally as the complete window list can be large
+-spec list_all(windows_collection()) -> {ok | {continue, list_options()}, descending_windows_list()}.
+list_all(Windows) ->
+    list_internal(undefined, Windows, #{}).
 
 
 -spec insert_value(windows_collection(), timestamp_seconds(), value() | window_value(), insert_strategy()) -> windows_collection().
@@ -237,7 +248,7 @@ list_internal(Timestamp, Windows, Options) ->
 
 -spec list_internal(gb_trees:iter(timestamp_seconds(), window_value()), list_options()) ->
     {ok | {continue, list_options()}, descending_windows_list()}.
-list_internal(_Iterator, #{limit := 0}) ->
+list_internal(_Iterator, #{window_limit := 0}) ->
     {ok, []};
 list_internal(Iterator, Options) ->
     case gb_trees:next(Iterator) of
@@ -246,12 +257,12 @@ list_internal(Iterator, Options) ->
         {Key, Value, NextIterator} ->
             Timestamp = reverse_timestamp(Key),
             case Options of
-                #{stop := Stop} when Timestamp < Stop ->
+                #{stop_timestamp := StopTimestamp} when Timestamp < StopTimestamp ->
                     {ok, []};
-                #{stop := Stop} when Timestamp =:= Stop ->
+                #{stop_timestamp := StopTimestamp} when Timestamp =:= StopTimestamp ->
                     {ok, [{Timestamp, Value}]};
-                #{limit := Limit} ->
-                    {FinishOrContinue, List} = list_internal(NextIterator, Options#{limit := Limit - 1}),
+                #{window_limit := Limit} ->
+                    {FinishOrContinue, List} = list_internal(NextIterator, Options#{window_limit := Limit - 1}),
                     {FinishOrContinue, [{Timestamp, Value} | List]};
                 _ ->
                     {FinishOrContinue, List} = list_internal(NextIterator, Options),
