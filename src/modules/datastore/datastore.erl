@@ -311,7 +311,7 @@ get_links_trees(Ctx, Key) ->
 
 
 -spec time_series_collection_operation(ctx(), key(), atom(), [term()]) ->
-    ok | {ok, ts_windows:descending_windows_list() | time_series_collection:windows_map()} | {error, term()}.
+    ok | {ok, time_series_collection:layout() | time_series_collection:slice()} | {error, term()}.
 time_series_collection_operation(Ctx, Key, Function, Args) ->
     datastore_hooks:wrap(Ctx, Key, Function, Args, fun datastore_router:route_time_series_collection_operation/2).
 

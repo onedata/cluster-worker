@@ -14,6 +14,7 @@
 -ifndef(DATASTORE_TIME_SERIES_HRL).
 -define(DATASTORE_TIME_SERIES_HRL, 1).
 
+-include_lib("ctool/include/errors.hrl").
 
 % Record storing part of metric's windows. If windows count exceeds capacity of
 % of single record (see ts_persistence), windows of each metric are
@@ -40,7 +41,7 @@
 % Record describing single metric that is part of time series (see time_series_collection.erl).
 % It stores config, splitting_strategy (see above) and head of list of #data_node{} records.
 -record(metric, {
-    config :: ts_metric:config(),
+    config :: metric_config:record(),
     % NOTE: splitting strategy may result in keeping more windows than required by config
     % (in order to optimize documents management)
     splitting_strategy :: ts_metric:splitting_strategy(),

@@ -16,14 +16,13 @@
 
 -export([get/3, exists/3]).
 -export([get_links/5, get_links_trees/3]).
--export([time_series_collection_list/4, infinite_log_operation/4]).
+-export([time_series_collection_get/4, infinite_log_operation/4]).
 
 -type tree_id() :: datastore_links:tree_id().
 -type link() :: datastore_links:link().
 -type link_name() :: datastore_links:link_name().
--type time_series_collection_list_function() :: list_windows | list_time_series_ids | list_metrics_by_time_series.
--type time_series_collection_list_ok_ans() :: ts_windows:descending_windows_list() | time_series_collection:windows_map() |
-    [time_series_collection:time_series_id()] | time_series_collection:metrics_by_time_series().
+-type time_series_collection_get_function() :: get_layout | get_slice.
+-type time_series_collection_get_ok_ans() :: time_series_collection:layout() | time_series_collection:slice().
 
 %%%===================================================================
 %%% Direct access API
@@ -105,11 +104,11 @@ get_links_trees(FetchNode, Ctx, Key) ->
     end.
 
 
--spec time_series_collection_list(node(), datastore_doc:ctx(), time_series_collection_list_function(), list()) ->
-    {ok, time_series_collection_list_ok_ans()} | {error, term()}.
-time_series_collection_list(FetchNode, Ctx, ListFunction, Args) ->
+-spec time_series_collection_get(node(), datastore_doc:ctx(), time_series_collection_get_function(), list()) ->
+    {ok, time_series_collection_get_ok_ans()} | {error, term()}.
+time_series_collection_get(FetchNode, Ctx, GetFunction, Args) ->
     try
-        ListResult = time_series_collection_list_unsafe(FetchNode, Ctx, ListFunction, Args),
+        ListResult = time_series_collection_get_unsafe(FetchNode, Ctx, GetFunction, Args),
         case ListResult of
             {{ok, Result}, _} ->
                 {ok, Result};
@@ -119,7 +118,7 @@ time_series_collection_list(FetchNode, Ctx, ListFunction, Args) ->
     catch
         throw:{fetch_error, not_found} ->
             datastore_router:execute_on_node(
-                FetchNode, datastore_writer, time_series_collection_operation, [Ctx, ListFunction, Args])
+                FetchNode, datastore_writer, time_series_collection_operation, [Ctx, GetFunction, Args])
     end.
 
 
@@ -172,11 +171,9 @@ set_direct_access_ctx(_FetchNode, Ctx) ->
 
 
 %% @private
--spec time_series_collection_list_unsafe(node(), datastore_doc:ctx(), time_series_collection_list_function(), list()) ->
-    {{ok, time_series_collection_list_ok_ans} | {error, term()}, datastore_doc:batch()}.
-time_series_collection_list_unsafe(FetchNode, Ctx, list_windows, [Id, Options]) ->
-    time_series_collection:list_windows(set_direct_access_ctx(FetchNode, Ctx), Id, Options, undefined);
-time_series_collection_list_unsafe(FetchNode, Ctx, list_windows, [Id, RequestedMetrics, Options]) ->
-    time_series_collection:list_windows(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined);
-time_series_collection_list_unsafe(FetchNode, Ctx, ListFunction, [Id]) ->
-    time_series_collection:ListFunction(set_direct_access_ctx(FetchNode, Ctx), Id, undefined).
+-spec time_series_collection_get_unsafe(node(), datastore_doc:ctx(), time_series_collection_get_function(), list()) ->
+    {{ok, time_series_collection_get_ok_ans()} | {error, term()}, datastore_doc:batch()}.
+time_series_collection_get_unsafe(FetchNode, Ctx, get_layout, [Id]) ->
+    time_series_collection:get_layout(set_direct_access_ctx(FetchNode, Ctx), Id, undefined);
+time_series_collection_get_unsafe(FetchNode, Ctx, get_slice, [Id, RequestedMetrics, Options]) ->
+    time_series_collection:get_slice(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined).

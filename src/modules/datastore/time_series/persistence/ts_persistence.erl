@@ -85,8 +85,8 @@
     hub :: doc() | deleted,
     is_hub_updated = false :: boolean(), % Field used to determine if hub should be saved by finalize/1 function
     % Fields representing metric currently being updated (single ctx can be used to update several metrics)
-    currently_processed_time_series :: time_series_collection:time_series_id() | undefined,
-    currently_processed_metric :: ts_metric:id() | undefined
+    currently_processed_time_series :: time_series_collection:time_series_name() | undefined,
+    currently_processed_metric :: time_series_collection:metric_name() | undefined
 }).
 
 -type ctx() :: #ctx{}.
@@ -101,24 +101,24 @@
 %%% API
 %%%===================================================================
 
--spec init_for_new_collection(datastore_ctx(), time_series_collection:collection_id(), ts_hub:time_series_collection_heads(),
-    batch()) -> ctx() | {{error, already_exists}, batch()}.
+-spec init_for_new_collection(datastore_ctx(), time_series_collection:id(), ts_hub:time_series_collection_heads(),
+    batch()) -> {ok, ctx()} | {{error, already_exists}, batch()}.
 init_for_new_collection(DatastoreCtx, Id, TimeSeriesHeads, Batch) ->
     case datastore_doc:fetch(DatastoreCtx, Id, Batch) of
         {{error, not_found}, UpdatedBatch} ->
             TSHub = #document{key = Id, value = ts_hub:set_time_series_collection_heads(TimeSeriesHeads)},
-            #ctx{
+            {ok, #ctx{
                 datastore_ctx = DatastoreCtx,
                 batch = UpdatedBatch,
                 hub = TSHub,
                 is_hub_updated = true
-            };
+            }};
         {{ok, #document{}}, UpdatedBatch} ->
             {{error, already_exists}, UpdatedBatch}
     end.
 
 
--spec init_for_existing_collection(datastore_ctx(), time_series_collection:collection_id(), batch() | undefined) ->
+-spec init_for_existing_collection(datastore_ctx(), time_series_collection:id(), batch() | undefined) ->
     {ts_hub:time_series_collection_heads(), ctx()}.
 init_for_existing_collection(DatastoreCtx, Id, Batch) ->
     case datastore_doc:fetch(DatastoreCtx, Id, Batch) of
@@ -132,19 +132,19 @@ init_for_existing_collection(DatastoreCtx, Id, Batch) ->
                 }
             };
         {{error, not_found}, UpdatedBatch} ->
-            throw({{error, hub_not_found}, UpdatedBatch})
+            throw({{error, not_found}, UpdatedBatch})
     end.
 
 
--spec insert_metric(ts_metric:metric(), ctx()) -> ctx().
+-spec insert_metric(ts_metric:record(), ctx()) -> ctx().
 insert_metric(Metric, #ctx{
     hub = #document{value = Record} = HubDoc,
-    currently_processed_time_series = TimeSeriesId,
-    currently_processed_metric = MetricId
+    currently_processed_time_series = TimeSeriesName,
+    currently_processed_metric = MetricName
 } = Ctx) ->
     TimeSeriesHeads = ts_hub:get_time_series_collection_heads(Record),
-    TimeSeries = maps:get(TimeSeriesId, TimeSeriesHeads, #{}),
-    UpdatedTimeSeriesHeads = TimeSeriesHeads#{TimeSeriesId => TimeSeries#{MetricId => Metric}},
+    TimeSeries = maps:get(TimeSeriesName, TimeSeriesHeads, #{}),
+    UpdatedTimeSeriesHeads = TimeSeriesHeads#{TimeSeriesName => TimeSeries#{MetricName => Metric}},
     UpdatedDoc = HubDoc#document{value = ts_hub:set_time_series_collection_heads(UpdatedTimeSeriesHeads)},
     Ctx#ctx{hub = UpdatedDoc, is_hub_updated = true}.
     
@@ -163,25 +163,25 @@ finalize(#ctx{
     UpdatedBatch.
 
 
--spec set_currently_processed_time_series(time_series_collection:time_series_id(), ctx()) -> ctx().
-set_currently_processed_time_series(TimeSeriesId, Ctx) ->
-    Ctx#ctx{currently_processed_time_series = TimeSeriesId}.
+-spec set_currently_processed_time_series(time_series_collection:time_series_name(), ctx()) -> ctx().
+set_currently_processed_time_series(TimeSeriesName, Ctx) ->
+    Ctx#ctx{currently_processed_time_series = TimeSeriesName}.
 
 
--spec set_currently_processed_metric(ts_metric:id(), ctx()) -> ctx().
-set_currently_processed_metric(MetricId, Ctx) ->
-    Ctx#ctx{currently_processed_metric = MetricId}.
+-spec set_currently_processed_metric(time_series_collection:metric_name(), ctx()) -> ctx().
+set_currently_processed_metric(MetricName, Ctx) ->
+    Ctx#ctx{currently_processed_metric = MetricName}.
 
 
--spec get_currently_processed_metric(ctx()) -> ts_metric:metric().
+-spec get_currently_processed_metric(ctx()) -> ts_metric:record().
 get_currently_processed_metric(#ctx{
     hub = #document{value = Record},
-    currently_processed_time_series = TimeSeriesId,
-    currently_processed_metric = MetricId
+    currently_processed_time_series = TimeSeriesName,
+    currently_processed_metric = MetricName
 }) ->
     TimeSeriesHeads = ts_hub:get_time_series_collection_heads(Record),
-    TimeSeries = maps:get(TimeSeriesId, TimeSeriesHeads),
-    maps:get(MetricId, TimeSeries).
+    TimeSeries = maps:get(TimeSeriesName, TimeSeriesHeads),
+    maps:get(MetricName, TimeSeries).
 
 
 -spec get_time_series_collection_id(ctx()) -> key().
@@ -219,13 +219,13 @@ create(DataToCreate, #ctx{hub = #document{key = HubKey}, datastore_ctx = Datasto
 -spec update(key(), ts_metric:data_node(), ctx()) -> ctx().
 update(HubKey, Data, #ctx{
     hub = #document{key = HubKey, value = Record} = HubDoc,
-    currently_processed_time_series = TimeSeriesId,
-    currently_processed_metric = MetricId
+    currently_processed_time_series = TimeSeriesName,
+    currently_processed_metric = MetricName
 } = Ctx) ->
     TimeSeriesHeads = ts_hub:get_time_series_collection_heads(Record),
-    TimeSeries = maps:get(TimeSeriesId, TimeSeriesHeads),
-    Metric = maps:get(MetricId, TimeSeries),
-    UpdatedTimeSeriesHeads = TimeSeriesHeads#{TimeSeriesId => TimeSeries#{MetricId => Metric#metric{head_data = Data}}},
+    TimeSeries = maps:get(TimeSeriesName, TimeSeriesHeads),
+    Metric = maps:get(MetricName, TimeSeries),
+    UpdatedTimeSeriesHeads = TimeSeriesHeads#{TimeSeriesName => TimeSeries#{MetricName => Metric#metric{head_data = Data}}},
     UpdatedDoc = HubDoc#document{value = ts_hub:set_time_series_collection_heads(UpdatedTimeSeriesHeads)},
     Ctx#ctx{hub = UpdatedDoc, is_hub_updated = true};
 
@@ -250,15 +250,15 @@ delete_hub(#ctx{hub = #document{key = HubKey}, datastore_ctx = DatastoreCtx, bat
 -spec delete_metric(ctx()) -> ctx().
 delete_metric(#ctx{
     hub = #document{value = Record} = HubDoc,
-    currently_processed_time_series = TimeSeriesId,
-    currently_processed_metric = MetricId
+    currently_processed_time_series = TimeSeriesName,
+    currently_processed_metric = MetricName
 } = Ctx) ->
     TimeSeriesHeads = ts_hub:get_time_series_collection_heads(Record),
-    TimeSeries = maps:get(TimeSeriesId, TimeSeriesHeads),
-    UpdatedTimeSeries = maps:remove(MetricId, TimeSeries),
+    TimeSeries = maps:get(TimeSeriesName, TimeSeriesHeads),
+    UpdatedTimeSeries = maps:remove(MetricName, TimeSeries),
     UpdatedTimeSeriesHeads = case maps:size(UpdatedTimeSeries) of
-        0 -> maps:remove(TimeSeriesId, TimeSeriesHeads);
-        _ -> TimeSeriesHeads#{TimeSeriesId => UpdatedTimeSeries}
+        0 -> maps:remove(TimeSeriesName, TimeSeriesHeads);
+        _ -> TimeSeriesHeads#{TimeSeriesName => UpdatedTimeSeries}
     end,
     UpdatedDoc = HubDoc#document{value = ts_hub:set_time_series_collection_heads(UpdatedTimeSeriesHeads)},
     Ctx#ctx{hub = UpdatedDoc, is_hub_updated = true}.

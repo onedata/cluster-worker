@@ -16,6 +16,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("ctool/include/time_series/common.hrl").
+-include_lib("ctool/include/test/test_utils.hrl").
 -include("modules/datastore/datastore_time_series.hrl").
 -include("global_definitions.hrl").
 
@@ -41,20 +42,17 @@ setup() ->
     application:set_env(?CLUSTER_WORKER_APP_NAME, time_series_max_doc_size, ?MAX_DOC_SIZE).
 
 
+-define(METRIC_WITH_RETENTION(Retention), #metric_config{
+    retention = Retention,
+    resolution = ?RAND_ELEMENT(?ALLOWED_METRIC_RESOLUTIONS -- [?INFINITY_RESOLUTION]),
+    aggregator = ?RAND_ELEMENT(?ALLOWED_METRIC_AGGREGATORS)
+}).
+
 %%%===================================================================
 %%% Tests
 %%%===================================================================
 
 single_doc_splitting_strategies_create() ->
-    Id = datastore_key:new(),
-    Batch = datastore_doc_batch:init(),
-    ConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0}}},
-    ?assertEqual({{error, empty_metric}, Batch}, time_series_collection:create(#{}, Id, ConfigMap, Batch)),
-    ConfigMap2 = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = -1}}},
-    ?assertEqual({{error, wrong_resolution}, Batch}, time_series_collection:create(#{}, Id, ConfigMap2, Batch)),
-    ConfigMap3 = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = 0}}},
-    ?assertEqual({{error, wrong_retention}, Batch}, time_series_collection:create(#{}, Id, ConfigMap3, Batch)),
-
     single_doc_splitting_strategies_create_testcase(10, #splitting_strategy{
         max_windows_in_head_doc = 10, max_windows_in_tail_doc = 0, max_docs_count = 1}),
     single_doc_splitting_strategies_create_testcase(2000, #splitting_strategy{
@@ -94,9 +92,9 @@ multiple_metrics_splitting_strategies_create() ->
         #splitting_strategy{max_docs_count = 1, max_windows_in_head_doc = 300, max_windows_in_tail_doc = 0}),
 
     ConfigMap = #{<<"TS1">> => #{
-        <<"M1">> => #metric_config{retention = 3000},
-        <<"M2">> => #metric_config{retention = 4000},
-        <<"M3">> => #metric_config{retention = 5500}
+        <<"M1">> => ?METRIC_WITH_RETENTION(3000),
+        <<"M2">> => ?METRIC_WITH_RETENTION(4000),
+        <<"M3">> => ?METRIC_WITH_RETENTION(5500)
     }},
     ExpectedMap = #{
         {<<"TS1">>, <<"M1">>} => #splitting_strategy{
@@ -110,13 +108,13 @@ multiple_metrics_splitting_strategies_create() ->
 
     ConfigMap2 = #{
         <<"TS1">> => #{
-            <<"M1">> => #metric_config{retention = 3500},
-            <<"M2">> => #metric_config{retention = 4000},
-            <<"M3">> => #metric_config{retention = 5000}
+            <<"M1">> => ?METRIC_WITH_RETENTION(3500),
+            <<"M2">> => ?METRIC_WITH_RETENTION(4000),
+            <<"M3">> => ?METRIC_WITH_RETENTION(5000)
         },
         <<"TS2">> => #{
-            <<"M1">> => #metric_config{retention = 3000},
-            <<"M2">> => #metric_config{retention = 10000}
+            <<"M1">> => ?METRIC_WITH_RETENTION(3000),
+            <<"M2">> => ?METRIC_WITH_RETENTION(10000)
         }
     },
     ExpectedMap2 = #{
@@ -134,12 +132,12 @@ multiple_metrics_splitting_strategies_create() ->
     ?assertEqual(ExpectedMap2, ts_doc_splitting_strategies:calculate(ConfigMap2)),
 
     GetLargeTimeSeries = fun() -> maps:from_list(lists:map(fun(Seq) ->
-        {<<(integer_to_binary(Seq))/binary>>, #metric_config{retention = Seq}}
+        {<<"M", (integer_to_binary(Seq))/binary>>, ?METRIC_WITH_RETENTION(Seq)}
     end, lists:seq(1, 1500))) end,
     ConfigMap3 = #{<<"TS1">> => GetLargeTimeSeries(), <<"TS2">> => GetLargeTimeSeries()},
     Id = datastore_key:new(),
     Batch = datastore_doc_batch:init(),
-    ?assertEqual({{error, too_many_metrics}, Batch}, time_series_collection:create(#{}, Id, ConfigMap3, Batch)).
+    ?assertEqual({?ERROR_TSC_TOO_MANY_METRICS(?MAX_DOC_SIZE), Batch}, time_series_collection:create(#{}, Id, ConfigMap3, Batch)).
 
 
 %%%===================================================================
@@ -147,7 +145,7 @@ multiple_metrics_splitting_strategies_create() ->
 %%%===================================================================
 
 single_doc_splitting_strategies_create_testcase(Retention, SplittingStrategy) ->
-    ConfigMap = #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = Retention}}},
+    ConfigMap = #{<<"TS1">> => #{<<"M1">> => ?METRIC_WITH_RETENTION(Retention)}},
     ExpectedMap = #{{<<"TS1">>, <<"M1">>} => SplittingStrategy},
     ?assertEqual(ExpectedMap, ts_doc_splitting_strategies:calculate(ConfigMap)).
 
@@ -155,9 +153,9 @@ single_doc_splitting_strategies_create_testcase(Retention, SplittingStrategy) ->
 multiple_metrics_splitting_strategies_create_testcase(Retention1, Retention2, Retention3,
     DocSplittingStrategy1, DocSplittingStrategy2, DocSplittingStrategy3) ->
     ConfigMap = #{<<"TS1">> => #{
-        <<"M1">> => #metric_config{retention = Retention1},
-        <<"M2">> => #metric_config{retention = Retention2},
-        <<"M3">> => #metric_config{retention = Retention3}
+        <<"M1">> => ?METRIC_WITH_RETENTION(Retention1),
+        <<"M2">> => ?METRIC_WITH_RETENTION(Retention2),
+        <<"M3">> => ?METRIC_WITH_RETENTION(Retention3)
     }},
     ExpectedMap = #{
         {<<"TS1">>, <<"M1">>} => DocSplittingStrategy1,
