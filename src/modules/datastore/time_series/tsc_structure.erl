@@ -15,7 +15,7 @@
 
 %% API
 -export([has/3, foreach/2, map/2, fold/3, merge_with/3]).
--export([to_layout/1, build_from_layout/2, buildfold_from_layout/3]).
+-export([to_layout/1, build_from_layout/2, buildfold_from_layout/3, subtract_layout/2]).
 
 
 % merely wrappers for shorter specs
@@ -101,3 +101,20 @@ buildfold_from_layout(BuildFoldFun, InitialFoldAcc, Layout) ->
         end, {#{}, OuterFoldAcc}, MetricNames),
         {StructureAcc#{TimeSeriesName => InnerMapResult}, InnerFoldResult}
     end, {#{}, InitialFoldAcc}, Layout).
+
+
+-spec subtract_layout(layout(), layout()) -> layout().
+subtract_layout(Minuend, Subtrahend) ->
+    maps:filtermap(fun(MinuendTimeSeriesName, MinuendMetricNames) ->
+        case maps:find(MinuendTimeSeriesName, Subtrahend) of
+            error ->
+                {true, MinuendMetricNames};
+            {ok, SubtrahendMetricNames} ->
+                case lists_utils:subtract(MinuendMetricNames, SubtrahendMetricNames) of
+                    [] ->
+                        false;
+                    MetricNamesDifference ->
+                        {true, MetricNamesDifference}
+                end
+        end
+    end, Minuend).
