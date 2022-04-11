@@ -24,8 +24,8 @@
 
 %%% Setters and getters API
 -export([update_description/4, update_status/4, fix_description/4,
-    get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1, get_description/1,
-    get_additional_data/1, get_additional_data/2, update_additional_data/4]).
+    get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1, is_cancelled/1, is_cancelled/2, 
+    get_description/1, get_additional_data/1, get_additional_data/2, update_additional_data/4]).
 
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1, get_record_version/0, upgrade_record/2, resolve_conflict/3]).
@@ -463,6 +463,19 @@ is_enqueued(#document{value = #traverse_task{
     canceled = Canceled
 }}) ->
     Enqueued and not Canceled.
+
+-spec is_cancelled(doc()) -> boolean().
+is_cancelled(#document{value = #traverse_task{canceled = Cancelled}}) ->
+    Cancelled.
+
+-spec is_cancelled(traverse:pool(), traverse:id()) -> {ok, boolean()} | {error, term()}.
+is_cancelled(Pool, TaskId) ->
+    case get(Pool, TaskId) of
+        {ok, Doc} ->
+            {ok, is_cancelled(Doc)};
+        Other ->
+            Other
+    end.
 
 -spec get_execution_info(doc()) -> {ok, traverse:task_execution_info()}.
 get_execution_info(#document{value = #traverse_task{
