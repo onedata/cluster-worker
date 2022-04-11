@@ -29,6 +29,7 @@
     call/2, call/3, call/4,
     cast/2, cast/3,
     stats/0, stats/1,
+    broadcast/2,
     default_strategy/0
 ]).
 
@@ -142,12 +143,12 @@ call(PoolName, Call, Strategy, Timeout) ->
 %% @doc
 %% Performs cast to worker from the pool with default strategy
 %% available_worker.
-%% @equiv wpool:cast(PoolName, Call).
+%% @equiv wpool:cast(PoolName, Cast).
 %% @end
 %%--------------------------------------------------------------------
 -spec cast(name(), request()) -> response().
-cast(PoolName, Call) ->
-    wpool:cast(PoolName, Call).
+cast(PoolName, Cast) ->
+    wpool:cast(PoolName, Cast).
 
 
 %%--------------------------------------------------------------------
@@ -180,6 +181,16 @@ stats() ->
 -spec stats(name()) -> stats().
 stats(PoolName) ->
     wpool:stats(PoolName).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Casts a message to all the workers within the given pool.
+%% @equiv wpool:broadcast(PoolName, Cast).
+%% @end
+%%--------------------------------------------------------------------
+-spec broadcast(name(), request()) -> response().
+broadcast(PoolName, Cast) ->
+    wpool:broadcast(PoolName, Cast).
 
 %%--------------------------------------------------------------------
 %% @doc
