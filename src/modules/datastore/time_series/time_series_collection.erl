@@ -122,6 +122,13 @@
 ).
 
 
+-define(make_missing_layout_error(TimeSeriesCollectionHeads, RequestLayout), begin
+    ActualLayout = tsc_structure:to_layout(TimeSeriesCollectionHeads),
+    MissingLayout = tsc_structure:subtract_layout(RequestLayout, ActualLayout),
+    ?ERROR_TSC_MISSING_LAYOUT(MissingLayout)
+end).
+
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -222,9 +229,7 @@ consume_measurements(Ctx, Id, ConsumeSpec, Batch) ->
         catch
             throw:invalid_layout ->
                 RequestLayout = tsc_structure:to_layout(ExpandedConsumeSpec),
-                ActualLayout = tsc_structure:to_layout(TimeSeriesCollectionHeads),
-                MissingLayout = tsc_structure:subtract_layout(RequestLayout, ActualLayout),
-                {?ERROR_TSC_MISSING_LAYOUT(MissingLayout), Batch}
+                {?make_missing_layout_error(TimeSeriesCollectionHeads, RequestLayout), Batch}
         end
     catch Class:Reason:Stacktrace ->
         ?handle_errors(Batch, [Id, ConsumeSpec], Class, Reason, Stacktrace)
@@ -246,9 +251,7 @@ get_slice(Ctx, Id, SliceLayout, ListWindowsOptions, Batch) ->
             {{ok, Slice}, ts_persistence:finalize(FinalPersistenceCtx)}
         catch
             throw:invalid_layout ->
-                ActualLayout = tsc_structure:to_layout(TimeSeriesCollectionHeads),
-                MissingLayout = tsc_structure:subtract_layout(ExpandedSliceLayout, ActualLayout),
-                {?ERROR_TSC_MISSING_LAYOUT(MissingLayout), Batch}
+                {?make_missing_layout_error(TimeSeriesCollectionHeads, ExpandedSliceLayout), Batch}
         end
     catch Class:Reason:Stacktrace ->
         ?handle_errors(Batch, [Id, SliceLayout, ListWindowsOptions], Class, Reason, Stacktrace)
