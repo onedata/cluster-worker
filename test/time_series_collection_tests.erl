@@ -159,33 +159,40 @@ invalid_consume_measurements_request() ->
             <<"M1">> => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 12, aggregator = sum},
             <<"M2">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 24, aggregator = min},
             <<"M3">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 36, aggregator = max}
+        },
+        <<"TSX">> => #{
+            <<"M1">> => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 12, aggregator = sum}
         }
     }),
     ?assertEqual(
         call_consume_measurements(#{
             <<"TS1">> => #{
                 <<"M1">> => [{1, 2}],
-                <<"M2">> => lists:seq(1, 100),
+                <<"M2">> => lists:map(fun(I) -> {I, I * 2} end, lists:seq(1, 100)),
                 <<"M3">> => [],
-                <<"M4">> => [{5, 6}, {7, 8}]
+                <<"M4">> => [{1, 2}]
             },
             <<"TS2">> => #{
-                <<"M2">> => lists:seq(0, 10, 2)
-            }
+                ?ALL_METRICS => lists:map(fun(I) -> {I, I * 2} end, lists:seq(0, 10, 20))
+            },
+            <<"TS3">> => #{},
+            <<"TS4">> => #{<<"M4">> => []}
         }),
         ?ERROR_TSC_MISSING_LAYOUT(#{
             <<"TS1">> => [<<"M4">>],
-            <<"TS2">> => [<<"M2">>]
+            <<"TS2">> => [?ALL_METRICS],
+            <<"TS3">> => [],
+            <<"TS4">> => [<<"M4">>]
         })
     ),
     ?assertEqual(
         call_consume_measurements(#{
-            <<"TS2">> => #{
-                all => lists:seq(0, 10, 2)
+            ?ALL_TIME_SERIES => #{
+                <<"M3">> => [{1, 2}]
             }
         }),
         ?ERROR_TSC_MISSING_LAYOUT(#{
-            <<"TS2">> => []
+            <<"TSX">> => [<<"M3">>]
         })
     ).
 
@@ -196,20 +203,30 @@ invalid_get_slice_request() ->
             <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = sum}
         },
         <<"TS2">> => #{
-            <<"M2.1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = last},
-            <<"M2.2">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 10, aggregator = max}
+            <<"M1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = last},
+            <<"M2">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 10, aggregator = max}
         }
     }),
     ?assertEqual(
         call_get_slice(#{
-            <<"TS1">> => [<<"M1.X">>],
-            <<"TS2">> => [<<"M2.1">>, <<"M2.3">>],
-            <<"TS3">> => []
+            <<"TS1">> => [<<"M1.X">>, <<"M1">>],
+            <<"TS2">> => [<<"M1">>, <<"M3">>],
+            <<"TS3">> => [],
+            <<"TS4">> => [?ALL_METRICS]
         }),
         ?ERROR_TSC_MISSING_LAYOUT(#{
             <<"TS1">> => [<<"M1.X">>],
-            <<"TS2">> => [<<"M2.3">>],
-            <<"TS3">> => []
+            <<"TS2">> => [<<"M3">>],
+            <<"TS3">> => [],
+            <<"TS4">> => [?ALL_METRICS]
+        })
+    ),
+    ?assertEqual(
+        call_get_slice(#{
+            ?ALL_TIME_SERIES => [<<"M2">>]
+        }),
+        ?ERROR_TSC_MISSING_LAYOUT(#{
+            <<"TS1">> => [<<"M2">>]
         })
     ).
 
@@ -537,7 +554,8 @@ multiple_time_series_multiple_nodes() ->
         lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowCounts))
     end, Config),
 
-    ?assert(compare_slice(ExpCompleteSlice, tsc_structure:to_layout(Config))).
+    ?assert(compare_slice(ExpCompleteSlice, tsc_structure:to_layout(Config))),
+    ?assert(compare_slice(ExpCompleteSlice, ?COMPLETE_LAYOUT)).
 
 
 update_subset() ->
@@ -549,10 +567,10 @@ update_subset() ->
     end, #{}, lists:seq(1, 5)),
     init_test_with_newly_created_collection(Config),
 
-    consume_measurements(#{<<"TS0">> => #{all => [{0, 0}]}}),
-    consume_measurements(#{<<"TS1">> => #{all => [{0, 1}]}}),
-    consume_measurements(#{<<"TS0">> => #{all => [{1, 2}]}}),
-    consume_measurements(#{<<"TS1">> => #{all => [{2, 3}]}}),
+    consume_measurements(#{<<"TS0">> => #{?ALL_METRICS => [{0, 0}]}}),
+    consume_measurements(#{<<"TS1">> => #{?ALL_METRICS => [{0, 1}]}}),
+    consume_measurements(#{<<"TS0">> => #{?ALL_METRICS => [{1, 2}]}}),
+    consume_measurements(#{<<"TS1">> => #{?ALL_METRICS => [{2, 3}]}}),
     consume_measurements(#{<<"TS0">> => #{<<"M1">> => [{3, 4}]}}),
     consume_measurements(#{
         <<"TS1">> => #{
@@ -572,11 +590,11 @@ update_subset() ->
         }
     }),
     consume_measurements(#{
-        <<"TS0">> => #{all => [{7, 9}]},
-        <<"TS1">> => #{all => [{7, 10}]}
+        <<"TS0">> => #{?ALL_METRICS => [{7, 9}]},
+        <<"TS1">> => #{?ALL_METRICS => [{7, 10}]}
     }),
 
-    ?assert(compare_slice(#{
+    ExpCompleteSlice = #{
         <<"TS0">> => #{
             <<"M1">> => [{7, 9}, {6, 7}, {5, 6}, {3, 4}, {1, 2}, {0, 0}],
             <<"M2">> => [{7, 9}, {1, 2}, {0, 0}]
@@ -586,7 +604,17 @@ update_subset() ->
             <<"M1">> => [{7, 10}, {6, 8}, {4, 5}, {2, 3}, {0, 1}],
             <<"M2">> => [{7, 10}, {4, 5}, {2, 3}, {0, 1}]
         }
-    }, tsc_structure:to_layout(Config))).
+    },
+    ?assert(compare_slice(ExpCompleteSlice, tsc_structure:to_layout(Config))),
+    ?assert(compare_slice(ExpCompleteSlice, ?COMPLETE_LAYOUT)),
+    ?assert(compare_slice(ExpCompleteSlice, #{<<"TS0">> => [?ALL_METRICS], <<"TS1">> => [<<"M0">>, <<"M1">>, <<"M2">>]})),
+    ?assert(compare_slice(ExpCompleteSlice, #{<<"TS0">> => [<<"M1">>, <<"M2">>], <<"TS1">> => [?ALL_METRICS]})),
+
+    ExpSliceWithM1 = maps:map(fun(_TimeSeriesName, WindowsPerMetric) ->
+        maps:with([<<"M1">>], WindowsPerMetric)
+    end, ExpCompleteSlice),
+    ?assert(compare_slice(ExpSliceWithM1, #{?ALL_TIME_SERIES => [<<"M1">>]})),
+    ?assert(compare_slice(ExpSliceWithM1, #{<<"TS0">> => [<<"M1">>], <<"TS1">> => [<<"M1">>]})).
 
 
 lifecycle_with_config_incorporation() ->
@@ -626,7 +654,7 @@ lifecycle_with_config_incorporation() ->
         }
     })),
 
-    consume_measurements(#{<<"TS2">> => #{all => Measurements}}),
+    consume_measurements(#{<<"TS2">> => #{?ALL_METRICS => Measurements}}),
 
     ?assertEqual(ok, call_incorporate_config(#{
         <<"TS1">> => #{
@@ -688,13 +716,13 @@ lifecycle_with_config_incorporation() ->
         [0, 22, 22], [38, 38, 38]),
 
     Measurements3 = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(301, 900)),
-    consume_measurements(#{<<"TS2">> => #{<<"M3">> => Measurements3}}),
+    consume_measurements(#{?ALL_TIME_SERIES => #{<<"M3">> => Measurements3}}),
 
     ?assert(compare_complete_slice(#{
         <<"TS1">> => #{
             <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, {1, 2 * I}} end, lists:seq(1, 200))),
             <<"M2">> => [],
-            <<"M3">> => []
+            <<"M3">> => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(891, 900)))
         },
         <<"TS2">> => #{
             <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, 300))),
@@ -834,13 +862,28 @@ consume_measurements(ConsumeSpec) ->
 
 consume_measurements_foreach_metric(Measurements) ->
     {ok, Layout} = call_get_layout(),
-    ConsumeSpec = tsc_structure:build_from_layout(fun(_TimeSeriesName, _MetricName) -> Measurements end, Layout),
+    ConsumeSpec = case ?RAND_INT(1, 3) of
+        1 ->
+            tsc_structure:build_from_layout(fun(_TimeSeriesName, _MetricName) -> Measurements end, Layout);
+        2 ->
+            #{?ALL_TIME_SERIES => #{?ALL_METRICS => Measurements}};
+        3 ->
+            maps:map(fun(_TimeSeriesName, _) -> #{?ALL_METRICS => Measurements} end, Layout)
+    end,
     consume_measurements(ConsumeSpec).
 
 
 compare_complete_slice(ExpectedSlice) ->
     {ok, Layout} = call_get_layout(),
-    compare_slice(ExpectedSlice, Layout, #{}).
+    SliceLayout = case ?RAND_INT(1, 3) of
+        1 ->
+            Layout;
+        2 ->
+            ?COMPLETE_LAYOUT;
+        3 ->
+            maps:map(fun(_TimeSeriesName, _) -> [?ALL_METRICS] end, Layout)
+    end,
+    compare_slice(ExpectedSlice, SliceLayout, #{}).
 
 compare_slice(ExpectedSlice, SliceLayout) ->
     compare_slice(ExpectedSlice, SliceLayout, #{}).

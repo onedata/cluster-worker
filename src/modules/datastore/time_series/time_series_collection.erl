@@ -75,9 +75,8 @@
 %%    },
 %%    <<"TS2">> => ...
 %% }
--type structure(MetricKeyType, ValueType) :: #{time_series_name() => #{MetricKeyType => ValueType}}.
--type structure(ValueType) :: structure(metric_name(), ValueType).
--export_type([structure/2, structure/1]).
+-type structure(ValueType) :: #{time_series_name() => #{metric_name() => ValueType}}.
+-export_type([structure/1]).
 
 %% Layout is used to express a summary of a time series collection structure,
 %% holding the list of metric names per time series name:
@@ -88,8 +87,13 @@
 -type layout() :: #{time_series_name() => [metric_name()]}.
 -export_type([layout/0]).
 
+%% NOTE: both structure and layout, when used as an input for
+%% consume_measurements/4 or get_slice/5 operations, can contain
+%% the placeholders ?ALL_TIME_SERIES / ?ALL_METRICS that will
+%% be expanded to the actual set of time series / metrics.
+
 -type config() :: structure(metric_config:record()).
--type consume_spec() :: structure(metric_name() | all, [{ts_windows:timestamp_seconds(), ts_windows:value()}]).
+-type consume_spec() :: structure([{ts_windows:timestamp_seconds(), ts_windows:value()}]).
 -type slice() :: structure(ts_windows:descending_windows_list()).
 -export_type([config/0, consume_spec/0, slice/0]).
 
@@ -116,6 +120,13 @@
             {?ERROR_UNEXPECTED_ERROR(ErrorRef), Batch}
     end
 ).
+
+
+-define(make_missing_layout_error(TimeSeriesCollectionHeads, RequestLayout), begin
+    ActualLayout = tsc_structure:to_layout(TimeSeriesCollectionHeads),
+    MissingLayout = tsc_structure:subtract_layout(RequestLayout, ActualLayout),
+    ?ERROR_TSC_MISSING_LAYOUT(MissingLayout)
+end).
 
 
 %%%===================================================================
@@ -210,15 +221,16 @@ consume_measurements(Ctx, Id, ConsumeSpec, Batch) ->
     try
         {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
         ExpandedConsumeSpec = expand_consume_spec(ConsumeSpec, TimeSeriesCollectionHeads),
-        RequestLayout = tsc_structure:to_layout(ExpandedConsumeSpec),
-        ActualLayout = tsc_structure:to_layout(TimeSeriesCollectionHeads),
-        assert_is_sub_layout(ActualLayout, RequestLayout),
-
-        FinalPersistenceCtx = tsc_structure:fold(
-            fun ts_metric:consume_measurements/4, PersistenceCtx, ExpandedConsumeSpec
-        ),
-
-        {ok, ts_persistence:finalize(FinalPersistenceCtx)}
+        try
+            FinalPersistenceCtx = tsc_structure:fold(
+                fun ts_metric:consume_measurements/4, PersistenceCtx, ExpandedConsumeSpec
+            ),
+            {ok, ts_persistence:finalize(FinalPersistenceCtx)}
+        catch
+            throw:invalid_layout ->
+                RequestLayout = tsc_structure:to_layout(ExpandedConsumeSpec),
+                {?make_missing_layout_error(TimeSeriesCollectionHeads, RequestLayout), Batch}
+        end
     catch Class:Reason:Stacktrace ->
         ?handle_errors(Batch, [Id, ConsumeSpec], Class, Reason, Stacktrace)
     end.
@@ -229,15 +241,18 @@ consume_measurements(Ctx, Id, ConsumeSpec, Batch) ->
 get_slice(Ctx, Id, SliceLayout, ListWindowsOptions, Batch) ->
     try
         {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-        ActualLayout = tsc_structure:to_layout(TimeSeriesCollectionHeads),
-        assert_is_sub_layout(ActualLayout, SliceLayout),
-
-        {Slice, FinalPersistenceCtx} = tsc_structure:buildfold_from_layout(fun(TimeSeriesName, MetricName, PersistenceCtxAcc) ->
-            {_Windows, _UpdatedPersistenceCtxAcc} = ts_metric:list_windows(
-                TimeSeriesName, MetricName, ListWindowsOptions, PersistenceCtxAcc
-            )
-        end, PersistenceCtx, SliceLayout),
-        {{ok, Slice}, ts_persistence:finalize(FinalPersistenceCtx)}
+        ExpandedSliceLayout = expand_layout(SliceLayout, TimeSeriesCollectionHeads),
+        try
+            {Slice, FinalPersistenceCtx} = tsc_structure:buildfold_from_layout(fun(TimeSeriesName, MetricName, PersistenceCtxAcc) ->
+                {_Windows, _UpdatedPersistenceCtxAcc} = ts_metric:list_windows(
+                    TimeSeriesName, MetricName, ListWindowsOptions, PersistenceCtxAcc
+                )
+            end, PersistenceCtx, ExpandedSliceLayout),
+            {{ok, Slice}, ts_persistence:finalize(FinalPersistenceCtx)}
+        catch
+            throw:invalid_layout ->
+                {?make_missing_layout_error(TimeSeriesCollectionHeads, ExpandedSliceLayout), Batch}
+        end
     catch Class:Reason:Stacktrace ->
         ?handle_errors(Batch, [Id, SliceLayout, ListWindowsOptions], Class, Reason, Stacktrace)
     end.
@@ -305,32 +320,45 @@ reconfigure(PreviousConfig, NewConfig, DocSplittingStrategies, PersistenceCtx) -
 
 %% @private
 -spec expand_consume_spec(consume_spec(), ts_hub:time_series_collection_heads()) -> consume_spec().
+expand_consume_spec(#{?ALL_TIME_SERIES := MeasurementsPerMetric}, TimeSeriesCollectionHeads) ->
+    WithExpandedTimeSeries = maps:map(fun(_TimeSeriesName, _) ->
+        MeasurementsPerMetric
+    end, TimeSeriesCollectionHeads),
+    expand_consume_spec(WithExpandedTimeSeries, TimeSeriesCollectionHeads);
 expand_consume_spec(ConsumeSpec, TimeSeriesCollectionHeads) ->
     maps:map(fun
-        (TimeSeriesName, #{all := Measurements}) ->
-            TimeSeriesConfig = maps:get(TimeSeriesName, TimeSeriesCollectionHeads, #{}),
-            maps:map(fun(_MetricName, _MetricConfig) -> Measurements end, TimeSeriesConfig);
+        (TimeSeriesName, #{?ALL_METRICS := Measurements}) ->
+            case maps:find(TimeSeriesName, TimeSeriesCollectionHeads) of
+                {ok, TimeSeriesMetricComposition} ->
+                    maps:map(fun(_MetricName, _) -> Measurements end, TimeSeriesMetricComposition);
+                error ->
+                    % retain the placeholder so that it appears in the error report
+                    % when the whole time series is not found during operation handling
+                    #{?ALL_METRICS => Measurements}
+            end;
         (_TimeSeriesName, MeasurementsPerMetric) ->
             MeasurementsPerMetric
     end, ConsumeSpec).
 
 
 %% @private
--spec assert_is_sub_layout(layout(), layout()) -> ok | no_return().
-assert_is_sub_layout(ReferenceLayout, AllegedSubLayout) ->
-    MissingLayout = maps:filtermap(fun(SubLayoutTimeSeriesName, SubLayoutMetricNames) ->
-        case maps:find(SubLayoutTimeSeriesName, ReferenceLayout) of
-            error ->
-                {true, SubLayoutMetricNames};
-            {ok, ReferenceMetricNames} ->
-                NewMetricNames = lists_utils:subtract(SubLayoutMetricNames, ReferenceMetricNames),
-                case lists_utils:is_empty(NewMetricNames) of
-                    true ->
-                        false;
-                    false ->
-                        {true, NewMetricNames}
-                end
-        end
-    end, AllegedSubLayout),
-    maps_utils:is_empty(MissingLayout) orelse throw(?ERROR_TSC_MISSING_LAYOUT(MissingLayout)),
-    ok.
+-spec expand_layout(layout(), ts_hub:time_series_collection_heads()) -> layout().
+expand_layout(#{?ALL_TIME_SERIES := MetricNames}, TimeSeriesCollectionHeads) ->
+    WithExpandedTimeSeries = maps:map(fun(_TimeSeriesName, _) ->
+        MetricNames
+    end, TimeSeriesCollectionHeads),
+    expand_layout(WithExpandedTimeSeries, TimeSeriesCollectionHeads);
+expand_layout(Layout, TimeSeriesCollectionHeads) ->
+    maps:map(fun
+        (TimeSeriesName, [?ALL_METRICS]) ->
+            case maps:find(TimeSeriesName, TimeSeriesCollectionHeads) of
+                {ok, TimeSeriesMetricComposition} ->
+                    maps:keys(TimeSeriesMetricComposition);
+                error ->
+                    % retain the placeholder so that it appears in the error report
+                    % when the whole time series is not found during operation handling
+                    [?ALL_METRICS]
+            end;
+        (_TimeSeriesName, MetricNames) ->
+            MetricNames
+    end, Layout).

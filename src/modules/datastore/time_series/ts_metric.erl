@@ -462,6 +462,12 @@ split_node(DataNodeKey, Data, Windows1, Windows2, SplitTimestamp, _DocumentNumbe
 
 
 %% @private
+-spec set_as_currently_processed(
+    time_series_collection:time_series_name(),
+    time_series_collection:metric_name(),
+    ts_persistence:ctx()
+) ->
+    ts_persistence:ctx().
 set_as_currently_processed(TimeSeriesName, MetricName, PersistenceCtx0) ->
     PersistenceCtx1 = ts_persistence:set_currently_processed_time_series(TimeSeriesName, PersistenceCtx0),
     ts_persistence:set_currently_processed_metric(MetricName, PersistenceCtx1).

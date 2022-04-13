@@ -173,15 +173,18 @@ set_currently_processed_metric(MetricName, Ctx) ->
     Ctx#ctx{currently_processed_metric = MetricName}.
 
 
--spec get_currently_processed_metric(ctx()) -> ts_metric:record().
+-spec get_currently_processed_metric(ctx()) -> ts_metric:record() | no_return().
 get_currently_processed_metric(#ctx{
     hub = #document{value = Record},
     currently_processed_time_series = TimeSeriesName,
     currently_processed_metric = MetricName
 }) ->
-    TimeSeriesHeads = ts_hub:get_time_series_collection_heads(Record),
-    TimeSeries = maps:get(TimeSeriesName, TimeSeriesHeads),
-    maps:get(MetricName, TimeSeries).
+    case ts_hub:get_time_series_collection_heads(Record) of
+        #{TimeSeriesName := #{MetricName := Metric}} ->
+            Metric;
+        _ ->
+            throw(invalid_layout)
+    end.
 
 
 -spec get_time_series_collection_id(ctx()) -> key().

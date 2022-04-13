@@ -1089,15 +1089,14 @@ time_series_test(Config) ->
         lists:foreach(fun
             ({NewTimestamp, NewValue}) when NewTimestamp < 1000 ->
                 ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
-                    <<"TS0">> => #{all => [{NewTimestamp, NewValue}]},
-                    <<"TS1">> => #{all => [{NewTimestamp, NewValue}]}
+                    ?ALL_TIME_SERIES => #{?ALL_METRICS => [{NewTimestamp, NewValue}]}
                 }]));
             ({NewTimestamp, NewValue}) ->
                 ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
-                    <<"TS0">> => #{all => [{NewTimestamp, NewValue}]}
+                    <<"TS0">> => #{?ALL_METRICS => [{NewTimestamp, NewValue}]}
                 }])),
                 ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
-                    <<"TS1">> => #{all => [{NewTimestamp, NewValue}]}
+                    <<"TS1">> => #{?ALL_METRICS => [{NewTimestamp, NewValue}]}
                 }]))
         end, Measurements),
 
@@ -1113,9 +1112,9 @@ time_series_test(Config) ->
 
         % Test errors when wrong time series or metric is given in the consume spec
         ?assertEqual(
-            ?ERROR_TSC_MISSING_LAYOUT(#{<<"TS", 2>> => []}),
+            ?ERROR_TSC_MISSING_LAYOUT(#{<<"TS2">> => [?ALL_METRICS]}),
             rpc:call(Worker, Model, time_series_collection_consume_measurements, [
-                Id, #{<<"TS", 2>> => #{all => [{1, 1}]}}
+                Id, #{<<"TS2">> => #{?ALL_METRICS => [{1, 1}]}}
             ])
         ),
 
@@ -1141,8 +1140,8 @@ multinode_time_series_test(Config) ->
         MeasurementsCount = 610000,
         Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
         ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
-            <<"TS0">> => #{all => Measurements},
-            <<"TS1">> => #{all => Measurements}
+            <<"TS0">> => #{?ALL_METRICS => Measurements},
+            <<"TS1">> => #{?ALL_METRICS => Measurements}
         }])),
 
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
@@ -1175,8 +1174,7 @@ time_series_document_fetch_test(Config) ->
         MeasurementsCount = 610000,
         Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
         ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
-            <<"TS0">> => #{all => Measurements},
-            <<"TS1">> => #{all => Measurements}
+            ?ALL_TIME_SERIES => #{?ALL_METRICS => Measurements}
         }])),
 
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
