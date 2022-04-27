@@ -330,19 +330,19 @@ init_forest_fold(ForestIt = #forest_it{tree_ids = TreeIds}, Opts) ->
 -spec add_prev_fold_nodes({ok | {error, term()}, forest_it()}, fold_opts(), list(), list()) ->
     {ok | {error, term()}, forest_it()}.
 add_prev_fold_nodes({ok, #forest_it{heap = Heap} = ForestIt} = Ans,
-    #{offset := Offset, prev_link_name := PrevLinkName} = Opts, EmptyTrees, ForceContinue) when Offset < 0 ->
+    #{offset := Offset} = Opts, EmptyTrees, ForceContinue) when Offset < 0 ->
     HeapList = gb_trees:to_list(Heap),
-    {Keys, TreeIds} = lists:foldl(fun({{_, TreeId}, #tree_it{links = Links}}, {LinksAcc, TreesAcc}) ->
-        {LinksAcc ++ lists:map(fun(#link{name = Name}) -> Name end, Links), [TreeId | TreesAcc]}
+    {LinksList, TreeIds} = lists:foldl(fun({{_, TreeId}, #tree_it{links = Links}}, {LinksAcc, TreesAcc}) ->
+        {LinksAcc ++ Links, [TreeId | TreesAcc]}
     end, {[], []}, HeapList),
-    Keys2 = lists:sort(Keys),
+    LinksSortedList = lists:sort(fun is_link_previous_or_equal/2, LinksList),
 
     Continue = case ForceContinue of
         [] ->
             OffsetAbs = abs(Offset),
-            case length(Keys) > OffsetAbs of
+            case length(LinksList) > OffsetAbs of
                 true ->
-                    {lists:nth(OffsetAbs, Keys2) >= PrevLinkName, TreeIds -- EmptyTrees};
+                    {not is_previous_to_starting_point(lists:nth(OffsetAbs, LinksSortedList), Opts), TreeIds -- EmptyTrees};
                 _ ->
                     {true, TreeIds -- EmptyTrees}
             end;
@@ -389,13 +389,13 @@ add_prev_fold_nodes({ok, #forest_it{heap = Heap} = ForestIt} = Ans,
         {_, true} ->
             Ans;
         _ ->
-            SmallerKeys = lists:takewhile(fun(Key) -> Key < PrevLinkName end, Keys2),
-            FirstIncluded = lists:nth(max(length(SmallerKeys) + Offset + 1, 1), Keys2),
+            SmallerLinks = lists:takewhile(fun(Key) -> is_previous_to_starting_point(Key, Opts) end, LinksSortedList),
+            FirstIncluded = lists:nth(max(length(SmallerLinks) + Offset + 1, 1), LinksSortedList),
 
             FoldAns = lists:foldl(fun({{_, ItTree}, #tree_it{links = [First | _] = Links} = TreeIt},
                 {#forest_it{heap = TmpHeap} = ForestIt2, ContinueList}) ->
-                FilteredLinks = lists:dropwhile(fun(#link{name = Key}) ->
-                    Key < FirstIncluded end, Links),
+                FilteredLinks = lists:dropwhile(fun(Link) ->
+                    is_link_previous(Link, FirstIncluded) end, Links),
                 case FilteredLinks of
                     [#link{name = ItName} = First | _] ->
                         case lists:member(ItTree, EmptyTrees) of
@@ -427,6 +427,33 @@ add_prev_fold_nodes({ok, ForestIt, NewEmptyTrees}, Opts, _EmptyTrees, ForceConti
     add_prev_fold_nodes({ok, ForestIt}, Opts, NewEmptyTrees, ForceContinue);
 add_prev_fold_nodes(Ans, _, _, _) ->
     Ans.
+
+-spec is_previous_to_starting_point(link(), fold_opts()) -> boolean().
+is_previous_to_starting_point(
+    #link{name = Name, tree_id = TreeId},
+    #{prev_link_name := Name, prev_tree_id := PrevTreeId, inclusive := true}
+) ->
+    TreeId < PrevTreeId;
+is_previous_to_starting_point(
+    #link{name = Name, tree_id = TreeId},
+    #{prev_link_name := Name, prev_tree_id := PrevTreeId}
+) ->
+    TreeId =< PrevTreeId;
+is_previous_to_starting_point(#link{name = Name}, #{prev_link_name := PrevLinkName}) ->
+    Name < PrevLinkName.
+
+-spec is_link_previous(link(), link()) -> boolean().
+is_link_previous(#link{name = Name, tree_id = TreeId}, #link{name = Name, tree_id = TreeId2}) ->
+    TreeId < TreeId2;
+is_link_previous(#link{name = Name}, #link{name = Name2}) ->
+    Name < Name2.
+
+-spec is_link_previous_or_equal(link(), link()) -> boolean().
+is_link_previous_or_equal(#link{name = Name, tree_id = TreeId}, #link{name = Name, tree_id = TreeId2}) ->
+    TreeId =< TreeId2;
+is_link_previous_or_equal(#link{name = Name}, #link{name = Name2}) ->
+    Name < Name2.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -555,6 +582,10 @@ process_link(Fun, Acc, #link{tree_id = TreeId, name = Name} = Link, Opts = #{
     inclusive := true
 }) ->
     execute_fold_fun_or_decrement_offset(Fun, Acc, Link, Opts);
+process_link(Fun, Acc, Link, Opts = #{
+    offset := Offset
+}) when Offset < 0 ->
+    execute_fold_fun_or_decrement_offset(Fun, Acc, Link, Opts);
 process_link(_, Acc, #link{tree_id = TreeId, name = Name}, Opts = #{
     prev_tree_id := PrevTreeId,
     prev_link_name := PrevName
@@ -630,6 +661,9 @@ get_next_tree_it(ForestIt = #forest_it{heap = Heap}) ->
 -spec get_fold_tree_init_arg(tree_id(), fold_opts()) -> bp_tree:fold_init().
 get_fold_tree_init_arg(_TreeId, #{node_id := NodeId}) ->
     {node_id, NodeId};
+get_fold_tree_init_arg(_TreeId, #{prev_link_name := Name, offset := Offset})
+    when Offset < 0 ->
+    {node_of_key, Name};
 get_fold_tree_init_arg(TreeId, #{
     prev_tree_id := PrevTreeId,
     prev_link_name := Name,
@@ -641,9 +675,6 @@ get_fold_tree_init_arg(TreeId, #{
     prev_link_name := Name
 }) when TreeId =< PrevTreeId ->
     {prev_key, Name};
-get_fold_tree_init_arg(_TreeId, #{prev_link_name := Name, offset := Offset})
-    when Offset < 0 ->
-    {node_of_key, Name};
 get_fold_tree_init_arg(_TreeId, #{prev_link_name := Name}) ->
     {start_key, Name};
 get_fold_tree_init_arg(_TreeId, #{node_prev_to_key := Name}) ->
