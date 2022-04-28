@@ -577,7 +577,7 @@ multi_tree_fold_should_return_all_using_id_and_tree_id_inclusive_with_neg_offset
         add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
     end, lists:seq(1, TreesNum))),
 
-    ExpectedLinks = get_expected_links(AllLinks),
+    [_ | ExpectedLinks] = get_expected_links(AllLinks),
     #link{name = StartName, tree_id = StartTreeId} = lists:nth(abs(Offset) + 1, ExpectedLinks),
     {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, datastore_links_iter, fold, [
         ?CTX(?KEY), ?KEY, all,
