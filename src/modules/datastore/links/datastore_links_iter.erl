@@ -330,7 +330,7 @@ init_forest_fold(ForestIt = #forest_it{tree_ids = TreeIds}, Opts) ->
 -spec add_prev_fold_nodes({ok | {error, term()}, forest_it()}, fold_opts(), list(), list()) ->
     {ok | {error, term()}, forest_it()}.
 add_prev_fold_nodes({ok, #forest_it{heap = Heap} = ForestIt} = Ans,
-    #{offset := Offset} = Opts, EmptyTrees, ForceContinue) when Offset < 0 ->
+    #{offset := Offset, prev_link_name := _} = Opts, EmptyTrees, ForceContinue) when Offset < 0 ->
     HeapList = gb_trees:to_list(Heap),
     {LinksList, TreeIds} = lists:foldl(fun({{_, TreeId}, #tree_it{links = Links}}, {LinksAcc, TreesAcc}) ->
         {LinksAcc ++ Links, [TreeId | TreesAcc]}
