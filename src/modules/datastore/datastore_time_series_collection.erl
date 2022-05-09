@@ -13,11 +13,14 @@
 -module(datastore_time_series_collection).
 -author("Michal Wrzeszcz").
 
+-include("middleware/ts_browser.hrl").
+
 %% API
 -export([create/3, incorporate_config/3, delete/2]).
 -export([get_layout/2]).
 -export([consume_measurements/3]).
 -export([get_slice/4]).
+-export([browse/3]).
 
 -type ctx() :: datastore_model:ctx().
 
@@ -69,3 +72,25 @@ consume_measurements(Ctx, Id, ConsumeSpec) ->
     {ok, time_series_collection:slice()} | {error, term()}.
 get_slice(Ctx, Id, SliceLayout, Options) ->
     ?apply(Ctx, Id, [SliceLayout, Options]).
+
+
+-spec browse(ctx(), time_series_collection:id(), ts_browse_request:req()) -> 
+    {ok, ts_browse_result:res()} | {error, term()}.
+browse(Ctx, Id, #time_series_get_layout_req{}) ->
+    case get_layout(Ctx, Id) of
+        {ok, Layout} -> #time_series_layout_result{layout = Layout};
+        Error -> Error
+    end;
+browse(Ctx, Id, #time_series_get_slice_req{} = SliceReq) ->
+    #time_series_get_slice_req{
+        layout = SliceLayout, 
+        start_timestamp = StartTimestamp, 
+        window_limit = WindowLimit
+    } = SliceReq,
+    Opts = maps_utils:remove_undefined(#{
+        start_timestamp => StartTimestamp, window_limit => WindowLimit
+    }),
+    case get_slice(Ctx, Id, SliceLayout, Opts) of
+        {ok, Slice} -> #time_series_slice_result{slice = Slice};
+        Error -> Error
+    end.
