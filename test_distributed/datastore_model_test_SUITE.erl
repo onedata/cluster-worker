@@ -65,6 +65,7 @@
     link_doc_should_expire/1,
     link_del_should_delay_inactivate/1,
     fold_links_id_should_succeed/1,
+    fold_links_inclusive_id_should_succeed/1,
     fold_links_token_and_id_should_succeed/1,
     stress_performance_test/1,
     stress_performance_test_base/1,
@@ -134,6 +135,7 @@ all() ->
         link_doc_should_expire,
         link_del_should_delay_inactivate,
         fold_links_id_should_succeed,
+        fold_links_inclusive_id_should_succeed,
         fold_links_token_and_id_should_succeed,
         memory_only_stress_performance_test,
         stress_performance_test,
@@ -763,6 +765,12 @@ fold_links_token_should_succeed_after_token_timeout(Config) ->
     end, ?TEST_MODELS).
 
 fold_links_id_should_succeed(Config) ->
+    fold_links_id_should_succeed_base(Config, ?KEY, fun fold_links_id_and_tree/4, false).
+
+fold_links_inclusive_id_should_succeed(Config) ->
+    fold_links_id_should_succeed_base(Config, ?KEY, fun fold_links_inclusive_id_and_tree/4, true).
+
+fold_links_id_should_succeed_base(Config, Key, FoldFun, Inclusive) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
@@ -770,10 +778,10 @@ fold_links_id_should_succeed(Config) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
         end, lists:seq(1, LinksNum))),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
-            ?KEY, ?LINK_TREE_ID, ExpectedLinks
+            Key, ?LINK_TREE_ID, ExpectedLinks
         ])),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
-            ?KEY, ?LINK_TREE_ID(2), ExpectedLinks
+            Key, ?LINK_TREE_ID(2), ExpectedLinks
         ])),
 
         AddTree = fun(TreeID) ->
@@ -783,8 +791,7 @@ fold_links_id_should_succeed(Config) ->
         end,
         ExpectedLinks2 = lists:sort(AddTree(?LINK_TREE_ID) ++ AddTree(?LINK_TREE_ID(2))),
 
-        Links = fold_links_id_and_tree(?KEY, Worker, Model,
-            #{prev_link_name => <<>>, size => 101}),
+        Links = FoldFun(Key, Worker, Model, #{prev_link_name => <<>>, size => 101, inclusive => Inclusive}),
         lists:foreach(fun({{Name, Target, TreeID}, Link = #link{}}) ->
             ?assertEqual(TreeID, Link#link.tree_id),
             ?assertEqual(Name, Link#link.name),
@@ -2080,6 +2087,26 @@ fold_links_id_and_tree(Key, Worker, Model, Opts) ->
             lists:reverse(Links) ++ fold_links_id_and_tree(Key, Worker, Model, Opts2);
         _ ->
             []
+    end.
+
+fold_links_inclusive_id_and_tree(Key, Worker, Model, Opts) ->
+    {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
+        [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], Opts]
+    )),
+
+    HasTreeId = maps:is_key(prev_tree_id, Opts),
+    case Links of
+        [] ->
+            [];
+        [_] when HasTreeId ->
+            [];
+        [Last | _] when HasTreeId ->
+            Opts2 = Opts#{prev_link_name => Last#link.name, prev_tree_id => Last#link.tree_id},
+            [_ | Ans] = lists:reverse(Links),
+            Ans ++ fold_links_inclusive_id_and_tree(Key, Worker, Model, Opts2);
+        [Last | _] ->
+            Opts2 = Opts#{prev_link_name => Last#link.name, prev_tree_id => Last#link.tree_id},
+            lists:reverse(Links) ++ fold_links_inclusive_id_and_tree(Key, Worker, Model, Opts2)
     end.
 
 fold_links_token_id_and_tree(Key, Worker, Model, Opts) ->

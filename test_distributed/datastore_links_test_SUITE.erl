@@ -29,6 +29,7 @@
     tree_fold_should_return_all_targets/1,
     tree_fold_should_return_targets_from_offset/1,
     tree_fold_should_return_targets_from_link/1,
+    tree_fold_should_return_targets_inclusive_from_link/1,
     tree_fold_should_return_targets_from_not_existing_id/1,
     tree_fold_should_return_targets_from_link_after_delete/1,
     tree_fold_should_return_targets_using_token_after_delete/1,
@@ -42,6 +43,8 @@
     multi_tree_fold_should_return_all_using_not_existing_ids/1,
     multi_tree_fold_should_return_all_using_id_with_offset/1,
     multi_tree_fold_should_return_all_using_id_with_neg_offset/1,
+    multi_tree_fold_should_return_all_using_id_and_tree_id_with_neg_offset/1,
+    multi_tree_fold_should_return_all_using_id_and_tree_id_inclusive_with_neg_offset/1,
     multi_tree_fold_should_return_all_using_empty_id_with_neg_offset/1,
     multi_tree_fold_should_return_non_with_neg_offset/1,
     multi_tree_fold_should_return_all_using_not_existsing_id_with_neg_offset/1,
@@ -64,6 +67,7 @@ all() ->
         tree_fold_should_return_all_targets,
         tree_fold_should_return_targets_from_offset,
         tree_fold_should_return_targets_from_link,
+        tree_fold_should_return_targets_inclusive_from_link,
         tree_fold_should_return_targets_from_not_existing_id,
         tree_fold_should_return_targets_from_link_after_delete,
         tree_fold_should_return_targets_using_token_after_delete,
@@ -77,6 +81,8 @@ all() ->
         multi_tree_fold_should_return_all_using_not_existing_ids,
         multi_tree_fold_should_return_all_using_id_with_offset,
         multi_tree_fold_should_return_all_using_id_with_neg_offset,
+        multi_tree_fold_should_return_all_using_id_and_tree_id_with_neg_offset,
+        multi_tree_fold_should_return_all_using_id_and_tree_id_inclusive_with_neg_offset,
         multi_tree_fold_should_return_all_using_empty_id_with_neg_offset,
         multi_tree_fold_should_return_non_with_neg_offset,
         multi_tree_fold_should_return_all_using_not_existsing_id_with_neg_offset,
@@ -214,6 +220,21 @@ tree_fold_should_return_targets_from_link(Config) ->
             prev_link_name => Name
         }),
         ?assertEqual(get_expected_links(AllLinks, Offset), Links)
+    end, lists_utils:enumerate(SortedNames)).
+
+tree_fold_should_return_targets_inclusive_from_link(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    LinksNum = 1000,
+    AllLinks = add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID, LinksNum),
+    Names = lists:map(fun(#link{name = Name}) -> Name end, AllLinks),
+    SortedNames = lists:sort(Names),
+    lists:foreach(fun({Offset, Name}) ->
+        Links = fold_links(Worker, ?CTX(?KEY), ?KEY, #{
+            prev_tree_id => ?LINK_TREE_ID,
+            prev_link_name => Name,
+            inclusive => true
+        }),
+        ?assertEqual(get_expected_links(AllLinks, Offset - 1), Links)
     end, lists_utils:enumerate(SortedNames)).
 
 tree_fold_should_return_targets_from_not_existing_id(Config) ->
@@ -524,6 +545,50 @@ multi_tree_fold_should_return_all_using_id_with_neg_offset(Config) ->
     Links2 = fold_links_id_and_neg_offset(Worker, ?CTX(?KEY), ?KEY, #{size => Incr,
         prev_link_name => StartName2, offset => Offset}, [], false, undefined),
     ?assert(length(ExpectedLinks) > length(Links2)).
+
+
+multi_tree_fold_should_return_all_using_id_and_tree_id_with_neg_offset(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    TreesNum = 5,
+    LinksNum = 1000,
+    Offset = -250,
+    AllLinks = lists:flatten(lists:map(fun(N) ->
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
+    end, lists:seq(1, TreesNum))),
+
+    [_ | ExpectedLinks] = get_expected_links(AllLinks),
+    #link{name = StartName, tree_id = StartTreeId} = lists:nth(abs(Offset), ExpectedLinks),
+    {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, datastore_links_iter, fold, [
+        ?CTX(?KEY), ?KEY, all,
+        fun(Link, Acc) ->
+            {ok, [Link | Acc]}
+        end,
+        [], #{size => 10000, prev_link_name => StartName, prev_tree_id => StartTreeId, offset => Offset}
+    ])),
+    ?assertEqual(ExpectedLinks, lists:reverse(Links)).
+
+
+multi_tree_fold_should_return_all_using_id_and_tree_id_inclusive_with_neg_offset(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    TreesNum = 5,
+    LinksNum = 1000,
+    Offset = -250,
+    AllLinks = lists:flatten(lists:map(fun(N) ->
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
+    end, lists:seq(1, TreesNum))),
+
+    [_ | ExpectedLinks] = get_expected_links(AllLinks),
+    #link{name = StartName, tree_id = StartTreeId} = lists:nth(abs(Offset) + 1, ExpectedLinks),
+    {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, datastore_links_iter, fold, [
+        ?CTX(?KEY), ?KEY, all,
+        fun(Link, Acc) ->
+            {ok, [Link | Acc]}
+        end,
+        [],
+        #{size => 10000, prev_link_name => StartName, prev_tree_id => StartTreeId, offset => Offset, inclusive => true}
+    ])),
+    ?assertEqual(ExpectedLinks, lists:reverse(Links)).
+
 
 multi_tree_fold_should_return_all_using_empty_id_with_neg_offset(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),

@@ -25,6 +25,7 @@
 -export([default_start_index/1]).
 -export([list_and_postprocess/3]).
 -export([browse_content/2]).
+-export([build_browse_opts/1]).
 
 %% datastore_model callbacks
 -export([get_ctx/0]).
@@ -65,6 +66,8 @@
 -type listing_postprocessor(MappedEntry) :: fun((entry()) -> MappedEntry).
 
 -export_type([id/0, entry_index/0, entry/0, browse_result/0, listing_opts/0, listing_postprocessor/1]).
+
+-define(MAX_LOG_LIST_LIMIT, 1000).
 
 -define(CTX, #{model => ?MODULE}).
 
@@ -133,6 +136,21 @@ browse_content(Id, Opts) ->
         {error, not_found} ->
             ?ERROR_NOT_FOUND
     end.
+
+
+-spec build_browse_opts(#{binary() => binary() | non_neg_integer() | time:seconds()}) -> 
+    listing_opts().
+build_browse_opts(Data) ->
+    #{
+        start_from => case Data of
+            #{<<"index">> := Index} -> {index, Index};
+            #{<<"timestamp">> := Timestamp} -> {timestamp, Timestamp};
+            _ -> undefined
+        end,
+        offset => maps:get(<<"offset">>, Data, 0),
+        limit => maps:get(<<"limit">>, Data, ?MAX_LOG_LIST_LIMIT)
+    }.
+
 
 %%%===================================================================
 %%% datastore_model callbacks
