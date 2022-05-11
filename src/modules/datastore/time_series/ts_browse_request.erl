@@ -6,16 +6,16 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Module providing time series browser middleware.
+%%% Module providing high level functions regarding time series browse request.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ts_browse_request).
 -author("Michal Stanisz").
 
 %% API
--export([sanitize/1]).
+-export([from_json/1]).
 
--include("middleware/ts_browser.hrl").
+-include("modules/datastore/ts_browser.hrl").
 -include_lib("ctool/include/errors.hrl").
 
 -define(MAX_WINDOW_LIMIT, 1000).
@@ -24,25 +24,25 @@
 -type timestamp() :: time:millis().
 -type window_limit() :: 1..?MAX_WINDOW_LIMIT.
 
--type layout_req() :: #time_series_get_layout_req{}.
--type slice_req() :: #time_series_get_slice_req{}.
--type req() :: layout_req() | slice_req().
+-type layout_request() :: #time_series_get_layout_request{}.
+-type slice_request() :: #time_series_get_slice_request{}.
+-type record() :: layout_request() | slice_request().
 
 -export_type([timestamp/0, window_limit/0]).
--export_type([req/0, layout_req/0, slice_req/0]).
+-export_type([record/0, layout_request/0, slice_request/0]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
--spec sanitize(json_utils:json_map()) -> req().
-sanitize(Data) when not is_map_key(<<"mode">>, Data) ->
-    #time_series_get_layout_req{};
+-spec from_json(json_utils:json_map()) -> record().
+from_json(Data) when not is_map_key(<<"mode">>, Data) ->
+    #time_series_get_layout_request{};
 
-sanitize(#{<<"mode">> := <<"layout">>}) ->
-    #time_series_get_layout_req{};
+from_json(#{<<"mode">> := <<"layout">>}) ->
+    #time_series_get_layout_request{};
 
-sanitize(Data = #{<<"mode">> := <<"slice">>}) ->
+from_json(Data = #{<<"mode">> := <<"slice">>}) ->
     DataSpec = #{
         required => #{
             <<"layout">> => {json, fun(RequestedLayout) ->
@@ -65,11 +65,11 @@ sanitize(Data = #{<<"mode">> := <<"slice">>}) ->
     },
     SanitizedData = middleware_sanitizer:sanitize_data(Data, DataSpec),
     
-    #time_series_get_slice_req{
+    #time_series_get_slice_request{
         layout = maps:get(<<"layout">>, SanitizedData),
         start_timestamp = maps:get(<<"startTimestamp">>, SanitizedData, undefined),
         window_limit = maps:get(<<"windowLimit">>, SanitizedData, ?DEFAULT_WINDOW_LIMIT)
     };
 
-sanitize(#{<<"mode">> := _InvalidMode}) ->
+from_json(#{<<"mode">> := _InvalidMode}) ->
     throw(?ERROR_BAD_VALUE_NOT_ALLOWED(<<"mode">>, [<<"layout">>, <<"slice">>])).

@@ -6,19 +6,19 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This file contains records definitions used across time series middleware modules.
+%%% This file contains records definitions used across time series browse modules.
 %%% @end
 %%%-------------------------------------------------------------------
 
 -ifndef(TS_BROWSER_HRL).
 -define(TS_BROWSER_HRL, 1).
 
--record(time_series_get_layout_req, {}).
+-record(time_series_get_layout_request, {}).
 
--record(time_series_get_slice_req, {
+-record(time_series_get_slice_request, {
     layout :: time_series_collection:layout(),
     start_timestamp :: undefined | ts_browse_request:timestamp(),
-    window_limit :: ts_browse_request:window_limit()
+    window_limit :: undefined | ts_browse_request:window_limit()
 }).
 
 -record(time_series_layout_result, {

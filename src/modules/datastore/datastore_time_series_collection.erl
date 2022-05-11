@@ -13,7 +13,7 @@
 -module(datastore_time_series_collection).
 -author("Michal Wrzeszcz").
 
--include("middleware/ts_browser.hrl").
+-include("modules/datastore/ts_browser.hrl").
 
 %% API
 -export([create/3, incorporate_config/3, delete/2]).
@@ -74,15 +74,15 @@ get_slice(Ctx, Id, SliceLayout, Options) ->
     ?apply(Ctx, Id, [SliceLayout, Options]).
 
 
--spec browse(ctx(), time_series_collection:id(), ts_browse_request:req()) -> 
-    {ok, ts_browse_result:res()} | {error, term()}.
-browse(Ctx, Id, #time_series_get_layout_req{}) ->
+-spec browse(ctx(), time_series_collection:id(), ts_browse_request:record()) -> 
+    {ok, ts_browse_result:record()} | {error, term()}.
+browse(Ctx, Id, #time_series_get_layout_request{}) ->
     case get_layout(Ctx, Id) of
         {ok, Layout} -> {ok, #time_series_layout_result{layout = Layout}};
-        Error -> Error
+        {error, _} = Error -> Error
     end;
-browse(Ctx, Id, #time_series_get_slice_req{} = SliceReq) ->
-    #time_series_get_slice_req{
+browse(Ctx, Id, #time_series_get_slice_request{} = SliceReq) ->
+    #time_series_get_slice_request{
         layout = SliceLayout, 
         start_timestamp = StartTimestamp, 
         window_limit = WindowLimit
@@ -92,5 +92,5 @@ browse(Ctx, Id, #time_series_get_slice_req{} = SliceReq) ->
     }),
     case get_slice(Ctx, Id, SliceLayout, Opts) of
         {ok, Slice} -> {ok, #time_series_slice_result{slice = Slice}};
-        Error -> Error
+        {error, _} = Error -> Error
     end.

@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Module providing time series browser middleware.
+%%% Module providing high level functions regarding time series browse result.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ts_browse_result).
@@ -15,30 +15,33 @@
 %% API
 -export([to_json/1]).
 
--include("middleware/ts_browser.hrl").
+-include("modules/datastore/ts_browser.hrl").
 -include_lib("ctool/include/errors.hrl").
 
--type layout_res() :: #time_series_layout_result{}.
--type slice_res() :: #time_series_slice_result{}.
--type res() :: layout_res() | slice_res().
+-type layout_result() :: #time_series_layout_result{}.
+-type slice_result() :: #time_series_slice_result{}.
+-type record() :: layout_result() | slice_result().
 
--export_type([res/0, layout_res/0, slice_res/0]).
+-export_type([record/0, layout_result/0, slice_result/0]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
--spec to_json(res()) -> json_utils:json_term().
+-spec to_json(record()) -> json_utils:json_term().
 to_json(#time_series_layout_result{layout = Layout}) ->
     Layout;
 
 to_json(#time_series_slice_result{slice = Slice}) ->
     #{
         <<"windows">> => tsc_structure:map(fun(_TimeSeriesName, _MetricName, Windows) ->
-            lists:map(fun({Timestamp, ValuesSum}) ->
+            lists:map(fun({Timestamp, Value}) ->
                 #{
                     <<"timestamp">> => Timestamp,
-                    <<"value">> => ValuesSum
+                    <<"value">> => case Value of
+                        {_ValuesCount, ValuesSum} -> ValuesSum;
+                        _ -> Value
+                    end
                 }
             end, Windows)
         end, Slice)

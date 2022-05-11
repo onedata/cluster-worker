@@ -9,6 +9,7 @@
 %%% @doc
 %%% This module implements functions for parsing and sanitizing
 %%% parameters of middleware request.
+%%% @TODO VFS-8507 Common data sanitizers and their reuse in automation
 %%% @end
 %%%-------------------------------------------------------------------
 -module(middleware_sanitizer).
