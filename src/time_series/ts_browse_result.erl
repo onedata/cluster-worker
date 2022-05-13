@@ -15,7 +15,7 @@
 %% API
 -export([to_json/1]).
 
--include("modules/datastore/ts_browser.hrl").
+-include("time_series/browsing.hrl").
 -include_lib("ctool/include/errors.hrl").
 
 -type layout_result() :: #time_series_layout_result{}.

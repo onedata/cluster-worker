@@ -15,7 +15,7 @@
 %% API
 -export([from_json/1]).
 
--include("modules/datastore/ts_browser.hrl").
+-include("time_series/browsing.hrl").
 -include_lib("ctool/include/errors.hrl").
 
 -define(MAX_WINDOW_LIMIT, 1000).

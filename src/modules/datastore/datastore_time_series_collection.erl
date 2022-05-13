@@ -13,7 +13,7 @@
 -module(datastore_time_series_collection).
 -author("Michal Wrzeszcz").
 
--include("modules/datastore/ts_browser.hrl").
+-include("time_series/browsing.hrl").
 
 %% API
 -export([create/3, incorporate_config/3, delete/2]).
