@@ -120,7 +120,7 @@
 
 -spec create(ctx(), log_id(), log_opts(), batch()) -> {ok | {error, term()}, batch()}.
 create(Ctx, LogId, Opts, InitialBatch) ->
-    infinite_log_sentinel:save(Ctx, LogId, #infinite_log_sentinel{
+    infinite_log_sentinel:create(Ctx, LogId, #infinite_log_sentinel{
         log_id = LogId,
         max_entries_per_node = maps:get(max_entries_per_node, Opts, ?DEFAULT_MAX_ENTRIES_PER_NODE),
         size_pruning_threshold = maps:get(size_pruning_threshold, Opts, undefined),

@@ -17,7 +17,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% Model API
--export([acquire/5, save/4, delete/3, sve_with_ttl/4]).
+-export([acquire/5, create/4, save/4, delete/3, sve_with_ttl/4]).
 %% Convenience functions
 -export([append/4]).
 -export([get_node_by_number/4]).
@@ -72,17 +72,16 @@ acquire(Ctx, LogId, apply_pruning, AccessMode, Batch) ->
     end.
 
 
--spec save(infinite_log:ctx(), infinite_log:log_id(), term(), infinite_log:batch()) -> 
+-spec create(infinite_log:ctx(), infinite_log:log_id(), term(), infinite_log:batch()) ->
+    {ok | {error, term()}, infinite_log:batch()}.
+create(Ctx, LogId, Record, Batch) ->
+    persist(create, Ctx, LogId, Record, Batch).
+
+
+-spec save(infinite_log:ctx(), infinite_log:log_id(), record(), infinite_log:batch()) -> 
     {ok | {error, term()}, infinite_log:batch()}.
 save(Ctx, LogId, Record, Batch) ->
-    Ctx1 = case Record#infinite_log_sentinel.expiration_time of
-        undefined -> Ctx;
-        Timestamp -> datastore_doc:set_expiry_in_ctx(Ctx, Timestamp - current_timestamp(Record) div 1000)
-    end,
-    case datastore_doc:save(Ctx1, LogId, #document{key = LogId, value = Record}, Batch) of
-        {{ok, _}, UpdatedBatch} -> {ok, UpdatedBatch};
-        {{error, _}, _} = Error -> Error
-    end.
+    persist(save, Ctx, LogId, Record, Batch).
 
 
 -spec delete(infinite_log:ctx(), infinite_log:log_id(), infinite_log:batch()) -> 
@@ -138,6 +137,20 @@ get_node_by_number(Ctx, Sentinel = #infinite_log_sentinel{log_id = LogId}, NodeN
 %%=====================================================================
 %% Internal functions
 %%=====================================================================
+
+%% @private
+-spec persist(save | create, infinite_log:ctx(), infinite_log:log_id(), record(), infinite_log:batch()) ->
+    {ok | {error, term()}, infinite_log:batch()}.
+persist(Operation, Ctx, LogId, Record, Batch) ->
+    Ctx1 = case Record#infinite_log_sentinel.expiration_time of
+        undefined -> Ctx;
+        Timestamp -> datastore_doc:set_expiry_in_ctx(Ctx, Timestamp - current_timestamp(Record) div 1000)
+    end,
+    case datastore_doc:Operation(Ctx1, LogId, #document{key = LogId, value = Record}, Batch) of
+        {{ok, _}, UpdatedBatch} -> {ok, UpdatedBatch};
+        {{error, _}, _} = Error -> Error
+    end.
+
 
 %% @private
 -spec transfer_entries_to_new_node_upon_full_buffer(infinite_log:ctx(), record(), infinite_log:batch()) -> 
