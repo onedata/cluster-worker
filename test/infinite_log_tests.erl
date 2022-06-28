@@ -102,6 +102,7 @@ create_and_destroy(LogId, MaxEntriesPerNode) ->
     EntryCount = 1000,
 
     ?assert(sentinel_exists(LogId)),
+    ?assertEqual({error, already_exists}, call_create(LogId, #{})),
     foreach_archival_node_number(EntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
         ?assertNot(node_exists(LogId, NodeNumber))
     end),
@@ -913,6 +914,22 @@ mock_datastore_doc() ->
     meck:expect(datastore_doc, fetch,
         fun(_Ctx, Id, Batch) ->
             {node_cache:get({?MODULE, Id}, {error, not_found}), Batch}
+        end
+    ),
+    meck:expect(datastore_doc, create,
+        fun(Ctx, Id, Document, Batch) ->
+            Ttl = kv_utils:get([disc_driver_ctx, expiry], Ctx, infinity),
+            MockTtl = case is_integer(Ttl) andalso Ttl > 2592000 of
+                true -> Ttl - global_clock:timestamp_seconds();
+                false -> Ttl
+            end,
+            case node_cache:get({?MODULE, Id}, default) of
+                default ->
+                    node_cache:put({?MODULE, Id}, {ok, Document}, MockTtl),
+                    {{ok, Document}, Batch};
+                _ ->
+                    {{error, already_exists}, Batch}
+            end
         end
     ),
     meck:expect(datastore_doc, save,

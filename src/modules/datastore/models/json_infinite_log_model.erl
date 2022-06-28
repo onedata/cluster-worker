@@ -15,6 +15,7 @@
 -author("Michal Stanisz").
 -author("Lukasz Opiola").
 
+-include("modules/datastore/infinite_log.hrl").
 -include_lib("ctool/include/errors.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -148,7 +149,8 @@ build_browse_opts(Data) ->
             _ -> undefined
         end,
         offset => maps:get(<<"offset">>, Data, 0),
-        limit => maps:get(<<"limit">>, Data, ?MAX_LOG_LIST_LIMIT)
+        limit => maps:get(<<"limit">>, Data, ?MAX_LOG_LIST_LIMIT),
+        direction => maps:get(<<"direction">>, Data, ?BACKWARD)
     }.
 
 

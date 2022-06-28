@@ -120,7 +120,7 @@
 
 -spec create(ctx(), log_id(), log_opts(), batch()) -> {ok | {error, term()}, batch()}.
 create(Ctx, LogId, Opts, InitialBatch) ->
-    infinite_log_sentinel:save(Ctx, LogId, #infinite_log_sentinel{
+    infinite_log_sentinel:create(Ctx, LogId, #infinite_log_sentinel{
         log_id = LogId,
         max_entries_per_node = maps:get(max_entries_per_node, Opts, ?DEFAULT_MAX_ENTRIES_PER_NODE),
         size_pruning_threshold = maps:get(size_pruning_threshold, Opts, undefined),
@@ -207,7 +207,7 @@ set_ttl(Ctx, LogId, Ttl, InitialBatch) ->
                 {{error, _}, _} = SetTtlError ->
                     SetTtlError;
                 {ok, UpdatedBatch} ->
-                    infinite_log_sentinel:sve_with_ttl(Ctx, LogId, Ttl, UpdatedBatch)
+                    infinite_log_sentinel:save_with_ttl(Ctx, LogId, Ttl, UpdatedBatch)
             end
     end.
 
