@@ -207,7 +207,7 @@ set_ttl(Ctx, LogId, Ttl, InitialBatch) ->
                 {{error, _}, _} = SetTtlError ->
                     SetTtlError;
                 {ok, UpdatedBatch} ->
-                    infinite_log_sentinel:sve_with_ttl(Ctx, LogId, Ttl, UpdatedBatch)
+                    infinite_log_sentinel:save_with_ttl(Ctx, LogId, Ttl, UpdatedBatch)
             end
     end.
 

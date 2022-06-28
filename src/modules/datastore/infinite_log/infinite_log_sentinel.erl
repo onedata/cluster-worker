@@ -17,7 +17,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% Model API
--export([acquire/5, create/4, save/4, delete/3, sve_with_ttl/4]).
+-export([acquire/5, create/4, delete/3, save_with_ttl/4]).
 %% Convenience functions
 -export([append/4]).
 -export([get_node_by_number/4]).
@@ -78,21 +78,15 @@ create(Ctx, LogId, Record, Batch) ->
     persist(create, Ctx, LogId, Record, Batch).
 
 
--spec save(infinite_log:ctx(), infinite_log:log_id(), record(), infinite_log:batch()) -> 
-    {ok | {error, term()}, infinite_log:batch()}.
-save(Ctx, LogId, Record, Batch) ->
-    persist(save, Ctx, LogId, Record, Batch).
-
-
 -spec delete(infinite_log:ctx(), infinite_log:log_id(), infinite_log:batch()) -> 
     {ok | {error, term()}, infinite_log:batch()}.
 delete(Ctx, LogId, Batch) ->
     datastore_doc:delete(Ctx, LogId, Batch).
 
 
--spec sve_with_ttl(infinite_log:ctx(), infinite_log:log_id(), time:seconds(), infinite_log:batch()) -> 
+-spec save_with_ttl(infinite_log:ctx(), infinite_log:log_id(), time:seconds(), infinite_log:batch()) -> 
     {ok | {error, term()}, infinite_log:batch()} .
-sve_with_ttl(Ctx, LogId, Ttl, Batch) ->
+save_with_ttl(Ctx, LogId, Ttl, Batch) ->
     {{ok, Record}, UpdatedBatch} = infinite_log_sentinel:acquire(Ctx, LogId, skip_pruning, allow_updates, Batch),
     ExpirationTime = current_timestamp(Record) div 1000 + Ttl,
     save(Ctx, LogId, Record#infinite_log_sentinel{
@@ -137,6 +131,14 @@ get_node_by_number(Ctx, Sentinel = #infinite_log_sentinel{log_id = LogId}, NodeN
 %%=====================================================================
 %% Internal functions
 %%=====================================================================
+
+
+%% @private
+-spec save(infinite_log:ctx(), infinite_log:log_id(), record(), infinite_log:batch()) ->
+    {ok | {error, term()}, infinite_log:batch()}.
+save(Ctx, LogId, Record, Batch) ->
+    persist(save, Ctx, LogId, Record, Batch).
+
 
 %% @private
 -spec persist(save | create, infinite_log:ctx(), infinite_log:log_id(), record(), infinite_log:batch()) ->
