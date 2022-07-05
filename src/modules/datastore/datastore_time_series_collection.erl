@@ -76,13 +76,13 @@ get_slice(Ctx, Id, SliceLayout, Options) ->
 
 -spec browse(ctx(), time_series_collection:id(), ts_browse_request:record()) -> 
     {ok, ts_browse_result:record()} | {error, term()}.
-browse(Ctx, Id, #time_series_get_layout_request{}) ->
+browse(Ctx, Id, #time_series_layout_get_request{}) ->
     case get_layout(Ctx, Id) of
-        {ok, Layout} -> {ok, #time_series_layout_result{layout = Layout}};
+        {ok, Layout} -> {ok, #time_series_layout_get_result{layout = Layout}};
         {error, _} = Error -> Error
     end;
-browse(Ctx, Id, #time_series_get_slice_request{} = SliceReq) ->
-    #time_series_get_slice_request{
+browse(Ctx, Id, #time_series_slice_get_request{} = SliceReq) ->
+    #time_series_slice_get_request{
         layout = SliceLayout, 
         start_timestamp = StartTimestamp, 
         window_limit = WindowLimit
@@ -91,6 +91,6 @@ browse(Ctx, Id, #time_series_get_slice_request{} = SliceReq) ->
         start_timestamp => StartTimestamp, window_limit => WindowLimit
     }),
     case get_slice(Ctx, Id, SliceLayout, Opts) of
-        {ok, Slice} -> {ok, #time_series_slice_result{slice = Slice}};
+        {ok, Slice} -> {ok, #time_series_slice_get_result{slice = Slice}};
         {error, _} = Error -> Error
     end.

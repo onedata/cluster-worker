@@ -24,8 +24,8 @@
 -type timestamp() :: time:millis().
 -type window_limit() :: 1..?MAX_WINDOW_LIMIT.
 
--type layout_request() :: #time_series_get_layout_request{}.
--type slice_request() :: #time_series_get_slice_request{}.
+-type layout_request() :: #time_series_layout_get_request{}.
+-type slice_request() :: #time_series_slice_get_request{}.
 -type record() :: layout_request() | slice_request().
 
 -export_type([timestamp/0, window_limit/0]).
@@ -37,10 +37,10 @@
 
 -spec from_json(json_utils:json_map()) -> record().
 from_json(Data) when not is_map_key(<<"mode">>, Data) ->
-    #time_series_get_layout_request{};
+    #time_series_layout_get_request{};
 
 from_json(#{<<"mode">> := <<"layout">>}) ->
-    #time_series_get_layout_request{};
+    #time_series_layout_get_request{};
 
 from_json(Data = #{<<"mode">> := <<"slice">>}) ->
     DataSpec = #{
@@ -65,7 +65,7 @@ from_json(Data = #{<<"mode">> := <<"slice">>}) ->
     },
     SanitizedData = middleware_sanitizer:sanitize_data(Data, DataSpec),
     
-    #time_series_get_slice_request{
+    #time_series_slice_get_request{
         layout = maps:get(<<"layout">>, SanitizedData),
         start_timestamp = maps:get(<<"startTimestamp">>, SanitizedData, undefined),
         window_limit = maps:get(<<"windowLimit">>, SanitizedData, ?DEFAULT_WINDOW_LIMIT)
