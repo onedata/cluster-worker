@@ -85,8 +85,8 @@
     hub :: doc() | deleted,
     is_hub_updated = false :: boolean(), % Field used to determine if hub should be saved by finalize/1 function
     % Fields representing metric currently being updated (single ctx can be used to update several metrics)
-    currently_processed_time_series :: time_series_collection:time_series_name() | undefined,
-    currently_processed_metric :: time_series_collection:metric_name() | undefined
+    currently_processed_time_series :: time_series:name() | undefined,
+    currently_processed_metric :: time_series:metric_name() | undefined
 }).
 
 -type ctx() :: #ctx{}.
@@ -163,12 +163,12 @@ finalize(#ctx{
     UpdatedBatch.
 
 
--spec set_currently_processed_time_series(time_series_collection:time_series_name(), ctx()) -> ctx().
+-spec set_currently_processed_time_series(time_series:name(), ctx()) -> ctx().
 set_currently_processed_time_series(TimeSeriesName, Ctx) ->
     Ctx#ctx{currently_processed_time_series = TimeSeriesName}.
 
 
--spec set_currently_processed_metric(time_series_collection:metric_name(), ctx()) -> ctx().
+-spec set_currently_processed_metric(time_series:metric_name(), ctx()) -> ctx().
 set_currently_processed_metric(MetricName, Ctx) ->
     Ctx#ctx{currently_processed_metric = MetricName}.
 

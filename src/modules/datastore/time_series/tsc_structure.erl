@@ -19,8 +19,6 @@
 
 
 % merely wrappers for shorter specs
--type time_series_name() :: time_series_collection:time_series_name().
--type metric_name() :: time_series_collection:metric_name().
 -type structure(ValueType) :: time_series_collection:structure(ValueType).
 -type layout() :: time_series_collection:layout().
 
@@ -30,12 +28,12 @@
 %%%===================================================================
 
 
--spec has(time_series_name(), metric_name(), structure(_)) -> boolean().
+-spec has(time_series:name(), time_series:metric_name(), structure(_)) -> boolean().
 has(TimeSeriesName, MetricName, Structure) ->
     kv_utils:is_key([TimeSeriesName, MetricName], Structure).
 
 
--spec foreach(fun((time_series_name(), metric_name(), InputType) -> term()), structure(InputType)) ->
+-spec foreach(fun((time_series:name(), time_series:metric_name(), InputType) -> term()), structure(InputType)) ->
     ok.
 foreach(ForeachFun, Structure) ->
     maps:foreach(fun(TimeSeriesName, ValuesPerMetric) ->
@@ -45,7 +43,7 @@ foreach(ForeachFun, Structure) ->
     end, Structure).
 
 
--spec map(fun((time_series_name(), metric_name(), InputType) -> OutputType), structure(InputType)) ->
+-spec map(fun((time_series:name(), time_series:metric_name(), InputType) -> OutputType), structure(InputType)) ->
     structure(OutputType).
 map(MapFun, Structure) ->
     maps:map(fun(TimeSeriesName, ValuesPerMetric) ->
@@ -55,7 +53,7 @@ map(MapFun, Structure) ->
     end, Structure).
 
 
--spec fold(fun((time_series_name(), metric_name(), Type, Acc) -> Acc), Acc, structure(Type)) ->
+-spec fold(fun((time_series:name(), time_series:metric_name(), Type, Acc) -> Acc), Acc, structure(Type)) ->
     Acc.
 fold(FoldFun, InitialAcc, Structure) ->
     maps:fold(fun(TimeSeriesName, ValuesPerMetric, OuterAcc) ->
@@ -65,7 +63,7 @@ fold(FoldFun, InitialAcc, Structure) ->
     end, InitialAcc, Structure).
 
 
--spec merge_with(fun((time_series_name(), metric_name(), Type, Type) -> Type), structure(Type), structure(Type)) ->
+-spec merge_with(fun((time_series:name(), time_series:metric_name(), Type, Type) -> Type), structure(Type), structure(Type)) ->
     structure(Type).
 merge_with(MergeFun, First, Second) ->
     maps:merge_with(fun(TimeSeriesName, FirstValuesPerMetric, SecondValuesPerMetric) ->
@@ -82,7 +80,7 @@ to_layout(Structure) ->
     end, Structure).
 
 
--spec build_from_layout(fun((time_series_name(), metric_name()) -> Type), layout()) -> structure(Type).
+-spec build_from_layout(fun((time_series:name(), time_series:metric_name()) -> Type), layout()) -> structure(Type).
 build_from_layout(BuildFun, Structure) ->
     maps:map(fun(TimeSeriesName, MetricNames) ->
         maps_utils:generate_from_list(fun(MetricName) ->
@@ -91,7 +89,7 @@ build_from_layout(BuildFun, Structure) ->
     end, Structure).
 
 
--spec buildfold_from_layout(fun((time_series_name(), metric_name(), Acc) -> {Type, Acc}), Acc, layout()) ->
+-spec buildfold_from_layout(fun((time_series:name(), time_series:metric_name(), Acc) -> {Type, Acc}), Acc, layout()) ->
     {structure(Type), Acc}.
 buildfold_from_layout(BuildFoldFun, InitialFoldAcc, Layout) ->
     maps:fold(fun(TimeSeriesName, MetricNames, {StructureAcc, OuterFoldAcc}) ->

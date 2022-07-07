@@ -60,10 +60,6 @@
 -type id() :: binary().
 -export_type([id/0]).
 
--type time_series_name() :: binary().
--type metric_name() :: binary().
--export_type([time_series_name/0, metric_name/0]).
-
 %% Different aspects of a time series collection (e.g. config, slice, consume spec)
 %% use the same structure of two-level nested maps, but with different types of values
 %% assigned to each metric. Time series and metrics are identified by their names.
@@ -75,7 +71,7 @@
 %%    },
 %%    <<"TS2">> => ...
 %% }
--type structure(ValueType) :: #{time_series_name() => #{metric_name() => ValueType}}.
+-type structure(ValueType) :: #{time_series:name() => #{time_series:metric_name() => ValueType}}.
 -export_type([structure/1]).
 
 %% Layout is used to express a summary of a time series collection structure,
@@ -84,7 +80,7 @@
 %%    <<"TS1">> => [<<"M1">>, <<"M2">>],
 %%    <<"TS2">> => ...
 %% }
--type layout() :: #{time_series_name() => [metric_name()]}.
+-type layout() :: #{time_series:name() => [time_series:metric_name()]}.
 -export_type([layout/0]).
 
 %% NOTE: both structure and layout, when used as an input for
