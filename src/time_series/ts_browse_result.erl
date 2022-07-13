@@ -12,11 +12,12 @@
 -module(ts_browse_result).
 -author("Michal Stanisz").
 
+-behaviour(jsonable_record).
+
 %% API
 -export([to_json/1, from_json/1]).
 
 -include("time_series/browsing.hrl").
--include_lib("ctool/include/errors.hrl").
 
 -type layout_result() :: #time_series_layout_get_result{}.
 -type slice_result() :: #time_series_slice_get_result{}.
@@ -40,6 +41,7 @@ to_json(#time_series_slice_get_result{slice = Slice}) ->
                     <<"timestamp">> => Timestamp,
                     <<"value">> => case Value of
                         {Count, Aggregated} -> #{
+                            %% @TODO VFS-9589 - introduce average metric aggregator
                             <<"count">> => Count,
                             <<"aggregated">> => Aggregated
                         };
