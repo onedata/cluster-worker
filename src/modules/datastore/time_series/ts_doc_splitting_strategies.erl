@@ -21,7 +21,7 @@
 %% API
 -export([calculate/1]).
 
--type metric_selector() :: {time_series_collection:time_series_name(), time_series_collection:metric_name()}.
+-type metric_selector() :: {time_series:name(), time_series:metric_name()}.
 -type flat_config_map() :: #{metric_selector() => metric_config:record()}.
 -type windows_count_map() :: #{metric_selector() => non_neg_integer()}.
 -type splitting_strategies_map() :: #{metric_selector() => ts_metric:splitting_strategy()}.

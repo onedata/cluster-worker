@@ -51,8 +51,8 @@ build(Config, DocSplittingStrategy) ->
 
 
 -spec insert(
-    time_series_collection:metric_name(),
-    time_series_collection:time_series_name(),
+    time_series:metric_name(),
+    time_series:name(),
     record(),
     ts_persistence:ctx()
 ) ->
@@ -62,8 +62,8 @@ insert(TimeSeriesName, MetricName, Metric, PersistenceCtx) ->
 
 
 -spec consume_measurements(
-    time_series_collection:metric_name(),
-    time_series_collection:time_series_name(),
+    time_series:metric_name(),
+    time_series:name(),
     [{ts_windows:timestamp_seconds(), ts_windows:value()}],
     ts_persistence:ctx()
 ) ->
@@ -92,8 +92,8 @@ consume_measurements(TimeSeriesName, MetricName, Measurements, PersistenceCtx0) 
 
 
 -spec list_windows(
-    time_series_collection:metric_name(),
-    time_series_collection:time_series_name(),
+    time_series:metric_name(),
+    time_series:name(),
     ts_windows:list_options(),
     ts_persistence:ctx()
 ) ->
@@ -114,8 +114,8 @@ list_windows(#metric{
 
 
 -spec delete_data_nodes(
-    time_series_collection:metric_name(),
-    time_series_collection:time_series_name(),
+    time_series:metric_name(),
+    time_series:name(),
     ts_persistence:ctx()
 ) ->
     ts_persistence:ctx().
@@ -135,8 +135,8 @@ delete_data_nodes(#metric{head_data = #data_node{older_node_key = OlderNodeKey}}
 
 
 -spec reconfigure(
-    time_series_collection:metric_name(),
-    time_series_collection:time_series_name(),
+    time_series:metric_name(),
+    time_series:name(),
     ts_metric:splitting_strategy(),
     ts_persistence:ctx()
 ) ->
@@ -189,7 +189,7 @@ reconfigure(#metric{
     prepend_sorted_windows(DataNodeKey, NewDocSplittingStrategy, ExistingWindows, PersistenceCtxAfterInit).
 
 
--spec delete(time_series_collection:metric_name(), time_series_collection:time_series_name(), ts_persistence:ctx()) ->
+-spec delete(time_series:metric_name(), time_series:name(), ts_persistence:ctx()) ->
     ts_persistence:ctx().
 delete(TimeSeriesName, MetricName, PersistenceCtx) ->
     ts_persistence:delete_metric(set_as_currently_processed(TimeSeriesName, MetricName, PersistenceCtx)).
@@ -463,8 +463,8 @@ split_node(DataNodeKey, Data, Windows1, Windows2, SplitTimestamp, _DocumentNumbe
 
 %% @private
 -spec set_as_currently_processed(
-    time_series_collection:time_series_name(),
-    time_series_collection:metric_name(),
+    time_series:name(),
+    time_series:metric_name(),
     ts_persistence:ctx()
 ) ->
     ts_persistence:ctx().
