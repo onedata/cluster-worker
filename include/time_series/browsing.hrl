@@ -13,19 +13,19 @@
 -ifndef(TS_BROWSER_HRL).
 -define(TS_BROWSER_HRL, 1).
 
--record(time_series_get_layout_request, {}).
+-record(time_series_layout_get_request, {}).
 
--record(time_series_get_slice_request, {
+-record(time_series_slice_get_request, {
     layout :: time_series_collection:layout(),
     start_timestamp :: undefined | ts_browse_request:timestamp(),
     window_limit :: undefined | ts_browse_request:window_limit()
 }).
 
--record(time_series_layout_result, {
+-record(time_series_layout_get_result, {
     layout :: time_series_collection:layout()
 }).
 
--record(time_series_slice_result, {
+-record(time_series_slice_get_result, {
     slice :: time_series_collection:slice()
 }).
 
