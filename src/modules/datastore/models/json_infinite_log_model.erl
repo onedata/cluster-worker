@@ -25,8 +25,6 @@
 -export([append/2]).
 -export([default_start_index/1]).
 -export([list_and_postprocess/3]).
--export([browse_content/2]).
--export([build_browse_opts/1]).
 
 %% datastore_model callbacks
 -export([get_ctx/0]).
@@ -118,53 +116,20 @@ list_and_postprocess(Id, Opts, ListingPostprocessor) ->
     end.
 
 
--spec browse_content(id(), listing_opts()) ->
-    {ok, browse_result()} | errors:error().
-browse_content(Id, Opts) ->
-    ListingPostprocessor = fun({IndexBin, {Timestamp, EntryContent}}) ->
-        #{
-            <<"index">> => IndexBin,
-            <<"timestamp">> => Timestamp,
-            <<"content">> => EntryContent
-        }
-    end,
-    case list_and_postprocess(Id, Opts, ListingPostprocessor) of
-        {ok, {ProgressMarker, EntrySeries}} ->
-            {ok, #{
-                <<"logEntries">> => EntrySeries,
-                <<"isLast">> => ProgressMarker =:= done
-            }};
-        {error, not_found} ->
-            ?ERROR_NOT_FOUND
-    end.
-
-
--spec build_browse_opts(#{binary() => binary() | non_neg_integer() | time:seconds()}) -> 
-    listing_opts().
-build_browse_opts(Data) ->
-    #{
-        start_from => case Data of
-            #{<<"index">> := Index} -> {index, Index};
-            #{<<"timestamp">> := Timestamp} -> {timestamp, Timestamp};
-            _ -> undefined
-        end,
-        offset => maps:get(<<"offset">>, Data, 0),
-        limit => maps:get(<<"limit">>, Data, ?MAX_LOG_LIST_LIMIT),
-        direction => maps:get(<<"direction">>, Data, ?BACKWARD)
-    }.
-
-
 %%%===================================================================
 %%% datastore_model callbacks
 %%%===================================================================
+
 
 -spec get_ctx() -> datastore:ctx().
 get_ctx() ->
     ?CTX.
 
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
 
 %% @private
 -spec prepare_listing_opts(listing_opts()) -> infinite_log_browser:listing_opts().
