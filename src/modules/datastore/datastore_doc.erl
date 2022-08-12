@@ -341,13 +341,12 @@ fill(Ctx, Doc) ->
 %%--------------------------------------------------------------------
 -spec fill(ctx(), doc(value()), doc(value())) -> doc(value()).
 fill(Ctx, Doc, _PrevDoc = #document{revs = Revs}) ->
-    Doc2 = Doc#document{deleted = false},
-    Doc3 = set_mutator(Ctx, Doc2),
-    Doc4 = set_scope(Ctx, Doc3),
-    Doc5 = set_version(Doc4),
+    Doc2 = set_mutator(Ctx, Doc),
+    Doc3 = set_scope(Ctx, Doc2),
+    Doc4 = set_version(Doc3),
     case Revs of
-        [] -> set_rev(Ctx, Doc5, undefined);
-        [PrevRev | _] -> set_rev(Ctx, Doc5, PrevRev)
+        [] -> set_rev(Ctx, Doc4, undefined);
+        [PrevRev | _] -> set_rev(Ctx, Doc4, PrevRev)
     end.
 
 %%--------------------------------------------------------------------
