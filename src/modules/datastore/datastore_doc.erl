@@ -85,7 +85,9 @@ save(Ctx, Key, Doc, Batch) ->
                 {save, Doc2} ->
                     datastore_doc_batch:save(Ctx, Key, Doc2, Batch2);
                 ignore ->
-                    {{error, ignored}, Batch2}
+                    {{error, ignored}, Batch2};
+                already_exists ->
+                    {{error, already_exists}, Batch2}
             end;
         {{error, not_found}, Batch2} ->
             case resolve_conflict(Ctx, Doc, #document{}) of
@@ -282,13 +284,15 @@ fetch_deleted(Ctx, Key, Batch, _) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec resolve_conflict(ctx(), doc(value()), doc(value())) ->
-    {save, doc(value())} | ignore.
+    {save, doc(value())} | ignore | already_exists.
 resolve_conflict(Ctx = #{sync_change := true}, RemoteDoc, #document{revs = []}) ->
     Model = element(1, RemoteDoc#document.value),
     datastore_model_default:on_remote_doc_created(Model, Ctx, RemoteDoc),
     {save, RemoteDoc};
 resolve_conflict(#{sync_change := true}, #document{revs = []}, _LocalDoc) ->
     ignore;
+resolve_conflict(#{sync_change := true}, #document{revs = [Rev | _]}, #document{revs = [Rev | _]}) ->
+    already_exists;
 resolve_conflict(Ctx = #{sync_change := true}, RemoteDoc, LocalDoc) ->
     Model = element(1, RemoteDoc#document.value),
     case datastore_model_default:resolve_conflict(
