@@ -63,7 +63,5 @@ is_greater(Rev1, Rev2) ->
         {false, true, _, _} -> false;
         {false, false, true, false} -> true;
         {false, false, false, true} -> false;
-        % Equal generations and revs should not happen, but in case it does,
-        % it is safer to return true which should trigger an action
-        {false, false, false, false} -> true
+        {false, false, false, false} -> false
     end.
