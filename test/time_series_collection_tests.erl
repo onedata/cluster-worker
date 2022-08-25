@@ -92,7 +92,7 @@ empty_collection_creation() ->
 
 
 metric_config_sanitization() ->
-    VeryLongName = <<"very_very_very_looong_name_with_at_least_50_characters">>,
+    VeryLongName = ?TOO_LONG_NAME,
     TestCases = [{
         ?ERROR_BAD_VALUE_NAME(<<"timeSeriesName">>),
         #{<<1, 2, 3>> => #{<<"M1">> => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = sum}}}
