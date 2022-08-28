@@ -13,6 +13,8 @@
 *.o
 
 test/eunit_results
+test/dialyzer_results
+test/codetag_tracker_results
 test_distributed/cover_tmp.spec
 test_coverage
 
