@@ -1145,25 +1145,49 @@ multinode_time_series_test(Config) ->
             fun(N) -> #metric_config{resolution = ?SECOND_RESOLUTION, retention = 10000 * N, aggregator = last} end),
 
         MeasurementsCount = 610000,
-        Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
-        ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
-            <<"TS0">> => #{?ALL_METRICS => Measurements},
-            <<"TS1">> => #{?ALL_METRICS => Measurements}
-        }])),
-
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
-        ExpCompleteSlice = tsc_structure:map(fun(_, _, #metric_config{retention = Retention}) ->
-            lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))
-        end, CollectionConfig),
-
+        ExpCompleteSlice = prepare_test_measurements_and_check(Worker, Model, Id, CollectionConfig,
+            0, MeasurementsCount, ExpectedWindowsCounts, 2),
         verify_layout(Worker, Model, Id),
 
+        % Test multi-node time series collection cloning
+        {ok, ClonedId} = ?assertMatch({ok, _}, rpc:call(Worker, Model, time_series_collection_clone, [Id])),
+        verify_layout(Worker, Model, ClonedId),
+        ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, ClonedId)),
+
+        % Test modification of cloned and original collection
+        ExpCompleteSlice2 = prepare_test_measurements_and_check(Worker, Model, ClonedId, CollectionConfig,
+            MeasurementsCount, MeasurementsCount, ExpectedWindowsCounts, 3),
         ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
+        ?assertEqual(ExpCompleteSlice2, get_complete_slice(Worker, Model, ClonedId)),
+        ExpCompleteSlice3 = prepare_test_measurements_and_check(Worker, Model, Id, CollectionConfig,
+            MeasurementsCount, MeasurementsCount, ExpectedWindowsCounts, 4),
+        ?assertEqual(ExpCompleteSlice3, get_complete_slice(Worker, Model, Id)),
+        ?assertEqual(ExpCompleteSlice2, get_complete_slice(Worker, Model, ClonedId)),
 
         % Verify if delete clears all documents from datastore
         ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [Id])),
+        ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [ClonedId])),
         ?assertEqual([], get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys)
     end, ?TEST_MODELS).
+
+
+prepare_test_measurements_and_check(
+    Worker, Model, Id, CollectionConfig,
+    TimestampBase, MeasurementsCount, ExpectedWindowsCounts, ValueMultiplier
+) ->
+    Measurements = lists:map(fun(I) -> {TimestampBase + I, ValueMultiplier * I} end, lists:seq(1, MeasurementsCount)),
+    ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
+        <<"TS0">> => #{?ALL_METRICS => Measurements},
+        <<"TS1">> => #{?ALL_METRICS => Measurements}
+    }])),
+
+    ExpCompleteSlice = tsc_structure:map(fun(_, _, #metric_config{retention = Retention}) ->
+        lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))
+    end, CollectionConfig),
+
+    ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
+    ExpCompleteSlice.
 
 
 time_series_document_fetch_test(Config) ->

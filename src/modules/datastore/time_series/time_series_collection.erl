@@ -50,7 +50,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([create/4, delete/3]).
+-export([create/4, delete/3, clone/4]).
 -export([incorporate_config/4]).
 -export([get_layout/3]).
 -export([consume_measurements/4]).
@@ -169,6 +169,22 @@ delete(Ctx, Id, Batch) ->
     end.
 
 
+-spec clone(ctx(), id(), id(), batch()) -> {ok | {error, term()}, batch()}.
+clone(Ctx, Id, NewCollectionId, Batch) ->
+    try
+        {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+        Batch2 = ts_persistence:finalize(PersistenceCtx),
+        {ok, NewPersistenceCtx} = ts_persistence:init_for_new_collection(
+            Ctx, NewCollectionId, TimeSeriesCollectionHeads, Batch2),
+        FinalPersistenceCtx = tsc_structure:fold(fun(TimeSeriesName, MetricName, Metric, PersistenceCtxAcc) ->
+            ts_metric:clone_data(TimeSeriesName, MetricName, Metric, PersistenceCtxAcc)
+        end, NewPersistenceCtx, TimeSeriesCollectionHeads),
+        {ok, ts_persistence:finalize(FinalPersistenceCtx)}
+    catch Class:Reason:Stacktrace ->
+        ?handle_errors(Batch, [Id], Class, Reason, Stacktrace)
+    end.
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Ensures that provided config is a part of the collection config, creating
@@ -252,6 +268,7 @@ get_slice(Ctx, Id, SliceLayout, ListWindowsOptions, Batch) ->
     catch Class:Reason:Stacktrace ->
         ?handle_errors(Batch, [Id, SliceLayout, ListWindowsOptions], Class, Reason, Stacktrace)
     end.
+
 
 %%%===================================================================
 %%% Internal functions

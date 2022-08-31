@@ -16,7 +16,7 @@
 -include("time_series/browsing.hrl").
 
 %% API
--export([create/3, incorporate_config/3, delete/2]).
+-export([create/3, incorporate_config/3, delete/2, clone/2]).
 -export([get_layout/2]).
 -export([consume_measurements/3]).
 -export([get_slice/4]).
@@ -51,6 +51,19 @@ incorporate_config(Ctx, Id, ConfigToIncorporate) ->
     ok | {error, term()}.
 delete(Ctx, Id) ->
     ?apply(Ctx, Id, []).
+
+
+%% @doc @see time_series_collection:clone/3
+-spec clone(ctx(), time_series_collection:id()) ->
+    {ok, time_series_collection:id()} | {error, term()}.
+clone(#{model := Model} = Ctx, Id) ->
+    % Id of new collection must be generated from original key.
+    % It cannot be generated inside tp process as tp processes use unique keys.
+    NewCollectionId = datastore_key:new_adjacent_to(Id),
+    case ?apply(Ctx, Id, [datastore_model:get_unique_key(Model, NewCollectionId)]) of
+        ok -> {ok, NewCollectionId};
+        Error -> Error
+    end.
 
 
 %% @doc @see time_series_collection:get_layout/3

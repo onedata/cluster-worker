@@ -172,6 +172,10 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_time_series_collection:delete(Ctx, Id)
         end},
+        {time_series_collection_clone, fun(Id) ->
+            Ctx = get_ctx(Model),
+            datastore_time_series_collection:clone(Ctx, Id)
+        end},
         {time_series_collection_get_layout, fun(Id) ->
             Ctx = get_ctx(Model),
             datastore_time_series_collection:get_layout(Ctx, Id)
