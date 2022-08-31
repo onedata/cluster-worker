@@ -1170,7 +1170,7 @@ multinode_time_series_test(Config) ->
         ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [Id])),
         ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [ClonedId])),
         ?assertEqual([], get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys)
-    end, ?TEST_MODELS).
+    end, ?TEST_MODELS -- [disc_only_model]). % It would take a lot of time to execute test on disc_only_model
 
 
 time_series_document_fetch_test(Config) ->
