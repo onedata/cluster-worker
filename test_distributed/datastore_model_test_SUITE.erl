@@ -1156,12 +1156,13 @@ multinode_time_series_test(Config) ->
         ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, ClonedId)),
 
         % Test modification of cloned and original collection
+        AddedMeasurementsCount = 600000,
         ExpCompleteSlice2 = prepare_test_measurements_and_check(Worker, Model, ClonedId, CollectionConfig,
-            MeasurementsCount, MeasurementsCount, ExpectedWindowsCounts, 3),
+            MeasurementsCount, AddedMeasurementsCount, ExpectedWindowsCounts, 3),
         ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
         ?assertEqual(ExpCompleteSlice2, get_complete_slice(Worker, Model, ClonedId)),
         ExpCompleteSlice3 = prepare_test_measurements_and_check(Worker, Model, Id, CollectionConfig,
-            MeasurementsCount, MeasurementsCount, ExpectedWindowsCounts, 4),
+            MeasurementsCount, AddedMeasurementsCount, ExpectedWindowsCounts, 4),
         ?assertEqual(ExpCompleteSlice3, get_complete_slice(Worker, Model, Id)),
         ?assertEqual(ExpCompleteSlice2, get_complete_slice(Worker, Model, ClonedId)),
 
@@ -1170,24 +1171,6 @@ multinode_time_series_test(Config) ->
         ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [ClonedId])),
         ?assertEqual([], get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys)
     end, ?TEST_MODELS).
-
-
-prepare_test_measurements_and_check(
-    Worker, Model, Id, CollectionConfig,
-    TimestampBase, MeasurementsCount, ExpectedWindowsCounts, ValueMultiplier
-) ->
-    Measurements = lists:map(fun(I) -> {TimestampBase + I, ValueMultiplier * I} end, lists:seq(1, MeasurementsCount)),
-    ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
-        <<"TS0">> => #{?ALL_METRICS => Measurements},
-        <<"TS1">> => #{?ALL_METRICS => Measurements}
-    }])),
-
-    ExpCompleteSlice = tsc_structure:map(fun(_, _, #metric_config{retention = Retention}) ->
-        lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))
-    end, CollectionConfig),
-
-    ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
-    ExpCompleteSlice.
 
 
 time_series_document_fetch_test(Config) ->
@@ -2332,3 +2315,19 @@ gather_windows(Worker, Model, CollectionId, TimeSeriesName, MetricName, StartTim
     end.
 
 
+prepare_test_measurements_and_check(
+    Worker, Model, Id, CollectionConfig,
+    TimestampBase, MeasurementsCount, ExpectedWindowsCounts, ValueMultiplier
+) ->
+    Measurements = lists:map(fun(I) -> {TimestampBase + I, ValueMultiplier * I} end, lists:seq(1, MeasurementsCount)),
+    ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
+        <<"TS0">> => #{?ALL_METRICS => Measurements},
+        <<"TS1">> => #{?ALL_METRICS => Measurements}
+    }])),
+
+    ExpCompleteSlice = tsc_structure:map(fun(_, _, #metric_config{retention = Retention}) ->
+        lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))
+    end, CollectionConfig),
+
+    ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
+    ExpCompleteSlice.

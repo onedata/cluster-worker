@@ -50,7 +50,8 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([create/4, delete/3, clone/4]).
+-export([create/4, delete/3]).
+-export([get_cloned_collection/3, save_cloned_collection/4]).
 -export([incorporate_config/4]).
 -export([get_layout/3]).
 -export([consume_measurements/4]).
@@ -94,6 +95,7 @@
 -export_type([config/0, consume_spec/0, slice/0]).
 
 
+-type cloned_collection() :: structure(ts_metric:cloned_metric()).
 -type ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
 
@@ -169,18 +171,39 @@ delete(Ctx, Id, Batch) ->
     end.
 
 
--spec clone(ctx(), id(), id(), batch()) -> {ok | {error, term()}, batch()}.
-clone(Ctx, Id, NewCollectionId, Batch) ->
+-spec get_cloned_collection(ctx(), id(), batch()) -> {{ok, cloned_collection()} | {error, term()}, batch()}.
+get_cloned_collection(Ctx, Id, Batch) ->
     try
         {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-        Batch2 = ts_persistence:finalize(PersistenceCtx),
-        {ok, NewPersistenceCtx} = ts_persistence:init_for_new_collection(
-            Ctx, NewCollectionId, TimeSeriesCollectionHeads, Batch2),
-        FinalPersistenceCtx = tsc_structure:fold(fun(TimeSeriesName, MetricName, Metric, PersistenceCtxAcc) ->
-            ts_metric:clone_data(TimeSeriesName, MetricName, Metric, PersistenceCtxAcc)
-        end, NewPersistenceCtx, TimeSeriesCollectionHeads),
+        {FinalResult, FinalPersistenceCtx} = maps:fold(
+            fun(TimeSeriesName, TimeSeries, {ClonedCollection, OuterPersistenceCtxAcc}) ->
+                {ClonedTimeSeries, UpdatedOuterPersistenceCtxAcc} = maps:fold(
+                    fun(MetricName, Metric, {ClonedMetrics, InnerPersistenceCtxAcc}) ->
+                        {ClonedMetric, UpdatedInnerPersistenceCtxAcc} = ts_metric:get_cloned_metric(Metric, InnerPersistenceCtxAcc),
+                        {ClonedMetrics#{MetricName => ClonedMetric}, UpdatedInnerPersistenceCtxAcc}
+                    end, {#{}, OuterPersistenceCtxAcc}, TimeSeries),
+                {ClonedCollection#{TimeSeriesName => ClonedTimeSeries}, UpdatedOuterPersistenceCtxAcc}
+            end, {#{}, PersistenceCtx}, TimeSeriesCollectionHeads),
+
+        {{ok, FinalResult}, ts_persistence:finalize(FinalPersistenceCtx)}
+    catch Class:Reason:Stacktrace ->
+        ?handle_errors(Batch, [Id], Class, Reason, Stacktrace)
+    end.
+
+
+-spec save_cloned_collection(ctx(), id(), cloned_collection(), batch()) -> {ok | {error, term()}, batch()}.
+save_cloned_collection(Ctx, Id, ClonedCollection, Batch) ->
+    try
+        TimeSeriesCollectionHeads = tsc_structure:map(fun(_TimeSeriesName, _MetricName, [Metric | _]) ->
+            Metric
+        end, ClonedCollection),
+        {ok, NewPersistenceCtx} = ts_persistence:init_for_new_collection(Ctx, Id, TimeSeriesCollectionHeads, Batch),
+        FinalPersistenceCtx = tsc_structure:fold(fun(TimeSeriesName, MetricName, ClonedMetric, PersistenceCtxAcc) ->
+            ts_metric:save_cloned_metric(TimeSeriesName, MetricName, ClonedMetric, PersistenceCtxAcc)
+        end, NewPersistenceCtx, ClonedCollection),
         {ok, ts_persistence:finalize(FinalPersistenceCtx)}
     catch Class:Reason:Stacktrace ->
+        % ClonedData can be large structure - do not log it
         ?handle_errors(Batch, [Id], Class, Reason, Stacktrace)
     end.
 

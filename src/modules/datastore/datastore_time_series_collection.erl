@@ -24,8 +24,9 @@
 
 -type ctx() :: datastore_model:ctx().
 
--define(apply(Ctx, Id, Args), datastore_model:datastore_apply(
-    Ctx, Id, fun datastore:time_series_collection_operation/4, [?FUNCTION_NAME, Args]
+-define(apply(Ctx, Id, Args), ?apply(?FUNCTION_NAME, Ctx, Id, Args)).
+-define(apply(FunctionName, Ctx, Id, Args), datastore_model:datastore_apply(
+    Ctx, Id, fun datastore:time_series_collection_operation/4, [FunctionName, Args]
 )).
 
 %%%===================================================================
@@ -53,16 +54,20 @@ delete(Ctx, Id) ->
     ?apply(Ctx, Id, []).
 
 
-%% @doc @see time_series_collection:clone/3
 -spec clone(ctx(), time_series_collection:id()) ->
     {ok, time_series_collection:id()} | {error, term()}.
-clone(#{model := Model} = Ctx, Id) ->
-    % Id of new collection must be generated from original key.
-    % It cannot be generated inside tp process as tp processes use unique keys.
-    NewCollectionId = datastore_key:new_adjacent_to(Id),
-    case ?apply(Ctx, Id, [datastore_model:get_unique_key(Model, NewCollectionId)]) of
-        ok -> {ok, NewCollectionId};
-        Error -> Error
+clone(Ctx, Id) ->
+    case ?apply(get_cloned_collection, Ctx, Id, []) of
+        {ok, ClonedCollection} ->
+            % Id of new collection must be generated from original key.
+            % It cannot be generated inside tp process as tp processes use unique keys.
+            NewCollectionId = datastore_key:new_adjacent_to(Id),
+            case ?apply(save_cloned_collection, Ctx, NewCollectionId, [ClonedCollection]) of
+                ok -> {ok, NewCollectionId};
+                SaveError -> SaveError
+            end;
+        GetError ->
+            GetError
     end.
 
 
