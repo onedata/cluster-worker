@@ -48,4 +48,11 @@
     head_data = #data_node{} :: ts_metric:data_node()
 }).
 
+
+% Record storing whole metric created on the basis of all data nodes.
+-record(metric_dump, {
+    head_record :: ts_metric:record(),
+    data_nodes = [] :: [ts_metric:data_node()]
+}).
+
 -endif.

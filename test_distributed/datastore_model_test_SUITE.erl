@@ -1090,9 +1090,7 @@ time_series_test(Config) ->
             }
         end),
 
-        MeasurementsCount = 1199,
-        Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementsCount)),
-
+        MeasurementsCount = 1200,
         lists:foreach(fun
             ({NewTimestamp, NewValue}) when NewTimestamp < 1000 ->
                 ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
@@ -1105,14 +1103,14 @@ time_series_test(Config) ->
                 ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
                     <<"TS1">> => #{?ALL_METRICS => [{NewTimestamp, NewValue}]}
                 }]))
-        end, Measurements),
+        end, gen_measurements(MeasurementsCount, 0, 2)),
 
         % Measurements are arithmetic sequence so values of windows
         % are calculated using formula for the sum of an arithmetic sequence
         ExpCompleteSlice = tsc_structure:map(fun(_, _, #metric_config{resolution = Resolution, retention = Retention}) ->
             lists:sublist(lists:reverse(lists:map(fun(N) ->
                 {N, {Resolution, (N + N + Resolution - 1) * Resolution}}
-            end, lists:seq(0, MeasurementsCount, Resolution))), Retention)
+            end, lists:seq(0, MeasurementsCount - 1, Resolution))), Retention)
         end, CollectionConfig),
 
         ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
@@ -1141,34 +1139,32 @@ multinode_time_series_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         InitialKeys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)),
-        {Id, CollectionConfig} = create_time_series_collection(Worker, Model,
+        {OrigId, CollectionConfig} = create_time_series_collection(Worker, Model,
             fun(N) -> #metric_config{resolution = ?SECOND_RESOLUTION, retention = 10000 * N, aggregator = last} end),
 
-        MeasurementsCount = 610000,
-        ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
-        ExpCompleteSlice = prepare_test_measurements_and_check(Worker, Model, Id, CollectionConfig,
-            0, MeasurementsCount, ExpectedWindowsCounts, 2),
-        verify_layout(Worker, Model, Id),
+        InitialMeasurements = gen_measurements(610000, 0, 2),
+        consume_measurements_by_all_metrics(Worker, Model, OrigId, InitialMeasurements),
+        verify_layout(Worker, Model, OrigId),
+        verify_complete_slice(Worker, Model, OrigId, CollectionConfig, InitialMeasurements),
 
         % Test multi-node time series collection cloning
-        {ok, ClonedId} = ?assertMatch({ok, _}, rpc:call(Worker, Model, time_series_collection_clone, [Id])),
-        verify_layout(Worker, Model, ClonedId),
-        ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, ClonedId)),
+        {ok, CloneId} = ?assertMatch({ok, _}, rpc:call(Worker, Model, time_series_collection_clone, [OrigId])),
+        verify_layout(Worker, Model, CloneId),
+        verify_complete_slice(Worker, Model, CloneId, CollectionConfig, InitialMeasurements),
 
         % Test modification of cloned and original collection
-        AddedMeasurementsCount = 600000,
-        ExpCompleteSlice2 = prepare_test_measurements_and_check(Worker, Model, ClonedId, CollectionConfig,
-            MeasurementsCount, AddedMeasurementsCount, ExpectedWindowsCounts, 3),
-        ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
-        ?assertEqual(ExpCompleteSlice2, get_complete_slice(Worker, Model, ClonedId)),
-        ExpCompleteSlice3 = prepare_test_measurements_and_check(Worker, Model, Id, CollectionConfig,
-            MeasurementsCount, AddedMeasurementsCount, ExpectedWindowsCounts, 4),
-        ?assertEqual(ExpCompleteSlice3, get_complete_slice(Worker, Model, Id)),
-        ?assertEqual(ExpCompleteSlice2, get_complete_slice(Worker, Model, ClonedId)),
+        MeasurementsAddedToClone = gen_measurements(600000, 610000, 3),
+        consume_measurements_by_all_metrics(Worker, Model, CloneId, MeasurementsAddedToClone),
+        verify_complete_slice(Worker, Model, OrigId, CollectionConfig, InitialMeasurements),
+        verify_complete_slice(Worker, Model, CloneId, CollectionConfig, MeasurementsAddedToClone),
+        MeasurementsAddedToOrig = gen_measurements(600000, 610000, 4),
+        consume_measurements_by_all_metrics(Worker, Model, OrigId, MeasurementsAddedToOrig),
+        verify_complete_slice(Worker, Model, OrigId, CollectionConfig, MeasurementsAddedToOrig),
+        verify_complete_slice(Worker, Model, CloneId, CollectionConfig, MeasurementsAddedToClone),
 
         % Verify if delete clears all documents from datastore
-        ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [Id])),
-        ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [ClonedId])),
+        ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [OrigId])),
+        ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [CloneId])),
         ?assertEqual([], get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys)
     end, ?TEST_MODELS -- [disc_only_model]). % It would take a lot of time to execute test on disc_only_model
 
@@ -1185,10 +1181,10 @@ time_series_document_fetch_test(Config) ->
             #metric_config{resolution = ?SECOND_RESOLUTION, retention = 10000 * N, aggregator = ApplyFun}
         end),
 
-        MeasurementsCount = 610000,
-        Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
+        Measurements = gen_measurements(610000, 0, 2),
         ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
-            ?ALL_TIME_SERIES => #{?ALL_METRICS => Measurements}
+            <<"TS0">> => #{?ALL_METRICS => Measurements},
+            <<"TS1">> => #{?ALL_METRICS => Measurements}
         }])),
 
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
@@ -1233,9 +1229,8 @@ time_series_config_incorporation_test(Config) ->
         ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_create, [Id, InitialConfig])),
 
         MeasurementsCount = 100000,
-        Measurements = lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount)),
         ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
-            <<"TS1">> => #{<<"M1">> => Measurements}
+            <<"TS1">> => #{<<"M1">> => gen_measurements(MeasurementsCount, 0, 2)}
         }])),
 
         ConfigToIncorporate = #{
@@ -1266,7 +1261,7 @@ time_series_config_incorporation_test(Config) ->
 
         ExpCompleteSlice = #{
             <<"TS1">> => #{
-                <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(1, MeasurementsCount))),
+                <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementsCount - 1))),
                 <<"M2">> => []
             },
             <<"TS2">> => #{
@@ -2282,6 +2277,18 @@ create_time_series_collection(Worker, Model, CreateMetricConfigFun) ->
 
 
 %% @private
+gen_measurements(MeasurementsCount, FirstTimestamp, ValueMultiplier) ->
+    lists:map(fun(I) -> {FirstTimestamp + I, ValueMultiplier * I} end, lists:seq(0, MeasurementsCount - 1)).
+
+
+%% @private
+consume_measurements_by_all_metrics(Worker, Model, Id, Measurements) ->
+    ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
+        ?ALL_TIME_SERIES => #{?ALL_METRICS => Measurements}
+    }])).
+
+
+%% @private
 verify_layout(Worker, Model, CollectionId) ->
     ?assertEqual({ok, #{
         <<"TS0">> => [<<"M1">>, <<"M2">>],
@@ -2295,6 +2302,15 @@ get_complete_slice(Worker, Model, CollectionId) ->
     tsc_structure:build_from_layout(fun(TimeSeriesName, MetricName) ->
         gather_windows(Worker, Model, CollectionId, TimeSeriesName, MetricName, 9999999999, [])
     end, Layout).
+
+
+%% @private
+verify_complete_slice(Worker, Model, Id, CollectionConfig, Measurements) ->
+    ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
+    ExpCompleteSlice = tsc_structure:map(fun(_, _, #metric_config{retention = Retention}) ->
+        lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))
+    end, CollectionConfig),
+    ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)).
 
 
 %% @private
@@ -2313,21 +2329,3 @@ gather_windows(Worker, Model, CollectionId, TimeSeriesName, MetricName, StartTim
         _ ->
             NewAcc
     end.
-
-
-prepare_test_measurements_and_check(
-    Worker, Model, Id, CollectionConfig,
-    TimestampBase, MeasurementsCount, ExpectedWindowsCounts, ValueMultiplier
-) ->
-    Measurements = lists:map(fun(I) -> {TimestampBase + I, ValueMultiplier * I} end, lists:seq(1, MeasurementsCount)),
-    ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
-        <<"TS0">> => #{?ALL_METRICS => Measurements},
-        <<"TS1">> => #{?ALL_METRICS => Measurements}
-    }])),
-
-    ExpCompleteSlice = tsc_structure:map(fun(_, _, #metric_config{retention = Retention}) ->
-        lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))
-    end, CollectionConfig),
-
-    ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
-    ExpCompleteSlice.

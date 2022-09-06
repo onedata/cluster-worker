@@ -31,15 +31,15 @@
 
 %% API
 -export([build/2, insert/4, consume_measurements/4, list_windows/4, delete_data_nodes/3,
-    reconfigure/4, delete/3, get_cloned_metric/2, save_cloned_metric/4]).
+    reconfigure/4, delete/3, generate_dump/2, create_from_dump/4]).
 
 -type record() :: #metric{}.
 -type splitting_strategy() :: #splitting_strategy{}.
 -type data_node() :: #data_node{}.
 % cloned metric is not empty list - metric record is head of this list and tail is consisted of data nodes
--type cloned_metric() :: [record() | data_node()]. 
+-type dump() :: #metric_dump{}.
 
--export_type([record/0, splitting_strategy/0, data_node/0, cloned_metric/0]).
+-export_type([record/0, splitting_strategy/0, data_node/0, dump/0]).
 
 %%%===================================================================
 %%% API
@@ -198,29 +198,26 @@ delete(TimeSeriesName, MetricName, PersistenceCtx) ->
     ts_persistence:delete_metric(set_as_currently_processed(TimeSeriesName, MetricName, PersistenceCtx)).
 
 
--spec get_cloned_metric(record(), ts_persistence:ctx()) ->
-    {cloned_metric(), ts_persistence:ctx()}.
-get_cloned_metric(#metric{
+-spec generate_dump(record(), ts_persistence:ctx()) -> {dump(), ts_persistence:ctx()}.
+generate_dump(#metric{
     head_data = #data_node{older_node_key = OlderDataNodeKey}
 } = Metric, PersistenceCtx) ->
-    {DataNodes, UpdatedPersistenceCtx} = get_cloned_metric_internal(OlderDataNodeKey, PersistenceCtx),
-    {[Metric | DataNodes], UpdatedPersistenceCtx}.
+    {DataNodes, UpdatedPersistenceCtx} = generate_data_nodes_dump(OlderDataNodeKey, PersistenceCtx),
+    {#metric_dump{head_record = Metric, data_nodes = DataNodes}, UpdatedPersistenceCtx}.
 
 
--spec save_cloned_metric(
-    time_series:name(),
-    time_series:metric_name(),
-    cloned_metric(),
-    ts_persistence:ctx()
-) ->
+-spec create_from_dump(time_series:name(), time_series:metric_name(), dump(), ts_persistence:ctx()) ->
     ts_persistence:ctx().
-save_cloned_metric(_TimeSeriesName, _MetricName, [_], PersistenceCtx) ->
+create_from_dump(_TimeSeriesName, _MetricName, #metric_dump{data_nodes = []}, PersistenceCtx) ->
     PersistenceCtx;
-save_cloned_metric(TimeSeriesName, MetricName, [#metric{head_data = Data} | DataTail], PersistenceCtx) ->
+create_from_dump(TimeSeriesName, MetricName, #metric_dump{
+    head_record = #metric{head_data = HeadData}, 
+    data_nodes = DataNodes
+}, PersistenceCtx) ->
     PersistenceCtx2 = set_as_currently_processed(TimeSeriesName, MetricName, PersistenceCtx),
-    {NewOlderNodeKey, PersistenceCtx3} = save_cloned_metric_internal(DataTail, PersistenceCtx2),
+    {NewOlderNodeKey, PersistenceCtx3} = create_data_nodes_from_dump(DataNodes, PersistenceCtx2),
     DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtx3),
-    ts_persistence:update(DataNodeKey, Data#data_node{older_node_key = NewOlderNodeKey}, PersistenceCtx3).
+    ts_persistence:update(DataNodeKey, HeadData#data_node{older_node_key = NewOlderNodeKey}, PersistenceCtx3).
 
 
 %%=====================================================================
@@ -503,22 +500,22 @@ set_as_currently_processed(TimeSeriesName, MetricName, PersistenceCtx0) ->
 
 
 %% @private
--spec get_cloned_metric_internal(ts_metric_data_node:key() | undefined, ts_persistence:ctx()) ->
+-spec generate_data_nodes_dump(ts_metric_data_node:key() | undefined, ts_persistence:ctx()) ->
     {[data_node()], ts_persistence:ctx()}.
-get_cloned_metric_internal(undefined = _NodeKey, PersistenceCtx) ->
+generate_data_nodes_dump(undefined = _NodeKey, PersistenceCtx) ->
     {[], PersistenceCtx};
-get_cloned_metric_internal(NodeKey, PersistenceCtx) ->
+generate_data_nodes_dump(NodeKey, PersistenceCtx) ->
     {#data_node{older_node_key = OlderDataNodeKey} = Data, UpdatedPersistenceCtx} =
         ts_persistence:get(NodeKey, PersistenceCtx),
-    {DataNodes, FinalPersistenceCtx} = get_cloned_metric_internal(OlderDataNodeKey, UpdatedPersistenceCtx),
+    {DataNodes, FinalPersistenceCtx} = generate_data_nodes_dump(OlderDataNodeKey, UpdatedPersistenceCtx),
     {[Data | DataNodes], FinalPersistenceCtx}.
 
 
 %% @private
--spec save_cloned_metric_internal([data_node()], ts_persistence:ctx()) ->
+-spec create_data_nodes_from_dump([data_node()], ts_persistence:ctx()) ->
     {ts_metric_data_node:key() | undefined, ts_persistence:ctx()}.
-save_cloned_metric_internal([], PersistenceCtx) ->
+create_data_nodes_from_dump([], PersistenceCtx) ->
     {undefined, PersistenceCtx};
-save_cloned_metric_internal([Data | DataTail], PersistenceCtx) ->
-    {OlderNodeKey, UpdatedPersistenceCtx} = save_cloned_metric_internal(DataTail, PersistenceCtx),
+create_data_nodes_from_dump([Data | DataTail], PersistenceCtx) ->
+    {OlderNodeKey, UpdatedPersistenceCtx} = create_data_nodes_from_dump(DataTail, PersistenceCtx),
     ts_persistence:create(Data#data_node{older_node_key = OlderNodeKey}, UpdatedPersistenceCtx).

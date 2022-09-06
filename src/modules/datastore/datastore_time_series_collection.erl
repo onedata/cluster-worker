@@ -57,16 +57,16 @@ delete(Ctx, Id) ->
 -spec clone(ctx(), time_series_collection:id()) ->
     {ok, time_series_collection:id()} | {error, term()}.
 clone(Ctx, Id) ->
-    case ?apply(get_cloned_collection, Ctx, Id, []) of
-        {ok, ClonedCollection} ->
-            % Id of new collection must be generated from original key.
-            % It cannot be generated inside tp process as tp processes use unique keys.
+    case ?apply(generate_dump, Ctx, Id, []) of
+        {ok, Dump} ->
+            % Generate a new key for the clone that is adjacent to retain the same routing.
+            % It must be generated on this layer as TP processes operate on a different type of keys.
             NewCollectionId = datastore_key:new_adjacent_to(Id),
-            case ?apply(save_cloned_collection, Ctx, NewCollectionId, [ClonedCollection]) of
+            case ?apply(create_from_dump, Ctx, NewCollectionId, [Dump]) of
                 ok -> {ok, NewCollectionId};
-                SaveError -> SaveError
+                {error, _} = SaveError -> SaveError
             end;
-        GetError ->
+        {error, _} = GetError ->
             GetError
     end.
 
