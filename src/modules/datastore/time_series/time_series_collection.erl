@@ -175,7 +175,7 @@ delete(Ctx, Id, Batch) ->
 generate_dump(Ctx, Id, Batch) ->
     try
         {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-        {Dump, FinalPersistenceCtx} = tsc_structure:fold_map(
+        {Dump, FinalPersistenceCtx} = tsc_structure:mapfold(
             fun(_TimeSeriesName, _MetricName, Metric, PersistenceCtxAcc) ->
                 ts_metric:generate_dump(Metric, PersistenceCtxAcc)
             end,

@@ -14,7 +14,7 @@
 
 
 %% API
--export([has/3, foreach/2, map/2, fold/3, fold_map/3, merge_with/3]).
+-export([has/3, foreach/2, map/2, fold/3, mapfold/3, merge_with/3]).
 -export([to_layout/1, build_from_layout/2, buildfold_from_layout/3, subtract_layout/2]).
 
 
@@ -63,16 +63,16 @@ fold(FoldFun, InitialAcc, Structure) ->
     end, InitialAcc, Structure).
 
 
--spec fold_map(
+-spec mapfold(
     fun((time_series:name(), time_series:metric_name(), InputType, Acc) -> {OutputType, Acc}),
     Acc,
     structure(InputType)
 ) ->
     {structure(OutputType), Acc}.
-fold_map(BuildFoldFun, InitialFoldAcc, Structure) ->
+mapfold(Fun, InitialFoldAcc, Structure) ->
     maps:fold(fun(TimeSeriesName, ValuesPerMetric, {MappedStructureAcc, OuterFoldAcc}) ->
         {InnerMapResult, InnerFoldResult} = maps:fold(fun(MetricName, ValueForMetric, {PerMetricAcc, InnerFoldAcc}) ->
-            {MappedValue, UpdatedInnerFoldAcc} = BuildFoldFun(TimeSeriesName, MetricName, ValueForMetric, InnerFoldAcc),
+            {MappedValue, UpdatedInnerFoldAcc} = Fun(TimeSeriesName, MetricName, ValueForMetric, InnerFoldAcc),
             {PerMetricAcc#{MetricName => MappedValue}, UpdatedInnerFoldAcc}
         end, {#{}, OuterFoldAcc}, ValuesPerMetric),
         {MappedStructureAcc#{TimeSeriesName => InnerMapResult}, InnerFoldResult}
