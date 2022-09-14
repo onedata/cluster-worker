@@ -192,7 +192,9 @@ generate_dump(Ctx, Id, Batch) ->
 create_from_dump(Ctx, Id, Dump, Batch) ->
     try
         TimeSeriesCollectionHeads = tsc_structure:map(
-            fun(_TimeSeriesName, _MetricName, #metric_dump{head_record = Metric}) -> Metric end, Dump),
+            fun(_TimeSeriesName, _MetricName, #metric_dump{head_record = Metric}) ->
+                Metric
+            end, Dump),
         {ok, NewPersistenceCtx} = ts_persistence:init_for_new_collection(Ctx, Id, TimeSeriesCollectionHeads, Batch),
         FinalPersistenceCtx = tsc_structure:fold(fun(TimeSeriesName, MetricName, MetricDump, PersistenceCtxAcc) ->
             ts_metric:create_from_dump(TimeSeriesName, MetricName, MetricDump, PersistenceCtxAcc)

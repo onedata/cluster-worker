@@ -36,7 +36,6 @@
 -type record() :: #metric{}.
 -type splitting_strategy() :: #splitting_strategy{}.
 -type data_node() :: #data_node{}.
-% cloned metric is not empty list - metric record is head of this list and tail is consisted of data nodes
 -type dump() :: #metric_dump{}.
 
 -export_type([record/0, splitting_strategy/0, data_node/0, dump/0]).
@@ -200,9 +199,9 @@ delete(TimeSeriesName, MetricName, PersistenceCtx) ->
 
 -spec generate_dump(record(), ts_persistence:ctx()) -> {dump(), ts_persistence:ctx()}.
 generate_dump(#metric{
-    head_data = #data_node{older_node_key = OlderDataNodeKey}
+    head_data = #data_node{older_node_key = OlderNodeKey}
 } = Metric, PersistenceCtx) ->
-    {DataNodes, UpdatedPersistenceCtx} = generate_data_nodes_dump(OlderDataNodeKey, PersistenceCtx),
+    {DataNodes, UpdatedPersistenceCtx} = generate_data_nodes_dump(OlderNodeKey, PersistenceCtx),
     {#metric_dump{head_record = Metric, data_nodes = DataNodes}, UpdatedPersistenceCtx}.
 
 
@@ -505,10 +504,10 @@ set_as_currently_processed(TimeSeriesName, MetricName, PersistenceCtx0) ->
 generate_data_nodes_dump(undefined = _NodeKey, PersistenceCtx) ->
     {[], PersistenceCtx};
 generate_data_nodes_dump(NodeKey, PersistenceCtx) ->
-    {#data_node{older_node_key = OlderDataNodeKey} = Data, UpdatedPersistenceCtx} =
+    {#data_node{older_node_key = OlderNodeKey} = CurrentDataNode, UpdatedPersistenceCtx} =
         ts_persistence:get(NodeKey, PersistenceCtx),
-    {DataNodes, FinalPersistenceCtx} = generate_data_nodes_dump(OlderDataNodeKey, UpdatedPersistenceCtx),
-    {[Data | DataNodes], FinalPersistenceCtx}.
+    {DataNodesTail, FinalPersistenceCtx} = generate_data_nodes_dump(OlderNodeKey, UpdatedPersistenceCtx),
+    {[CurrentDataNode | DataNodesTail], FinalPersistenceCtx}.
 
 
 %% @private
@@ -516,6 +515,6 @@ generate_data_nodes_dump(NodeKey, PersistenceCtx) ->
     {ts_metric_data_node:key() | undefined, ts_persistence:ctx()}.
 create_data_nodes_from_dump([], PersistenceCtx) ->
     {undefined, PersistenceCtx};
-create_data_nodes_from_dump([Data | DataTail], PersistenceCtx) ->
-    {OlderNodeKey, UpdatedPersistenceCtx} = create_data_nodes_from_dump(DataTail, PersistenceCtx),
-    ts_persistence:create(Data#data_node{older_node_key = OlderNodeKey}, UpdatedPersistenceCtx).
+create_data_nodes_from_dump([CurrentDataNode | DataNodesTail], PersistenceCtx) ->
+    {OlderNodeKey, UpdatedPersistenceCtx} = create_data_nodes_from_dump(DataNodesTail, PersistenceCtx),
+    ts_persistence:create(CurrentDataNode#data_node{older_node_key = OlderNodeKey}, UpdatedPersistenceCtx).
