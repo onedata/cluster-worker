@@ -51,6 +51,7 @@
 
 %% API
 -export([create/4, delete/3]).
+-export([generate_dump/3, create_from_dump/4]).
 -export([incorporate_config/4]).
 -export([get_layout/3]).
 -export([consume_measurements/4]).
@@ -94,6 +95,7 @@
 -export_type([config/0, consume_spec/0, slice/0]).
 
 
+-type dump() :: structure(ts_metric:dump()).
 -type ctx() :: datastore:ctx().
 -type batch() :: datastore_doc:batch().
 
@@ -165,6 +167,41 @@ delete(Ctx, Id, Batch) ->
 
         {ok, ts_persistence:finalize(FinalPersistenceCtx)}
     catch Class:Reason:Stacktrace ->
+        ?handle_errors(Batch, [Id], Class, Reason, Stacktrace)
+    end.
+
+
+-spec generate_dump(ctx(), id(), batch()) -> {{ok, dump()} | {error, term()}, batch()}.
+generate_dump(Ctx, Id, Batch) ->
+    try
+        {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
+        {Dump, FinalPersistenceCtx} = tsc_structure:mapfold(
+            fun(_TimeSeriesName, _MetricName, Metric, PersistenceCtxAcc) ->
+                ts_metric:generate_dump(Metric, PersistenceCtxAcc)
+            end,
+            PersistenceCtx,
+            TimeSeriesCollectionHeads
+        ),
+        {{ok, Dump}, ts_persistence:finalize(FinalPersistenceCtx)}
+    catch Class:Reason:Stacktrace ->
+        ?handle_errors(Batch, [Id], Class, Reason, Stacktrace)
+    end.
+
+
+-spec create_from_dump(ctx(), id(), dump(), batch()) -> {ok | {error, term()}, batch()}.
+create_from_dump(Ctx, Id, Dump, Batch) ->
+    try
+        TimeSeriesCollectionHeads = tsc_structure:map(
+            fun(_TimeSeriesName, _MetricName, #metric_dump{head_record = Metric}) ->
+                Metric
+            end, Dump),
+        {ok, NewPersistenceCtx} = ts_persistence:init_for_new_collection(Ctx, Id, TimeSeriesCollectionHeads, Batch),
+        FinalPersistenceCtx = tsc_structure:fold(fun(TimeSeriesName, MetricName, MetricDump, PersistenceCtxAcc) ->
+            ts_metric:create_from_dump(TimeSeriesName, MetricName, MetricDump, PersistenceCtxAcc)
+        end, NewPersistenceCtx, Dump),
+        {ok, ts_persistence:finalize(FinalPersistenceCtx)}
+    catch Class:Reason:Stacktrace ->
+        % ClonedData can be large structure - do not log it
         ?handle_errors(Batch, [Id], Class, Reason, Stacktrace)
     end.
 
@@ -252,6 +289,7 @@ get_slice(Ctx, Id, SliceLayout, ListWindowsOptions, Batch) ->
     catch Class:Reason:Stacktrace ->
         ?handle_errors(Batch, [Id, SliceLayout, ListWindowsOptions], Class, Reason, Stacktrace)
     end.
+
 
 %%%===================================================================
 %%% Internal functions

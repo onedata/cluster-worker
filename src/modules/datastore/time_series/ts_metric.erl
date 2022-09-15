@@ -30,13 +30,15 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([build/2, insert/4, consume_measurements/4, list_windows/4, delete_data_nodes/3, reconfigure/4, delete/3]).
+-export([build/2, insert/4, consume_measurements/4, list_windows/4, delete_data_nodes/3,
+    reconfigure/4, delete/3, generate_dump/2, create_from_dump/4]).
 
 -type record() :: #metric{}.
 -type splitting_strategy() :: #splitting_strategy{}.
 -type data_node() :: #data_node{}.
+-type dump() :: #metric_dump{}.
 
--export_type([record/0, splitting_strategy/0, data_node/0]).
+-export_type([record/0, splitting_strategy/0, data_node/0, dump/0]).
 
 %%%===================================================================
 %%% API
@@ -51,8 +53,8 @@ build(Config, DocSplittingStrategy) ->
 
 
 -spec insert(
-    time_series:metric_name(),
     time_series:name(),
+    time_series:metric_name(),
     record(),
     ts_persistence:ctx()
 ) ->
@@ -62,8 +64,8 @@ insert(TimeSeriesName, MetricName, Metric, PersistenceCtx) ->
 
 
 -spec consume_measurements(
-    time_series:metric_name(),
     time_series:name(),
+    time_series:metric_name(),
     [{ts_windows:timestamp_seconds(), ts_windows:value()}],
     ts_persistence:ctx()
 ) ->
@@ -92,8 +94,8 @@ consume_measurements(TimeSeriesName, MetricName, Measurements, PersistenceCtx0) 
 
 
 -spec list_windows(
-    time_series:metric_name(),
     time_series:name(),
+    time_series:metric_name(),
     ts_windows:list_options(),
     ts_persistence:ctx()
 ) ->
@@ -114,8 +116,8 @@ list_windows(#metric{
 
 
 -spec delete_data_nodes(
-    time_series:metric_name(),
     time_series:name(),
+    time_series:metric_name(),
     ts_persistence:ctx()
 ) ->
     ts_persistence:ctx().
@@ -135,8 +137,8 @@ delete_data_nodes(#metric{head_data = #data_node{older_node_key = OlderNodeKey}}
 
 
 -spec reconfigure(
-    time_series:metric_name(),
     time_series:name(),
+    time_series:metric_name(),
     ts_metric:splitting_strategy(),
     ts_persistence:ctx()
 ) ->
@@ -189,10 +191,33 @@ reconfigure(#metric{
     prepend_sorted_windows(DataNodeKey, NewDocSplittingStrategy, ExistingWindows, PersistenceCtxAfterInit).
 
 
--spec delete(time_series:metric_name(), time_series:name(), ts_persistence:ctx()) ->
+-spec delete(time_series:name(), time_series:metric_name(), ts_persistence:ctx()) ->
     ts_persistence:ctx().
 delete(TimeSeriesName, MetricName, PersistenceCtx) ->
     ts_persistence:delete_metric(set_as_currently_processed(TimeSeriesName, MetricName, PersistenceCtx)).
+
+
+-spec generate_dump(record(), ts_persistence:ctx()) -> {dump(), ts_persistence:ctx()}.
+generate_dump(#metric{
+    head_data = #data_node{older_node_key = OlderNodeKey}
+} = Metric, PersistenceCtx) ->
+    {DataNodes, UpdatedPersistenceCtx} = generate_data_nodes_dump(OlderNodeKey, PersistenceCtx),
+    {#metric_dump{head_record = Metric, data_nodes = DataNodes}, UpdatedPersistenceCtx}.
+
+
+-spec create_from_dump(time_series:name(), time_series:metric_name(), dump(), ts_persistence:ctx()) ->
+    ts_persistence:ctx().
+create_from_dump(_TimeSeriesName, _MetricName, #metric_dump{data_nodes = []}, PersistenceCtx) ->
+    PersistenceCtx;
+create_from_dump(TimeSeriesName, MetricName, #metric_dump{
+    head_record = #metric{head_data = HeadData}, 
+    data_nodes = DataNodes
+}, PersistenceCtx) ->
+    PersistenceCtx2 = set_as_currently_processed(TimeSeriesName, MetricName, PersistenceCtx),
+    {NewOlderNodeKey, PersistenceCtx3} = create_data_nodes_from_dump(DataNodes, PersistenceCtx2),
+    DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtx3),
+    ts_persistence:update(DataNodeKey, HeadData#data_node{older_node_key = NewOlderNodeKey}, PersistenceCtx3).
+
 
 %%=====================================================================
 %% Internal functions
@@ -471,3 +496,25 @@ split_node(DataNodeKey, Data, Windows1, Windows2, SplitTimestamp, _DocumentNumbe
 set_as_currently_processed(TimeSeriesName, MetricName, PersistenceCtx0) ->
     PersistenceCtx1 = ts_persistence:set_currently_processed_time_series(TimeSeriesName, PersistenceCtx0),
     ts_persistence:set_currently_processed_metric(MetricName, PersistenceCtx1).
+
+
+%% @private
+-spec generate_data_nodes_dump(ts_metric_data_node:key() | undefined, ts_persistence:ctx()) ->
+    {[data_node()], ts_persistence:ctx()}.
+generate_data_nodes_dump(undefined = _NodeKey, PersistenceCtx) ->
+    {[], PersistenceCtx};
+generate_data_nodes_dump(NodeKey, PersistenceCtx) ->
+    {#data_node{older_node_key = OlderNodeKey} = CurrentDataNode, UpdatedPersistenceCtx} =
+        ts_persistence:get(NodeKey, PersistenceCtx),
+    {DataNodesTail, FinalPersistenceCtx} = generate_data_nodes_dump(OlderNodeKey, UpdatedPersistenceCtx),
+    {[CurrentDataNode | DataNodesTail], FinalPersistenceCtx}.
+
+
+%% @private
+-spec create_data_nodes_from_dump([data_node()], ts_persistence:ctx()) ->
+    {ts_metric_data_node:key() | undefined, ts_persistence:ctx()}.
+create_data_nodes_from_dump([], PersistenceCtx) ->
+    {undefined, PersistenceCtx};
+create_data_nodes_from_dump([CurrentDataNode | DataNodesTail], PersistenceCtx) ->
+    {OlderNodeKey, UpdatedPersistenceCtx} = create_data_nodes_from_dump(DataNodesTail, PersistenceCtx),
+    ts_persistence:create(CurrentDataNode#data_node{older_node_key = OlderNodeKey}, UpdatedPersistenceCtx).
