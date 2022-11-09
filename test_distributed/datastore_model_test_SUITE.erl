@@ -1086,7 +1086,7 @@ time_series_test(Config) ->
             #metric_config{
                 resolution = ?RAND_ELEMENT([?SECOND_RESOLUTION, ?FIVE_SECONDS_RESOLUTION, ?MINUTE_RESOLUTION]),
                 retention = 600 div N + 10,
-                aggregator = sum
+                aggregator = avg
             }
         end),
 
@@ -1109,7 +1109,7 @@ time_series_test(Config) ->
         % are calculated using formula for the sum of an arithmetic sequence
         ExpCompleteSlice = tsc_structure:map(fun(_, _, #metric_config{resolution = Resolution, retention = Retention}) ->
             lists:sublist(lists:reverse(lists:map(fun(N) ->
-                {N, {Resolution, (N + N + Resolution - 1) * Resolution}}
+                {N, N + N + Resolution - 1.0}
             end, lists:seq(0, MeasurementsCount - 1, Resolution))), Retention)
         end, CollectionConfig),
 
@@ -1183,7 +1183,7 @@ time_series_document_fetch_test(Config) ->
         InitialKeys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)),
         {Id, CollectionConfig} = create_time_series_collection(Worker, Model, fun(N) ->
             ApplyFun = case N of
-                5 -> sum;
+                5 -> avg;
                 _ -> last
             end,
             #metric_config{resolution = ?SECOND_RESOLUTION, retention = 10000 * N, aggregator = ApplyFun}
@@ -1199,9 +1199,9 @@ time_series_document_fetch_test(Config) ->
         ExpCompleteSlice = tsc_structure:map(fun
             (_, _, #metric_config{retention = Retention, aggregator = last}) ->
                 lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts));
-            (_, _, #metric_config{retention = Retention, aggregator = sum}) ->
+            (_, _, #metric_config{retention = Retention, aggregator = avg}) ->
                 MappedMeasurements = lists:map(fun({Timestamp, Value}) ->
-                    {Timestamp, {1, Value}}
+                    {Timestamp, float(Value)}
                 end, Measurements),
                 lists:sublist(lists:reverse(MappedMeasurements), maps:get(Retention, ExpectedWindowsCounts))
         end, CollectionConfig),

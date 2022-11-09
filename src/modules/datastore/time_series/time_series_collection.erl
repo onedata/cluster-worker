@@ -90,7 +90,7 @@
 %% be expanded to the actual set of time series / metrics.
 
 -type config() :: structure(metric_config:record()).
--type consume_spec() :: structure([{ts_windows:timestamp_seconds(), ts_windows:value()}]).
+-type consume_spec() :: structure([ts_windows:measurement()]).
 -type slice() :: structure(ts_windows:descending_windows_list()).
 -export_type([config/0, consume_spec/0, slice/0]).
 

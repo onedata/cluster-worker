@@ -55,4 +55,12 @@
     data_nodes = [] :: [ts_metric:data_node()]
 }).
 
+
+% Record storing value of window
+-record(window_value, {
+    aggregated_measurements :: ts_windows:aggregated_value(),
+    lowest_timestamp :: ts_windows:timestamp_seconds() | undefined,
+    highest_timestamp :: ts_windows:timestamp_seconds() | undefined
+}).
+
 -endif.

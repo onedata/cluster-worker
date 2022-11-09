@@ -12,9 +12,13 @@
 -module(ts_windows).
 -author("Michal Wrzeszcz").
 
+
+-include("modules/datastore/datastore_time_series.hrl").
+
+
 %% API
--export([init/0, list/3, list_all/1, insert_value/4, prepend_windows_list/2, prune_overflowing/2, split/2,
-    is_size_exceeded/2, get_remaining_windows_count/2, reorganize/4]).
+-export([init/0, list/3, list_all/2, insert/4, prepend_windows_list/2, prune_overflowing/2, split/2,
+    is_size_exceeded/2, get_remaining_windows_count/2, reorganize/4, get_value_mapper/1]).
 %% Encoding/decoding  API
 -export([encode/1, decode/1]).
 %% Exported for unit tests
@@ -23,11 +27,13 @@
 -type timestamp_seconds() :: time_series:time_seconds().
 -type value() :: number().
 -type window_id() :: timestamp_seconds().
--type window_value() :: value() | {ValuesCount :: non_neg_integer(), ValuesSum :: value()}.
--type window() :: {timestamp_seconds(), window_value()}.
+-type aggregated_value() :: value() | {ValuesCount :: non_neg_integer(), ValuesSum :: value()}.
+-type window_value() :: #window_value{}.
+-type measurement() :: {timestamp_seconds(), value()}.
 -type windows_collection() :: gb_trees:tree(timestamp_seconds(), window_value()).
--type descending_windows_list() :: [window()].
--type insert_strategy() :: {aggregate, metric_config:aggregator()} | ignore_existing.
+-type descending_windows_list() :: [{timestamp_seconds(), value() | window_value()}].
+-type insert_strategy() :: {aggregate_measurement, metric_config:aggregator()} | override_window.
+-type value_mapper() :: fun((window_value()) -> value()).
 
 -type list_options() :: #{
     % newest timestamp from which descending listing will begin
@@ -35,11 +41,13 @@
     % oldest timestamp when the listing should stop (unless it hits the window_limit)
     stop_timestamp => timestamp_seconds(),
     % maximum number of time windows to be listed
-    window_limit => non_neg_integer()
+    window_limit => non_neg_integer(),
+    % mapper calculating value returned for each window
+    value_mapper => value_mapper() | return_complete_record
 }.
 
--export_type([timestamp_seconds/0, value/0, window_id/0, window_value/0, window/0, windows_collection/0,
-    descending_windows_list/0, insert_strategy/0, list_options/0]).
+-export_type([timestamp_seconds/0, value/0, window_id/0, aggregated_value/0, window_value/0, measurement/0,
+    windows_collection/0, descending_windows_list/0, insert_strategy/0, list_options/0]).
 
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
 -define(MAX_WINDOW_LIMIT, 1000).
@@ -66,18 +74,19 @@ list(Windows, Timestamp, Options) ->
 
 
 %% @doc should be used only internally as the complete window list can be large
--spec list_all(windows_collection()) -> {ok | {continue, list_options()}, descending_windows_list()}.
-list_all(Windows) ->
-    list_internal(undefined, Windows, #{}).
+-spec list_all(windows_collection(), list_options()) -> {ok | {continue, list_options()}, descending_windows_list()}.
+list_all(Windows, Options) ->
+    list_internal(undefined, Windows, Options).
 
 
--spec insert_value(windows_collection(), timestamp_seconds(), value() | window_value(), insert_strategy()) -> windows_collection().
-insert_value(Windows, WindowToBeUpdatedTimestamp, WindowValue, ignore_existing) ->
-    set_value(WindowToBeUpdatedTimestamp, WindowValue, Windows);
-insert_value(Windows, WindowToBeUpdatedTimestamp, NewValue, {aggregate, Aggregator}) ->
-    CurrentValue = get_value(WindowToBeUpdatedTimestamp, Windows),
-    NewWindowValue = aggregate(CurrentValue, NewValue, Aggregator),
-    set_value(WindowToBeUpdatedTimestamp, NewWindowValue, Windows).
+-spec insert(windows_collection(), timestamp_seconds(), measurement() | window_value(), insert_strategy()) ->
+    windows_collection().
+insert(Windows, WindowTimestamp, WindowValue, override_window) ->
+    set_value(WindowTimestamp, WindowValue, Windows);
+insert(Windows, WindowTimestamp, {MeasurementTimestamp, _} = NewMeasurement, {aggregate_measurement, Aggregator}) ->
+    CurrentValue = get_value(WindowTimestamp, Windows),
+    NewWindowValue = consume_timestamp(aggregate(CurrentValue, NewMeasurement, Aggregator), MeasurementTimestamp),
+    set_value(WindowTimestamp, NewWindowValue, Windows).
 
 
 -spec prepend_windows_list(windows_collection(), descending_windows_list()) -> windows_collection().
@@ -146,15 +155,28 @@ reorganize(WindowsInOlderDataNode, WindowsInCurrentDataNode, MaxWindowsInOlderDa
     end.
 
 
+-spec get_value_mapper(metric_config:aggregator()) -> value_mapper().
+get_value_mapper(avg) ->
+    fun(#window_value{aggregated_measurements = {Count, Sum}}) ->
+        Sum / Count
+    end;
+
+get_value_mapper(_) ->
+    fun(#window_value{aggregated_measurements = Aggregated}) ->
+        Aggregated
+    end.
+
 %%%===================================================================
 %%% Encoding/decoding  API
 %%%===================================================================
 
 -spec encode(windows_collection()) -> binary().
 encode(Windows) ->
-    json_utils:encode(lists:map(fun
-        ({Timestamp, {ValuesCount, ValuesSum}}) -> [Timestamp, ValuesCount, ValuesSum];
-        ({Timestamp, Value}) -> [Timestamp, Value]
+    json_utils:encode(lists:map(fun({Timestamp, #window_value{
+        aggregated_measurements = AggregatedMeasurements,
+        lowest_timestamp = LowestTimestamp,
+        highest_timestamp = HighestTimestamp
+    }}) -> [Timestamp, LowestTimestamp, HighestTimestamp | encode_aggregated_measurements(AggregatedMeasurements)]
     end, to_list(Windows))).
 
 
@@ -162,34 +184,90 @@ encode(Windows) ->
 decode(Term) ->
     InputList = json_utils:decode(Term),
     from_list(lists:map(fun
-        ([Timestamp, ValuesCount, ValuesSum]) -> {Timestamp, {ValuesCount, ValuesSum}};
-        ([Timestamp, Value]) -> {Timestamp, Value}
+        ([Timestamp, LowestTimestamp, HighestTimestamp | AggregatedMeasurements]) ->
+            {Timestamp, #window_value{
+                aggregated_measurements = decode_aggregated_measurements(AggregatedMeasurements),
+                lowest_timestamp = LowestTimestamp,
+                highest_timestamp = HighestTimestamp
+            }}
     end, InputList)).
+
+
+-spec encode_aggregated_measurements(aggregated_value()) -> list().
+encode_aggregated_measurements({ValuesCount, ValuesSum}) ->
+    [ValuesCount, ValuesSum];
+
+encode_aggregated_measurements(Value) ->
+    [Value].
+
+
+-spec decode_aggregated_measurements(list()) -> aggregated_value().
+decode_aggregated_measurements([ValuesCount, ValuesSum]) ->
+    {ValuesCount, ValuesSum};
+
+decode_aggregated_measurements([Value]) ->
+    Value.
 
 
 %%=====================================================================
 %% Internal functions
 %%=====================================================================
 
--spec aggregate(window_value() | undefined, value(), metric_config:aggregator()) -> window_value().
-aggregate(undefined, NewValue, sum) ->
-    {1, NewValue};
-aggregate({CurrentCount, CurrentSum}, NewValue, sum) ->
-    {CurrentCount + 1, CurrentSum + NewValue};
-aggregate(undefined, NewValue, max) ->
-    NewValue;
-aggregate(CurrentValue, NewValue, max) ->
-    max(CurrentValue, NewValue);
-aggregate(undefined, NewValue, min) ->
-    NewValue;
-aggregate(CurrentValue, NewValue, min) ->
-    min(CurrentValue, NewValue);
-aggregate(_CurrentValue, NewValue, last) ->
-    NewValue;
-aggregate(undefined, NewValue, first) ->
-    NewValue;
-aggregate(CurrentValue, _NewValue, first) ->
-    CurrentValue.
+-spec aggregate(window_value() | undefined, measurement(), metric_config:aggregator()) -> window_value().
+aggregate(undefined, {_NewTimestamp, NewValue}, avg) ->
+    #window_value{aggregated_measurements = {1, NewValue}};
+
+aggregate(undefined, {_NewTimestamp, NewValue}, _) ->
+    #window_value{aggregated_measurements = NewValue};
+
+aggregate(#window_value{aggregated_measurements = {CurrentCount, CurrentSum}} = CurrentValue, {_NewTimestamp, NewValue}, avg) ->
+    CurrentValue#window_value{aggregated_measurements = {CurrentCount + 1, CurrentSum + NewValue}};
+
+aggregate(#window_value{aggregated_measurements = Aggregated} = CurrentValue, {_NewTimestamp, NewValue}, sum) ->
+    CurrentValue#window_value{aggregated_measurements = Aggregated + NewValue};
+
+aggregate(#window_value{aggregated_measurements = Aggregated} = CurrentValue, {_NewTimestamp, NewValue}, max) ->
+    CurrentValue#window_value{aggregated_measurements = max(Aggregated, NewValue)};
+
+aggregate(#window_value{aggregated_measurements = Aggregated} = CurrentValue, {_NewTimestamp, NewValue}, min) ->
+    CurrentValue#window_value{aggregated_measurements = min(Aggregated, NewValue)};
+
+aggregate(#window_value{highest_timestamp = HighestTimestamp} = CurrentValue, {NewTimestamp, NewValue}, last) ->
+    case NewTimestamp >= HighestTimestamp of
+        true -> CurrentValue#window_value{aggregated_measurements = NewValue};
+        _ -> CurrentValue
+    end;
+
+aggregate(#window_value{lowest_timestamp = LowestTimestamp} = CurrentValue, {NewTimestamp, NewValue}, first) ->
+    case NewTimestamp < LowestTimestamp of
+        true -> CurrentValue#window_value{aggregated_measurements = NewValue};
+        _ -> CurrentValue
+    end.
+
+
+-spec consume_timestamp(window_value(), timestamp_seconds()) -> window_value().
+consume_timestamp(#window_value{lowest_timestamp = Lowest, highest_timestamp = Highest} = WindowValue, Current) ->
+    WindowValue#window_value{
+        lowest_timestamp =
+            case Lowest =:= undefined orelse Current < Lowest of
+                true -> Current;
+                false -> Lowest
+            end,
+        highest_timestamp =
+            case Highest =:= undefined orelse Current > Highest of
+                true -> Current;
+                false -> Highest
+            end
+    }.
+
+
+-spec map_value(window_value(), list_options()) -> value() | window_value().
+map_value(WindowValue, #{value_mapper := return_complete_record}) ->
+    WindowValue;
+
+map_value(WindowValue, #{value_mapper := Mapper}) ->
+    Mapper(WindowValue).
+
 
 
 %%=====================================================================
@@ -260,13 +338,13 @@ list_internal(Iterator, Options) ->
                 #{stop_timestamp := StopTimestamp} when Timestamp < StopTimestamp ->
                     {ok, []};
                 #{stop_timestamp := StopTimestamp} when Timestamp =:= StopTimestamp ->
-                    {ok, [{Timestamp, Value}]};
+                    {ok, [{Timestamp, map_value(Value, Options)}]};
                 #{window_limit := Limit} ->
                     {FinishOrContinue, List} = list_internal(NextIterator, Options#{window_limit := Limit - 1}),
-                    {FinishOrContinue, [{Timestamp, Value} | List]};
+                    {FinishOrContinue, [{Timestamp, map_value(Value, Options)} | List]};
                 _ ->
                     {FinishOrContinue, List} = list_internal(NextIterator, Options),
-                    {FinishOrContinue, [{Timestamp, Value} | List]}
+                    {FinishOrContinue, [{Timestamp, map_value(Value, Options)} | List]}
             end
     end.
 
