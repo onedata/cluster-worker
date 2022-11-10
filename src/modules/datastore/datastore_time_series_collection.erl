@@ -20,6 +20,7 @@
 -export([get_layout/2]).
 -export([consume_measurements/3]).
 -export([get_slice/4]).
+-export([get_windows_timestamps/3]).
 -export([browse/3]).
 
 -type ctx() :: datastore_model:ctx().
@@ -90,6 +91,13 @@ consume_measurements(Ctx, Id, ConsumeSpec) ->
     {ok, time_series_collection:slice()} | {error, term()}.
 get_slice(Ctx, Id, SliceLayout, Options) ->
     ?apply(Ctx, Id, [SliceLayout, Options]).
+
+
+%% @doc @see time_series_collection:get_windows_timestamps/4
+-spec get_windows_timestamps(ctx(), time_series_collection:id(), time_series_collection:windows_spec()) ->
+    {ok, time_series_collection:timestamps_spec()} | {error, term()}.
+get_windows_timestamps(Ctx, Id, WindowsSpec) ->
+    ?apply(Ctx, Id, [WindowsSpec]).
 
 
 -spec browse(ctx(), time_series_collection:id(), ts_browse_request:record()) -> 

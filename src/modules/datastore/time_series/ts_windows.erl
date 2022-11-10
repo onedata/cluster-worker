@@ -18,7 +18,9 @@
 
 %% API
 -export([init/0, list/3, list_all/2, insert/4, prepend_windows_list/2, prune_overflowing/2, split/2,
-    is_size_exceeded/2, get_remaining_windows_count/2, reorganize/4, get_value_mapper/1]).
+    is_size_exceeded/2, get_remaining_windows_count/2, reorganize/4,
+    get_value_mapper/1, get_value_to_timestamps_mapper/0, get_full_window_mapper/0
+]).
 %% Encoding/decoding  API
 -export([encode/1, decode/1]).
 %% Exported for unit tests
@@ -31,9 +33,9 @@
 -type window_value() :: #window_value{}.
 -type measurement() :: {timestamp_seconds(), value()}.
 -type windows_collection() :: gb_trees:tree(timestamp_seconds(), window_value()).
--type descending_windows_list() :: [{timestamp_seconds(), value() | window_value()}].
+-type descending_windows_list() :: [{timestamp_seconds(), term()}]. % list can include any term which is a result of value_mapper
 -type insert_strategy() :: {aggregate_measurement, metric_config:aggregator()} | override_window.
--type value_mapper() :: fun((window_value()) -> value()).
+-type value_mapper() :: fun((window_value()) -> term()).
 
 -type list_options() :: #{
     % newest timestamp from which descending listing will begin
@@ -43,7 +45,7 @@
     % maximum number of time windows to be listed
     window_limit => non_neg_integer(),
     % mapper calculating value returned for each window
-    value_mapper => value_mapper() | return_complete_record
+    value_mapper => value_mapper()
 }.
 
 -export_type([timestamp_seconds/0, value/0, window_id/0, aggregated_value/0, window_value/0, measurement/0,
@@ -166,6 +168,21 @@ get_value_mapper(_) ->
         Aggregated
     end.
 
+
+-spec get_value_to_timestamps_mapper() -> value_mapper().
+get_value_to_timestamps_mapper() ->
+    fun(#window_value{lowest_timestamp = Lowest, highest_timestamp = Highest}) ->
+        {Lowest, Highest}
+    end.
+
+
+-spec get_full_window_mapper() -> value_mapper().
+get_full_window_mapper() ->
+    fun(WindowValue) ->
+        WindowValue
+    end.
+
+
 %%%===================================================================
 %%% Encoding/decoding  API
 %%%===================================================================
@@ -260,10 +277,6 @@ consume_timestamp(#window_value{lowest_timestamp = Lowest, highest_timestamp = H
             end
     }.
 
-
--spec map_value(window_value(), list_options()) -> value() | window_value().
-map_value(WindowValue, #{value_mapper := return_complete_record}) ->
-    WindowValue;
 
 map_value(WindowValue, #{value_mapper := Mapper}) ->
     Mapper(WindowValue).

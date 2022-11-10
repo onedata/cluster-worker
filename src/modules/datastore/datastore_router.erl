@@ -83,6 +83,7 @@ route(Function, [Ctx | Args] = OriginalArgs) ->
 route_time_series_collection_operation(Function, [Ctx | Args]) when
     % TODO VFS-8540 - handle race with metric adding/deletion
     % Function =:= get_slice orelse
+    % Function =:= get_slice get_windows_timestamps
     Function =:= get_layout ->
     route_internal(datastore_reader, time_series_collection_get, Ctx, [Function, Args]);
 route_time_series_collection_operation(Function, [Ctx | Args]) ->

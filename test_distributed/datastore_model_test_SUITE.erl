@@ -1112,8 +1112,10 @@ time_series_test(Config) ->
                 {N, N + N + Resolution - 1.0}
             end, lists:seq(0, MeasurementsCount - 1, Resolution))), Retention)
         end, CollectionConfig),
-
         ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
+
+
+        ct:print("aaaa ~p", [get_windows_timestamps(Worker, Model, Id, [?SECOND_RESOLUTION, ?FIVE_SECONDS_RESOLUTION, ?MINUTE_RESOLUTION])]),
 
         % Test errors when wrong time series or metric is given in the consume spec
         ?assertEqual(
@@ -2345,3 +2347,16 @@ gather_windows(Worker, Model, CollectionId, TimeSeriesName, MetricName, StartTim
         _ ->
             NewAcc
     end.
+
+
+%% @private
+get_windows_timestamps(Worker, Model, CollectionId, MetricWindowsSpec) ->
+    {ok, Layout} = rpc:call(Worker, Model, time_series_collection_get_layout, [CollectionId]),
+    WindowsSpec = tsc_structure:build_from_layout(fun(_TimeSeriesName, _MetricName) ->
+        MetricWindowsSpec
+    end, Layout),
+
+    {ok, Timestamps} = ?assertMatch({ok, _}, rpc:call(Worker, Model, time_series_collection_get_windows_timestamps, [
+        CollectionId, WindowsSpec
+    ])),
+    Timestamps.
