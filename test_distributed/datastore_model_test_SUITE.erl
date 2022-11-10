@@ -1081,10 +1081,11 @@ infinite_log_age_pruning_test(Config) ->
 
 time_series_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
+    PossibleResolutions = [?SECOND_RESOLUTION, ?FIVE_SECONDS_RESOLUTION, ?MINUTE_RESOLUTION],
     lists:foreach(fun(Model) ->
         {Id, CollectionConfig} = create_time_series_collection(Worker, Model, fun(N) ->
             #metric_config{
-                resolution = ?RAND_ELEMENT([?SECOND_RESOLUTION, ?FIVE_SECONDS_RESOLUTION, ?MINUTE_RESOLUTION]),
+                resolution = ?RAND_ELEMENT(PossibleResolutions),
                 retention = 600 div N + 10,
                 aggregator = avg
             }
@@ -1114,8 +1115,16 @@ time_series_test(Config) ->
         end, CollectionConfig),
         ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
 
-
-        ct:print("aaaa ~p", [get_windows_timestamps(Worker, Model, Id, [?SECOND_RESOLUTION, ?FIVE_SECONDS_RESOLUTION, ?MINUTE_RESOLUTION])]),
+        ExpGetTimestampsAns = tsc_structure:map(fun(_, _, #metric_config{resolution = Resolution}) ->
+            maps:from_list(lists:filtermap(fun
+                (Generator) when Generator rem Resolution =:= 0 ->
+                    {true, {1080 + Generator, {1080 + Generator, 1080 + Generator + Resolution - 1}}};
+                (_) ->
+                    false
+            end, PossibleResolutions))
+        end, CollectionConfig),
+        ?assertEqual(ExpGetTimestampsAns, get_windows_timestamps(Worker, Model, Id,
+            lists:map(fun(PossibleResolution) -> 1080 + PossibleResolution end, PossibleResolutions))),
 
         % Test errors when wrong time series or metric is given in the consume spec
         ?assertEqual(
