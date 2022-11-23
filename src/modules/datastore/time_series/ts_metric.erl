@@ -118,7 +118,7 @@ list_windows(#metric{
     Window = get_window_id(maps:get(start_timestamp, Options, undefined), Config),
     FinalOptions = case Options of
         #{value_mapper := _} -> Options;
-        _ -> Options#{value_mapper => ts_windows:get_value_mapper(Aggregator)}
+        _ -> Options#{value_mapper => ts_windows:get_window_mapper(Aggregator)}
     end,
     list_windows_internal(Data, Window, FinalOptions, PersistenceCtx).
 
@@ -141,12 +141,12 @@ get_windows_timestamps(TimeSeriesName, MetricName, WindowsList, PersistenceCtx0)
 get_windows_timestamps(#metric{
     head_data = Data
 }, WindowsList, PersistenceCtx) ->
-    Options = #{value_mapper => ts_windows:get_value_to_timestamps_mapper(), window_limit => 1},
+    Options = #{value_mapper => ts_windows:get_window_to_timestamps_mapper(), window_limit => 1},
     lists:foldl(fun(Window, {Acc, PersistenceCtxAcc}) ->
         case list_windows_internal(Data, Window, Options, PersistenceCtxAcc) of
             {[{Window, WindowTimestamps}], UpdatedPersistenceCtxAcc} ->
                 {Acc#{Window => WindowTimestamps}, UpdatedPersistenceCtxAcc};
-            {_, UpdatedPersistenceCtxAcc} ->
+            {[], UpdatedPersistenceCtxAcc} ->
                 {Acc, UpdatedPersistenceCtxAcc}
         end
     end, {#{}, PersistenceCtx}, WindowsList).
@@ -263,7 +263,7 @@ create_from_dump(TimeSeriesName, MetricName, #metric_dump{
 
 %% @private
 -spec consume(data_node(), ts_metric_data_node:key(), non_neg_integer(), splitting_strategy(),
-    ts_windows:insert_strategy(), ts_windows:window_id(), ts_windows:measurement() | ts_windows:window_value(),
+    ts_windows:insert_strategy(), ts_windows:window_id(), ts_windows:measurement() | ts_windows:window(),
     ts_persistence:ctx()) -> ts_persistence:ctx().
 consume(
     #data_node{

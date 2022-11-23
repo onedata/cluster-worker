@@ -56,9 +56,11 @@
 }).
 
 
-% Record storing value of window
--record(window_value, {
-    aggregated_measurements :: ts_windows:aggregated_value(),
+% Collections of windows are stored inside #data_node{}
+-record(window, {
+    aggregated_measurements :: ts_windows:aggregated_measurements(),
+    % Lowest and highest timestamp among measurements that have been
+    % used to calculate value of aggregated_measurements field
     lowest_timestamp :: ts_windows:timestamp_seconds() | undefined,
     highest_timestamp :: ts_windows:timestamp_seconds() | undefined
 }).

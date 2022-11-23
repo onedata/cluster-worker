@@ -20,12 +20,12 @@
 
 -define(LIST_ALL(Windows), ?LIST(Windows, undefined, #{})).
 -define(LIST(Windows, Timestamp, Options),
-    ts_windows:list(Windows, Timestamp, Options#{value_mapper => ts_windows:get_value_mapper(max)})).
+    ts_windows:list(Windows, Timestamp, Options#{value_mapper => ts_windows:get_window_mapper(max)})).
 -define(LIST_ALL_RESULT(List), ?LIST_CONTINUE_RESULT(List, #{window_limit => 1000 - length(List)})).
 -define(LIST_CONTINUE_RESULT(List, ContinueOptions), {{continue, ContinueOptions#{
-    value_mapper => ts_windows:get_value_mapper(max)
+    value_mapper => ts_windows:get_window_mapper(max)
 }}, List}).
--define(WINDOW_VALUE(AggregatedMeasurements, Timestamp), #window_value{
+-define(WINDOW(AggregatedMeasurements, Timestamp), #window{
     aggregated_measurements = AggregatedMeasurements,
     lowest_timestamp = Timestamp,
     highest_timestamp = Timestamp
@@ -40,25 +40,25 @@ add_new_measurement_test() ->
     WindowTimestamp = 1,
     MeasurementTimestamp = 2,
 
-    ?assertEqual(undefined, ts_windows:get_value(WindowTimestamp, Windows)),
+    ?assertEqual(undefined, ts_windows:get(WindowTimestamp, Windows)),
 
     Test1 = ts_windows:insert(Windows, WindowTimestamp, {MeasurementTimestamp, 1}, {aggregate_measurement, avg}),
-    ?assertEqual(?WINDOW_VALUE({1, 1}, MeasurementTimestamp), ts_windows:get_value(WindowTimestamp, Test1)),
+    ?assertEqual(?WINDOW({1, 1}, MeasurementTimestamp), ts_windows:get(WindowTimestamp, Test1)),
 
     Test2 = ts_windows:insert(Windows, WindowTimestamp, {MeasurementTimestamp, 1}, {aggregate_measurement, max}),
-    ?assertEqual(?WINDOW_VALUE(1, MeasurementTimestamp), ts_windows:get_value(WindowTimestamp, Test2)),
+    ?assertEqual(?WINDOW(1, MeasurementTimestamp), ts_windows:get(WindowTimestamp, Test2)),
 
     Test3 = ts_windows:insert(Windows, WindowTimestamp, {MeasurementTimestamp, 1}, {aggregate_measurement, min}),
-    ?assertEqual(?WINDOW_VALUE(1, MeasurementTimestamp), ts_windows:get_value(WindowTimestamp, Test3)),
+    ?assertEqual(?WINDOW(1, MeasurementTimestamp), ts_windows:get(WindowTimestamp, Test3)),
 
     Test4 = ts_windows:insert(Windows, WindowTimestamp, {MeasurementTimestamp, 1}, {aggregate_measurement, last}),
-    ?assertEqual(?WINDOW_VALUE(1, MeasurementTimestamp), ts_windows:get_value(WindowTimestamp, Test4)),
+    ?assertEqual(?WINDOW(1, MeasurementTimestamp), ts_windows:get(WindowTimestamp, Test4)),
 
     Test5 = ts_windows:insert(Windows, WindowTimestamp, {MeasurementTimestamp, 1}, {aggregate_measurement, first}),
-    ?assertEqual(?WINDOW_VALUE(1, MeasurementTimestamp), ts_windows:get_value(WindowTimestamp, Test5)),
+    ?assertEqual(?WINDOW(1, MeasurementTimestamp), ts_windows:get(WindowTimestamp, Test5)),
 
     Test6 = ts_windows:insert(Windows, WindowTimestamp, {MeasurementTimestamp, 1}, {aggregate_measurement, sum}),
-    ?assertEqual(?WINDOW_VALUE(1, MeasurementTimestamp), ts_windows:get_value(WindowTimestamp, Test6)).
+    ?assertEqual(?WINDOW(1, MeasurementTimestamp), ts_windows:get(WindowTimestamp, Test6)).
 
 
 add_with_existing_timestamp_test() ->
@@ -70,72 +70,72 @@ add_with_existing_timestamp_test() ->
         ts_windows:init(), WindowTimestamp, {MeasurementTimestamp, 2}, {aggregate_measurement, max}),
 
     Test1 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 3}, {aggregate_measurement, max}),
-    ?assertEqual(#window_value{
+    ?assertEqual(#window{
         aggregated_measurements = 3,
         lowest_timestamp = MeasurementTimestamp,
         highest_timestamp = AddedMeasurementTimestamp
-    }, ts_windows:get_value(WindowTimestamp, Test1)),
+    }, ts_windows:get(WindowTimestamp, Test1)),
     Test2 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 1}, {aggregate_measurement, max}),
-    ?assertEqual(#window_value{
+    ?assertEqual(#window{
         aggregated_measurements = 2,
         lowest_timestamp = MeasurementTimestamp,
         highest_timestamp = AddedMeasurementTimestamp
-    }, ts_windows:get_value(WindowTimestamp, Test2)),
+    }, ts_windows:get(WindowTimestamp, Test2)),
 
     Test3 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 1}, {aggregate_measurement, min}),
-    ?assertEqual(#window_value{
+    ?assertEqual(#window{
         aggregated_measurements = 1,
         lowest_timestamp = MeasurementTimestamp,
         highest_timestamp = AddedMeasurementTimestamp
-    }, ts_windows:get_value(WindowTimestamp, Test3)),
+    }, ts_windows:get(WindowTimestamp, Test3)),
     Test4 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 3}, {aggregate_measurement, min}),
-    ?assertEqual(#window_value{
+    ?assertEqual(#window{
         aggregated_measurements = 2,
         lowest_timestamp = MeasurementTimestamp,
         highest_timestamp = AddedMeasurementTimestamp
-    }, ts_windows:get_value(WindowTimestamp, Test4)),
+    }, ts_windows:get(WindowTimestamp, Test4)),
 
     Test5 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementLowerTimestamp, 3}, {aggregate_measurement, last}),
-    ?assertEqual(#window_value{
+    ?assertEqual(#window{
         aggregated_measurements = 2,
         lowest_timestamp = AddedMeasurementLowerTimestamp,
         highest_timestamp = MeasurementTimestamp
-    }, ts_windows:get_value(WindowTimestamp, Test5)),
+    }, ts_windows:get(WindowTimestamp, Test5)),
     Test6 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 3}, {aggregate_measurement, last}),
-    ?assertEqual(#window_value{
+    ?assertEqual(#window{
         aggregated_measurements = 3,
         lowest_timestamp = MeasurementTimestamp,
         highest_timestamp = AddedMeasurementTimestamp
-    }, ts_windows:get_value(WindowTimestamp, Test6)),
+    }, ts_windows:get(WindowTimestamp, Test6)),
 
     Test7 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementLowerTimestamp, 3}, {aggregate_measurement, first}),
-    ?assertEqual(#window_value{
+    ?assertEqual(#window{
         aggregated_measurements = 3,
         lowest_timestamp = AddedMeasurementLowerTimestamp,
         highest_timestamp = MeasurementTimestamp
-    }, ts_windows:get_value(WindowTimestamp, Test7)),
+    }, ts_windows:get(WindowTimestamp, Test7)),
     Test8 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 3}, {aggregate_measurement, first}),
-    ?assertEqual(#window_value{
+    ?assertEqual(#window{
         aggregated_measurements = 2,
         lowest_timestamp = MeasurementTimestamp,
         highest_timestamp = AddedMeasurementTimestamp
-    }, ts_windows:get_value(WindowTimestamp, Test8)),
+    }, ts_windows:get(WindowTimestamp, Test8)),
 
     Test9 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 3}, {aggregate_measurement, sum}),
-    ?assertEqual(#window_value{
+    ?assertEqual(#window{
         aggregated_measurements = 5,
         lowest_timestamp = MeasurementTimestamp,
         highest_timestamp = AddedMeasurementTimestamp
-    }, ts_windows:get_value(WindowTimestamp, Test9)),
+    }, ts_windows:get(WindowTimestamp, Test9)),
     
     WindowsWithAvg = ts_windows:insert(
         ts_windows:init(), WindowTimestamp, {MeasurementTimestamp, 2}, {aggregate_measurement, avg}),
     Test10 = ts_windows:insert(WindowsWithAvg, WindowTimestamp, {AddedMeasurementTimestamp, 3}, {aggregate_measurement, avg}),
-    ?assertEqual(#window_value{
+    ?assertEqual(#window{
         aggregated_measurements = {2, 5},
         lowest_timestamp = MeasurementTimestamp,
         highest_timestamp = AddedMeasurementTimestamp
-    }, ts_windows:get_value(WindowTimestamp, Test10)).
+    }, ts_windows:get(WindowTimestamp, Test10)).
 
 
 prune_overflowing_windows_test() ->
@@ -151,8 +151,8 @@ prune_overflowing_windows_test() ->
     ?assertEqual(Windows2, Test2),
 
     Test3 = ts_windows:prune_overflowing(Test2, 1),
-    ?assertEqual(undefined, ts_windows:get_value(Timestamp1, Test3)),
-    ?assertEqual(?WINDOW_VALUE(1, Timestamp2), ts_windows:get_value(Timestamp2, Test3)),
+    ?assertEqual(undefined, ts_windows:get(Timestamp1, Test3)),
+    ?assertEqual(?WINDOW(1, Timestamp2), ts_windows:get(Timestamp2, Test3)),
 
     Test4 = ts_windows:prune_overflowing(Test3, 1),
     ?assertEqual(Test3, Test4),
