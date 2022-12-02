@@ -18,17 +18,20 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("ctool/include/hashing/consistent_hashing.hrl").
 
+
+-define(EXEMPLARY_AGGREGATOR, max). % When test verifies mechanisms that works the same for aggregators,
+                                    % ?EXEMPLARY_AGGREGATOR is used instead of repeating test for all aggregators.
 -define(LIST_ALL(Windows), ?LIST(Windows, undefined, #{})).
 -define(LIST(Windows, Timestamp, Options),
-    ts_windows:list(Windows, Timestamp, Options#{value_mapper => ts_windows:get_window_mapper(max)})).
+    ts_windows:list(Windows, Timestamp, Options#{return_type => basic_info, aggregator => ?EXEMPLARY_AGGREGATOR})).
 -define(LIST_ALL_RESULT(List), ?LIST_CONTINUE_RESULT(List, #{window_limit => 1000 - length(List)})).
 -define(LIST_CONTINUE_RESULT(List, ContinueOptions), {{continue, ContinueOptions#{
-    value_mapper => ts_windows:get_window_mapper(max)
+    return_type => basic_info
 }}, List}).
 -define(WINDOW(AggregatedMeasurements, Timestamp), #window{
     aggregated_measurements = AggregatedMeasurements,
-    lowest_timestamp = Timestamp,
-    highest_timestamp = Timestamp
+    first_measurement_timestamp = Timestamp,
+    last_measurement_timestamp = Timestamp
 }).
 
 %%%===================================================================
@@ -72,60 +75,60 @@ add_with_existing_timestamp_test() ->
     Test1 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 3}, {aggregate_measurement, max}),
     ?assertEqual(#window{
         aggregated_measurements = 3,
-        lowest_timestamp = MeasurementTimestamp,
-        highest_timestamp = AddedMeasurementTimestamp
+        first_measurement_timestamp = MeasurementTimestamp,
+        last_measurement_timestamp = AddedMeasurementTimestamp
     }, ts_windows:get(WindowTimestamp, Test1)),
     Test2 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 1}, {aggregate_measurement, max}),
     ?assertEqual(#window{
         aggregated_measurements = 2,
-        lowest_timestamp = MeasurementTimestamp,
-        highest_timestamp = AddedMeasurementTimestamp
+        first_measurement_timestamp = MeasurementTimestamp,
+        last_measurement_timestamp = AddedMeasurementTimestamp
     }, ts_windows:get(WindowTimestamp, Test2)),
 
     Test3 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 1}, {aggregate_measurement, min}),
     ?assertEqual(#window{
         aggregated_measurements = 1,
-        lowest_timestamp = MeasurementTimestamp,
-        highest_timestamp = AddedMeasurementTimestamp
+        first_measurement_timestamp = MeasurementTimestamp,
+        last_measurement_timestamp = AddedMeasurementTimestamp
     }, ts_windows:get(WindowTimestamp, Test3)),
     Test4 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 3}, {aggregate_measurement, min}),
     ?assertEqual(#window{
         aggregated_measurements = 2,
-        lowest_timestamp = MeasurementTimestamp,
-        highest_timestamp = AddedMeasurementTimestamp
+        first_measurement_timestamp = MeasurementTimestamp,
+        last_measurement_timestamp = AddedMeasurementTimestamp
     }, ts_windows:get(WindowTimestamp, Test4)),
 
     Test5 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementLowerTimestamp, 3}, {aggregate_measurement, last}),
     ?assertEqual(#window{
         aggregated_measurements = 2,
-        lowest_timestamp = AddedMeasurementLowerTimestamp,
-        highest_timestamp = MeasurementTimestamp
+        first_measurement_timestamp = AddedMeasurementLowerTimestamp,
+        last_measurement_timestamp = MeasurementTimestamp
     }, ts_windows:get(WindowTimestamp, Test5)),
     Test6 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 3}, {aggregate_measurement, last}),
     ?assertEqual(#window{
         aggregated_measurements = 3,
-        lowest_timestamp = MeasurementTimestamp,
-        highest_timestamp = AddedMeasurementTimestamp
+        first_measurement_timestamp = MeasurementTimestamp,
+        last_measurement_timestamp = AddedMeasurementTimestamp
     }, ts_windows:get(WindowTimestamp, Test6)),
 
     Test7 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementLowerTimestamp, 3}, {aggregate_measurement, first}),
     ?assertEqual(#window{
         aggregated_measurements = 3,
-        lowest_timestamp = AddedMeasurementLowerTimestamp,
-        highest_timestamp = MeasurementTimestamp
+        first_measurement_timestamp = AddedMeasurementLowerTimestamp,
+        last_measurement_timestamp = MeasurementTimestamp
     }, ts_windows:get(WindowTimestamp, Test7)),
     Test8 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 3}, {aggregate_measurement, first}),
     ?assertEqual(#window{
         aggregated_measurements = 2,
-        lowest_timestamp = MeasurementTimestamp,
-        highest_timestamp = AddedMeasurementTimestamp
+        first_measurement_timestamp = MeasurementTimestamp,
+        last_measurement_timestamp = AddedMeasurementTimestamp
     }, ts_windows:get(WindowTimestamp, Test8)),
 
     Test9 = ts_windows:insert(Windows, WindowTimestamp, {AddedMeasurementTimestamp, 3}, {aggregate_measurement, sum}),
     ?assertEqual(#window{
         aggregated_measurements = 5,
-        lowest_timestamp = MeasurementTimestamp,
-        highest_timestamp = AddedMeasurementTimestamp
+        first_measurement_timestamp = MeasurementTimestamp,
+        last_measurement_timestamp = AddedMeasurementTimestamp
     }, ts_windows:get(WindowTimestamp, Test9)),
     
     WindowsWithAvg = ts_windows:insert(
@@ -133,16 +136,16 @@ add_with_existing_timestamp_test() ->
     Test10 = ts_windows:insert(WindowsWithAvg, WindowTimestamp, {AddedMeasurementTimestamp, 3}, {aggregate_measurement, avg}),
     ?assertEqual(#window{
         aggregated_measurements = {2, 5},
-        lowest_timestamp = MeasurementTimestamp,
-        highest_timestamp = AddedMeasurementTimestamp
+        first_measurement_timestamp = MeasurementTimestamp,
+        last_measurement_timestamp = AddedMeasurementTimestamp
     }, ts_windows:get(WindowTimestamp, Test10)).
 
 
 prune_overflowing_windows_test() ->
     Timestamp1 = 1,
     Timestamp2 = 2,
-    Windows1 = ts_windows:insert(ts_windows:init(), Timestamp1, {Timestamp1, 1}, {aggregate_measurement, max}),
-    Windows2 = ts_windows:insert(Windows1, Timestamp2, {Timestamp2, 1}, {aggregate_measurement, max}),
+    Windows1 = ts_windows:insert(ts_windows:init(), Timestamp1, {Timestamp1, 1}, {aggregate_measurement, ?EXEMPLARY_AGGREGATOR}),
+    Windows2 = ts_windows:insert(Windows1, Timestamp2, {Timestamp2, 1}, {aggregate_measurement, ?EXEMPLARY_AGGREGATOR}),
 
     Test1 = ts_windows:prune_overflowing(Windows2, 3),
     ?assertEqual(Windows2, Test1),
@@ -165,7 +168,7 @@ get_test() ->
     MeasurementsCount = 10,
     MeasurementsToAdd = lists:map(fun(I) -> {I, I - 20} end, lists:seq(1, MeasurementsCount)),
     Windows = lists:foldl(fun({Timestamp, Value}, Acc) ->
-        ts_windows:insert(Acc, Timestamp, {Timestamp, Value}, {aggregate_measurement, max})
+        ts_windows:insert(Acc, Timestamp, {Timestamp, Value}, {aggregate_measurement, ?EXEMPLARY_AGGREGATOR})
     end, ts_windows:init(), MeasurementsToAdd),
     ReversedMeasurements = lists:reverse(MeasurementsToAdd),
 
@@ -213,7 +216,7 @@ split_test() ->
     MeasurementsCount = 10,
     MeasurementsToAdd = lists:map(fun(I) -> {I, I - 20} end, lists:seq(1, MeasurementsCount)),
     Windows = lists:foldl(fun({Timestamp, Value}, Acc) ->
-        ts_windows:insert(Acc, Timestamp, {Timestamp, Value}, {aggregate_measurement, max})
+        ts_windows:insert(Acc, Timestamp, {Timestamp, Value}, {aggregate_measurement, ?EXEMPLARY_AGGREGATOR})
     end, ts_windows:init(), MeasurementsToAdd),
     ReversedMeasurements = lists:reverse(MeasurementsToAdd),
 
@@ -229,13 +232,13 @@ reorganization_test() ->
 
     MeasurementsToAdd1 = lists:map(fun(I) -> {I, I - 20} end, lists:seq(1, MeasurementsCount)),
     Windows1 = lists:foldl(fun({Timestamp, Value}, Acc) ->
-        ts_windows:insert(Acc, Timestamp, {Timestamp, Value}, {aggregate_measurement, max})
+        ts_windows:insert(Acc, Timestamp, {Timestamp, Value}, {aggregate_measurement, ?EXEMPLARY_AGGREGATOR})
     end, ts_windows:init(), MeasurementsToAdd1),
     ReversedMeasurements1 = lists:reverse(MeasurementsToAdd1),
 
     MeasurementsToAdd2 = lists:map(fun(I) -> {I, I - 120} end, lists:seq(21, 20 + MeasurementsCount)),
     Windows2 = lists:foldl(fun({Timestamp, Value}, Acc) ->
-        ts_windows:insert(Acc, Timestamp, {Timestamp, Value}, {aggregate_measurement, max})
+        ts_windows:insert(Acc, Timestamp, {Timestamp, Value}, {aggregate_measurement, ?EXEMPLARY_AGGREGATOR})
     end, ts_windows:init(), MeasurementsToAdd2),
     ReversedMeasurements2 = lists:reverse(MeasurementsToAdd2),
 

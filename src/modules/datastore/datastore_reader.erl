@@ -21,9 +21,8 @@
 -type tree_id() :: datastore_links:tree_id().
 -type link() :: datastore_links:link().
 -type link_name() :: datastore_links:link_name().
--type time_series_collection_get_function() :: get_layout | get_slice | get_windows_timestamps.
--type time_series_collection_get_ok_ans() :: time_series_collection:layout() |
-    time_series_collection:slice() | time_series_collection:timestamps_spec().
+-type time_series_collection_get_function() :: get_layout | get_slice.
+-type time_series_collection_get_ok_ans() :: time_series_collection:layout() | time_series_collection:slice().
 
 %%%===================================================================
 %%% Direct access API
@@ -177,6 +176,4 @@ set_direct_access_ctx(_FetchNode, Ctx) ->
 time_series_collection_get_unsafe(FetchNode, Ctx, get_layout, [Id]) ->
     time_series_collection:get_layout(set_direct_access_ctx(FetchNode, Ctx), Id, undefined);
 time_series_collection_get_unsafe(FetchNode, Ctx, get_slice, [Id, RequestedMetrics, Options]) ->
-    time_series_collection:get_slice(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined);
-time_series_collection_get_unsafe(FetchNode, Ctx, get_windows_timestamps, [Id, WindowsSpec]) ->
-    time_series_collection:get_windows_timestamps(set_direct_access_ctx(FetchNode, Ctx), Id, WindowsSpec, undefined).
+    time_series_collection:get_slice(set_direct_access_ctx(FetchNode, Ctx), Id, RequestedMetrics, Options, undefined).

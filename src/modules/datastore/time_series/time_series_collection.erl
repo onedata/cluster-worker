@@ -56,7 +56,6 @@
 -export([get_layout/3]).
 -export([consume_measurements/4]).
 -export([get_slice/5]).
--export([get_windows_timestamps/4]).
 
 
 -type id() :: binary().
@@ -91,11 +90,9 @@
 %% be expanded to the actual set of time series / metrics.
 
 -type config() :: structure(metric_config:record()).
--type consume_spec() :: structure([ts_windows:measurement()]).
--type slice() :: structure(ts_windows:descending_windows_list()).
--type windows_spec() :: structure([ts_windows:window_id()]).
--type timestamps_spec() :: structure(ts_metric:window_timestamps_map()).
--export_type([config/0, consume_spec/0, slice/0, windows_spec/0, timestamps_spec/0]).
+-type consume_spec() :: structure([ts_window:measurement()]).
+-type slice() :: structure(ts_windows:descending_window_infos_list()).
+-export_type([config/0, consume_spec/0, slice/0]).
 
 
 -type dump() :: structure(ts_metric:dump()).
@@ -291,28 +288,6 @@ get_slice(Ctx, Id, SliceLayout, ListWindowsOptions, Batch) ->
         end
     catch Class:Reason:Stacktrace ->
         ?handle_errors(Batch, [Id, SliceLayout, ListWindowsOptions], Class, Reason, Stacktrace)
-    end.
-
-
--spec get_windows_timestamps(ctx(), id(), windows_spec(), batch() | undefined) ->
-    {{ok, timestamps_spec()} | {error, term()}, batch() | undefined}.
-get_windows_timestamps(Ctx, Id, WindowsSpec, Batch) ->
-    try
-        {TimeSeriesCollectionHeads, PersistenceCtx} = ts_persistence:init_for_existing_collection(Ctx, Id, Batch),
-        try
-            {FinalAns, FinalPersistenceCtx} = tsc_structure:mapfold(fun(TimeSeriesName, MetricName, WindowsList, PersistenceCtxAcc) ->
-                {_WindowTimestampsMap, _UpdatedPersistenceCtxAcc} = ts_metric:get_windows_timestamps(
-                    TimeSeriesName, MetricName, WindowsList, PersistenceCtxAcc
-                )
-            end, PersistenceCtx, WindowsSpec),
-            {{ok, FinalAns}, ts_persistence:finalize(FinalPersistenceCtx)}
-        catch
-            throw:invalid_layout ->
-                RequestLayout = tsc_structure:to_layout(WindowsSpec),
-                {?make_missing_layout_error(TimeSeriesCollectionHeads, RequestLayout), Batch}
-        end
-    catch Class:Reason:Stacktrace ->
-        ?handle_errors(Batch, [Id, WindowsSpec], Class, Reason, Stacktrace)
     end.
 
 

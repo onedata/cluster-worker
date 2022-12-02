@@ -187,10 +187,6 @@ mock_model(Model) ->
         {time_series_collection_get_slice, fun(Id, SliceLayout, ListWindowsOptions) ->
             Ctx = get_ctx(Model),
             datastore_time_series_collection:get_slice(Ctx, Id, SliceLayout, ListWindowsOptions)
-        end},
-        {time_series_collection_get_windows_timestamps, fun(Id, WindowsSpec) ->
-            Ctx = get_ctx(Model),
-            datastore_time_series_collection:get_windows_timestamps(Ctx, Id, WindowsSpec)
         end}
     ]).
 

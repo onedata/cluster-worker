@@ -23,6 +23,13 @@
 
 -define(MAX_DOC_SIZE, 200).
 
+% This SUITE verifies functionality of whole collection, not particular aggregators. Thus, tests are not repeated for
+% all aggregators. Instead, tests use only subset of aggregators (more than one aggregator is required for some tests).
+-define(AGGREGATOR1, avg).
+-define(AGGREGATOR2, max).
+-define(AGGREGATOR3, min).
+-define(AGGREGATOR4, last).
+
 %%%===================================================================
 %%% Setup and teardown
 %%%===================================================================
@@ -78,11 +85,11 @@ empty_collection_creation() ->
 
     ?assertEqual(ok, call_incorporate_config(#{
         <<"TS1">> => #{
-            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 10, aggregator = max}
+            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 10, aggregator = ?AGGREGATOR2}
         },
         <<"TS2">> => #{
-            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 50, aggregator = last},
-            <<"M2">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 2000, aggregator = min}
+            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 50, aggregator = ?AGGREGATOR4},
+            <<"M2">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 2000, aggregator = ?AGGREGATOR3}
         }
     })),
     ?assertEqual({ok, #{
@@ -95,22 +102,22 @@ metric_config_sanitization() ->
     VeryLongName = ?TOO_LONG_NAME,
     TestCases = [{
         ?ERROR_BAD_VALUE_NAME(<<"timeSeriesName">>),
-        #{<<1, 2, 3>> => #{<<"M1">> => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = avg}}}
+        #{<<1, 2, 3>> => #{<<"M1">> => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = ?AGGREGATOR1}}}
     }, {
         ?ERROR_BAD_VALUE_NAME(<<"metricName">>),
-        #{<<"TS1">> => #{VeryLongName => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = avg}}}
+        #{<<"TS1">> => #{VeryLongName => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = ?AGGREGATOR1}}}
     }, {
         ?ERROR_BAD_VALUE_NOT_IN_RANGE(<<"retention">>, 1, 1000000),
-        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0, resolution = ?MINUTE_RESOLUTION, aggregator = avg}}}
+        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0, resolution = ?MINUTE_RESOLUTION, aggregator = ?AGGREGATOR1}}}
     }, {
         ?ERROR_BAD_VALUE_NOT_IN_RANGE(<<"retention">>, 1, 1000000),
-        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 999999999, resolution = ?MINUTE_RESOLUTION, aggregator = max}}}
+        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 999999999, resolution = ?MINUTE_RESOLUTION, aggregator = ?AGGREGATOR2}}}
     }, {
         ?ERROR_BAD_DATA(<<"retention">>, <<"Retention must be set to 1 if resolution is set to 0 (infinite window resolution)">>),
-        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = ?INFINITY_RESOLUTION, aggregator = min}}}
+        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = ?INFINITY_RESOLUTION, aggregator = ?AGGREGATOR3}}}
     }, {
         ?ERROR_BAD_VALUE_NOT_ALLOWED(<<"resolution">>, ?ALLOWED_METRIC_RESOLUTIONS),
-        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = -1, aggregator = max}}}
+        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = -1, aggregator = ?AGGREGATOR2}}}
     }, {
         ?ERROR_BAD_VALUE_NOT_ALLOWED(<<"aggregator">>, ?ALLOWED_METRIC_AGGREGATORS),
         #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = 60, aggregator = bad}}}
@@ -121,7 +128,7 @@ metric_config_sanitization() ->
 
         init_test_with_newly_created_collection(#{
             <<"TSX">> => #{
-                <<"MX">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = avg}
+                <<"MX">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = ?AGGREGATOR1}
             }
         }),
         ?assertEqual(ExpError, call_incorporate_config(Config))
@@ -131,24 +138,24 @@ metric_config_sanitization() ->
 invalid_incorporate_config_request_with_conflicting_metric_config() ->
     init_test_with_newly_created_collection(#{
         <<"TS1">> => #{
-            <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = avg}
+            <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = ?AGGREGATOR1}
         },
         <<"TS2">> => #{
-            <<"M2">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = last}
+            <<"M2">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = ?AGGREGATOR4}
         }
     }),
     ?assertEqual(
         call_incorporate_config(#{
             <<"TS1">> => #{
-                <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = avg}
+                <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = ?AGGREGATOR1}
             },
             <<"TS2">> => #{
-                <<"M2">> => #metric_config{resolution = ?YEAR_RESOLUTION, retention = 10, aggregator = max}
+                <<"M2">> => #metric_config{resolution = ?YEAR_RESOLUTION, retention = 10, aggregator = ?AGGREGATOR2}
             }
         }),
         ?ERROR_BAD_VALUE_TSC_CONFLICTING_METRIC_CONFIG(<<"TS2">>, <<"M2">>,
-            #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = last},
-            #metric_config{resolution = ?YEAR_RESOLUTION, retention = 10, aggregator = max}
+            #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = ?AGGREGATOR4},
+            #metric_config{resolution = ?YEAR_RESOLUTION, retention = 10, aggregator = ?AGGREGATOR2}
         )
     ).
 
@@ -156,12 +163,12 @@ invalid_incorporate_config_request_with_conflicting_metric_config() ->
 invalid_consume_measurements_request() ->
     init_test_with_newly_created_collection(#{
         <<"TS1">> => #{
-            <<"M1">> => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 12, aggregator = avg},
-            <<"M2">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 24, aggregator = min},
-            <<"M3">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 36, aggregator = max}
+            <<"M1">> => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 12, aggregator = ?AGGREGATOR1},
+            <<"M2">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 24, aggregator = ?AGGREGATOR3},
+            <<"M3">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 36, aggregator = ?AGGREGATOR2}
         },
         <<"TSX">> => #{
-            <<"M1">> => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 12, aggregator = avg}
+            <<"M1">> => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 12, aggregator = ?AGGREGATOR1}
         }
     }),
     ?assertEqual(
@@ -200,11 +207,11 @@ invalid_consume_measurements_request() ->
 invalid_get_slice_request() ->
     init_test_with_newly_created_collection(#{
         <<"TS1">> => #{
-            <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = avg}
+            <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = ?AGGREGATOR1}
         },
         <<"TS2">> => #{
-            <<"M1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = last},
-            <<"M2">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 10, aggregator = max}
+            <<"M1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = ?AGGREGATOR4},
+            <<"M2">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 10, aggregator = ?AGGREGATOR2}
         }
     }),
     ?assertEqual(
@@ -234,21 +241,21 @@ invalid_get_slice_request() ->
 get_layout_request() ->
     init_test_with_newly_created_collection(#{
         <<"TS1">> => #{
-            <<"M1">> => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = avg}
+            <<"M1">> => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = ?AGGREGATOR1}
         },
         <<"TS2">> => #{
-            <<"M2.1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = min},
-            <<"M2.2">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 10, aggregator = max}
+            <<"M2.1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = ?AGGREGATOR3},
+            <<"M2.2">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 10, aggregator = ?AGGREGATOR2}
         }
     }),
     ?assertEqual(ok, call_incorporate_config(#{
         <<"TS2">> => #{
-            <<"M2.1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = min},
-            <<"M2.2">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 10, aggregator = max},
-            <<"M2.3">> => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = last}
+            <<"M2.1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = ?AGGREGATOR3},
+            <<"M2.2">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 10, aggregator = ?AGGREGATOR2},
+            <<"M2.3">> => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = ?AGGREGATOR4}
         },
         <<"TS3">> => #{
-            <<"M3.1">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 24, aggregator = max}
+            <<"M3.1">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 24, aggregator = ?AGGREGATOR2}
         }
     })),
     ?assertEqual(call_get_layout(), {ok, #{
@@ -263,7 +270,7 @@ single_metric_single_node() ->
     MetricName = <<"M1">>,
     init_test_with_newly_created_collection(#{
         TimeSeriesName => #{
-            MetricName => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 10, aggregator = avg}
+            MetricName => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 10, aggregator = ?AGGREGATOR1}
         }
     }),
 
@@ -311,7 +318,7 @@ single_metric_infinite_resolution() ->
     MetricName = <<"M1">>,
     init_test_with_newly_created_collection(#{
         TimeSeriesName => #{
-            MetricName => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = avg}
+            MetricName => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = ?AGGREGATOR1}
         }
     }),
 
@@ -332,7 +339,7 @@ single_metric_multiple_nodes() ->
     MetricName = <<"M1">>,
     init_test_with_newly_created_collection(#{
         TimeSeriesName => #{
-            MetricName => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 400, aggregator = max}
+            MetricName => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 400, aggregator = ?AGGREGATOR2}
         }
     }),
 
@@ -411,7 +418,7 @@ single_time_series_single_node() ->
         {<<"M", (integer_to_binary(N))/binary>>, #metric_config{
             resolution = ?RAND_ELEMENT([?SECOND_RESOLUTION, ?FIVE_SECONDS_RESOLUTION, ?MINUTE_RESOLUTION]),
             retention = 60 div N + 10,
-            aggregator = avg}
+            aggregator = ?AGGREGATOR1}
         }
     end, 5),
     init_test_with_newly_created_collection(#{
@@ -442,7 +449,7 @@ single_time_series_multiple_nodes() ->
         {<<"M", (integer_to_binary(N))/binary>>, #metric_config{
             resolution = ?SECOND_RESOLUTION,
             retention = 50 * N,
-            aggregator = min}
+            aggregator = ?AGGREGATOR3}
         }
     end, 4),
     init_test_with_newly_created_collection(#{
@@ -486,7 +493,7 @@ multiple_time_series_single_node() ->
         MetricConfig = #metric_config{
             resolution = ?RAND_ELEMENT([?SECOND_RESOLUTION, ?FIVE_SECONDS_RESOLUTION, ?MINUTE_RESOLUTION]),
             retention = 60 div N + 10,
-            aggregator = avg
+            aggregator = ?AGGREGATOR1
         },
         Acc#{TimeSeriesName => TimeSeriesConfig#{<<"M", (integer_to_binary(N div 2))/binary>> => MetricConfig}}
     end, #{}, lists:seq(1, 5)),
@@ -518,7 +525,7 @@ multiple_time_series_multiple_nodes() ->
     Config = lists:foldl(fun(N, Acc) ->
         TimeSeriesName = <<"TS", (integer_to_binary(N rem 2))/binary>>,
         TimeSeriesConfig = maps:get(TimeSeriesName, Acc, #{}),
-        MetricConfig = #metric_config{resolution = ?SECOND_RESOLUTION, retention = 40 * N, aggregator = last},
+        MetricConfig = #metric_config{resolution = ?SECOND_RESOLUTION, retention = 40 * N, aggregator = ?AGGREGATOR4},
         Acc#{TimeSeriesName => TimeSeriesConfig#{<<"M", (integer_to_binary(N div 2))/binary>> => MetricConfig}}
     end, #{}, lists:seq(1, 5)),
     init_test_with_newly_created_collection(Config),
@@ -562,7 +569,7 @@ update_subset() ->
     Config = lists:foldl(fun(N, Acc) ->
         TimeSeriesName = <<"TS", (integer_to_binary(N rem 2))/binary>>,
         TimeSeriesConfig = maps:get(TimeSeriesName, Acc, #{}),
-        MetricConfig = #metric_config{resolution = ?SECOND_RESOLUTION, retention = 100, aggregator = max},
+        MetricConfig = #metric_config{resolution = ?SECOND_RESOLUTION, retention = 100, aggregator = ?AGGREGATOR2},
         Acc#{TimeSeriesName => TimeSeriesConfig#{<<"M", (integer_to_binary(N div 2))/binary>> => MetricConfig}}
     end, #{}, lists:seq(1, 5)),
     init_test_with_newly_created_collection(Config),
@@ -620,7 +627,7 @@ update_subset() ->
 lifecycle_with_config_incorporation() ->
     init_test_with_newly_created_collection(#{
         <<"TS1">> => #{
-            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 200, aggregator = avg}
+            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 200, aggregator = ?AGGREGATOR1}
         }
     }),
 
@@ -629,7 +636,7 @@ lifecycle_with_config_incorporation() ->
 
     ?assertEqual(ok, call_incorporate_config(#{
         <<"TS1">> => #{
-            <<"M2">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 100, aggregator = last}
+            <<"M2">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 100, aggregator = ?AGGREGATOR4}
         }
     })),
     ?assert(compare_complete_slice(#{
@@ -641,7 +648,7 @@ lifecycle_with_config_incorporation() ->
 
     ?assertEqual(ok, call_incorporate_config(#{
         <<"TS2">> => #{
-            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 400, aggregator = last}
+            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 400, aggregator = ?AGGREGATOR4}
         }
     })),
     ?assert(compare_complete_slice(#{
@@ -658,11 +665,11 @@ lifecycle_with_config_incorporation() ->
 
     ?assertEqual(ok, call_incorporate_config(#{
         <<"TS1">> => #{
-            <<"M3">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 10, aggregator = max}
+            <<"M3">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 10, aggregator = ?AGGREGATOR2}
         },
         <<"TS2">> => #{
-            <<"M2">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 50, aggregator = last},
-            <<"M3">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 2000, aggregator = min}
+            <<"M2">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 50, aggregator = ?AGGREGATOR4},
+            <<"M3">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 2000, aggregator = ?AGGREGATOR3}
         }
     })),
     ?assert(compare_complete_slice(#{

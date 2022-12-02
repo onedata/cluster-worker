@@ -24,7 +24,7 @@
     windows = ts_windows:init() :: ts_windows:windows_collection(),
     older_node_key :: ts_metric_data_node:key() | undefined,
     % Timestamp of newest measurement in older data node
-    older_node_timestamp :: ts_windows:timestamp_seconds() | undefined
+    older_node_timestamp :: ts_window:timestamp_seconds() | undefined
 }).
 
 
@@ -58,11 +58,24 @@
 
 % Collections of windows are stored inside #data_node{}
 -record(window, {
-    aggregated_measurements :: ts_windows:aggregated_measurements(),
-    % Lowest and highest timestamp among measurements that have been
+    aggregated_measurements :: ts_window:aggregated_measurements(),
+    % First and last timestamp among measurements that have been
     % used to calculate value of aggregated_measurements field
-    lowest_timestamp :: ts_windows:timestamp_seconds() | undefined,
-    highest_timestamp :: ts_windows:timestamp_seconds() | undefined
+    first_measurement_timestamp :: ts_window:timestamp_seconds() | undefined,
+    last_measurement_timestamp :: ts_window:timestamp_seconds() | undefined
+}).
+
+
+% Information about window used to generate slices
+-record(window_info, {
+    timestamp :: ts_window:window_id(),  % id of window (timestamp of window_id representing beginning of the window)
+    value :: ts_window:value(), % value generated from #window.aggregated_measurements
+                                 % using custom value mapper for metric's aggregator
+
+    % extended_info fields - first and last timestamp among measurements that have been used to calculate value
+    % of #window.aggregated_measurements field. If extended_info is not requested, fields are undefined.
+    first_measurement_timestamp :: ts_window:timestamp_seconds() | undefined,
+    last_measurement_timestamp :: ts_window:timestamp_seconds() | undefined
 }).
 
 -endif.
