@@ -217,10 +217,6 @@ delete(Ctx, Key) ->
 delete(#{secure_fold_enabled := true} = Ctx, Key, Pred) ->
     UpdatedCtx = maps:remove(secure_fold_enabled, Ctx#{fold_enabled => true}),
     fold_critical_section(Ctx, fun() -> delete(UpdatedCtx, Key, Pred) end);
-delete(#{disc_driver := undefined} = Ctx, Key, Pred) ->
-    Result = datastore_apply(Ctx, Key, fun datastore:delete/3, [Pred]),
-    delete_all_links(Ctx, Key, Result),
-    delete_fold_link(Ctx, Key, Result);
 delete(Ctx, Key, Pred) ->
     Result = datastore_apply(ensure_expiry_set_on_delete(Ctx), Key, fun datastore:delete/3, [Pred]),
     delete_all_links(Ctx, Key, Result),

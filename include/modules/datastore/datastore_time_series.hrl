@@ -68,9 +68,9 @@
 
 % Information about window used to generate slices
 -record(window_info, {
-    timestamp :: ts_window:window_id(),  % id of window (timestamp of window_id representing beginning of the window)
+    timestamp :: ts_window:window_id(),  % id of window (timestamp representing beginning of the window)
     value :: ts_window:value(), % value generated from #window.aggregated_measurements
-                                 % using custom value mapper for metric's aggregator
+                                % using ts_window:calculate_window_value function
 
     % extended_info fields - first and last timestamp among measurements that have been used to calculate value
     % of #window.aggregated_measurements field. If extended_info is not requested, fields are undefined.

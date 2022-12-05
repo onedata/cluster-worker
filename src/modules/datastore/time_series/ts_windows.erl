@@ -34,7 +34,6 @@
 -type descending_window_infos_list() :: [ts_window:window_info()].
 -type insert_strategy() :: {aggregate_measurement, metric_config:aggregator()} | override.
 
-
 % List options provided with datastore requests and internal list options that extend
 % listing possibilities for datastore internal usage
 -type list_options() :: #{

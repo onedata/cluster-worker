@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Helper module operating on time_series_collection metric singe window.
+%%% Helper module operating on time_series_collection metric single window.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ts_window).

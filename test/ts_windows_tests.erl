@@ -19,7 +19,7 @@
 -include_lib("ctool/include/hashing/consistent_hashing.hrl").
 
 
--define(EXEMPLARY_AGGREGATOR, max). % When test verifies mechanisms that works the same for aggregators,
+-define(EXEMPLARY_AGGREGATOR, max). % When test verifies mechanism that works the same for all aggregators,
                                     % ?EXEMPLARY_AGGREGATOR is used instead of repeating test for all aggregators.
 -define(LIST_ALL(Windows), ?LIST(Windows, undefined, #{})).
 -define(LIST(Windows, Timestamp, Options),

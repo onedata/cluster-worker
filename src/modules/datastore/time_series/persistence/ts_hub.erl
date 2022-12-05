@@ -93,17 +93,16 @@ upgrade_record(2, {?MODULE, TimeSeriesCollectionHeads}
 ) ->
     {3, {?MODULE, tsc_structure:map(fun(_TimeSeriesName, _MetricName, OldMetric) ->
         {metric,
-            {metric_config, Resolution, Retention, Aggregator},
+            MetricConfig,
             SplittingStrategy,
-            DataNode
+            _DataNode
         } = OldMetric,
 
-        Data = ts_metric_data_node:get(DataNode),
-        % Metrics format has changed - prune existing data
+        % Metrics' format has changed - prune existing data
         {metric,
-            {metric_config, Resolution, Retention, Aggregator},
+            MetricConfig,
             SplittingStrategy,
-            ts_metric_data_node:set(Data#data_node{
+            ts_metric_data_node:set(#data_node{
                 windows = ts_windows:init(), older_node_key = undefined, older_node_timestamp = undefined
             })
         }
@@ -153,6 +152,6 @@ get_record_struct(3) ->
                 {max_windows_in_head_doc, integer},
                 {max_windows_in_tail_doc, integer}
             ]}},
-            DataRecordStruct % New version is needed as metrics format has changes and upgrade fun has to prune old data
+            DataRecordStruct % New version is needed as metrics' format has changed and upgrade fun has to prune old data
         ]}}}}
     ]}.
