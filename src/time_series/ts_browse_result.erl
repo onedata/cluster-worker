@@ -91,14 +91,8 @@ to_json_with_compressed_windows(#time_series_layout_get_result{} = TSBrowseResul
 to_json_with_compressed_windows(#time_series_slice_get_result{slice = Slice}) ->
     #{
         <<"slice">> => tsc_structure:map(fun(_TimeSeriesName, _MetricName, Windows) ->
-            lists:map(fun({Timestamp, Value}) ->
-                #{
-                    <<"timestamp">> => Timestamp,
-                    <<"value">> => case Value of
-                        {_Count, Aggregated} -> Aggregated;
-                        Aggregated -> Aggregated
-                    end
-                }
+            lists:map(fun(Window) ->
+                ts_window:info_to_json(Window)
             end, Windows)
         end, Slice)
     }.
