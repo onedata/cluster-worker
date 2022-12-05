@@ -25,9 +25,17 @@
 -define(LIST(Windows, Timestamp, Options),
     ts_windows:list(Windows, Timestamp, Options#{return_type => basic_info, aggregator => ?EXEMPLARY_AGGREGATOR})).
 -define(LIST_ALL_RESULT(List), ?LIST_CONTINUE_RESULT(List, #{window_limit => 1000 - length(List)})).
--define(LIST_CONTINUE_RESULT(List, ContinueOptions), {{continue, ContinueOptions#{
-    return_type => basic_info
-}}, List}).
+-define(WINDOWS_INFO_LIST(List),
+    lists:map(fun({T, V}) -> #window_info{
+        timestamp = T, value = V, first_measurement_timestamp = undefined, last_measurement_timestamp = undefined
+    } end, List)
+).
+-define(LIST_CONTINUE_RESULT(List, ContinueOptions), begin
+    {
+        {continue, ContinueOptions#{return_type => basic_info, aggregator => ?EXEMPLARY_AGGREGATOR}},
+        ?WINDOWS_INFO_LIST(List)
+    }
+end).
 -define(WINDOW(AggregatedMeasurements, Timestamp), #window{
     aggregated_measurements = AggregatedMeasurements,
     first_measurement_timestamp = Timestamp,
@@ -181,13 +189,13 @@ get_test() ->
     ?assertEqual({ok, []}, ?LIST(Windows, MeasurementsCount - 2, #{window_limit => 0})),
     ?assertEqual(?LIST_CONTINUE_RESULT(lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2), #{window_limit => 1}),
         ?LIST(Windows, MeasurementsCount - 2, #{window_limit => MeasurementsCount - 1})),
-    ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 5)},
+    ?assertEqual({ok, ?WINDOWS_INFO_LIST(lists:sublist(ReversedMeasurements, 3, 5))},
         ?LIST(Windows, MeasurementsCount - 2, #{window_limit => 5})),
-    ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 8)},
+    ?assertEqual({ok, ?WINDOWS_INFO_LIST(lists:sublist(ReversedMeasurements, 3, 8))},
         ?LIST(Windows, MeasurementsCount - 2, #{window_limit => 8})),
 
     ?assertEqual({ok, []}, ?LIST(Windows, MeasurementsCount - 2, #{stop_timestamp => MeasurementsCount - 1})),
-    ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 1)},
+    ?assertEqual({ok, ?WINDOWS_INFO_LIST(lists:sublist(ReversedMeasurements, 3, 1))},
         ?LIST(Windows, MeasurementsCount - 2, #{stop_timestamp => MeasurementsCount - 2})),
     ?assertEqual(
         ?LIST_CONTINUE_RESULT(
@@ -195,14 +203,14 @@ get_test() ->
             #{stop_timestamp => 0, window_limit => 992}
         ),
         ?LIST(Windows, MeasurementsCount - 2, #{stop_timestamp => 0})),
-    ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2)},
+    ?assertEqual({ok, ?WINDOWS_INFO_LIST(lists:sublist(ReversedMeasurements, 3, MeasurementsCount - 2))},
         ?LIST(Windows, MeasurementsCount - 2, #{stop_timestamp => 1})),
-    ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 4)},
+    ?assertEqual({ok, ?WINDOWS_INFO_LIST(lists:sublist(ReversedMeasurements, 3, 4))},
         ?LIST(Windows, MeasurementsCount - 2, #{stop_timestamp => 5})),
 
-    ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 4)},
+    ?assertEqual({ok, ?WINDOWS_INFO_LIST(lists:sublist(ReversedMeasurements, 3, 4))},
         ?LIST(Windows, MeasurementsCount - 2, #{window_limit => 5, stop_timestamp => 5})),
-    ?assertEqual({ok, lists:sublist(ReversedMeasurements, 3, 5)},
+    ?assertEqual({ok, ?WINDOWS_INFO_LIST(lists:sublist(ReversedMeasurements, 3, 5))},
         ?LIST(Windows, MeasurementsCount - 2, #{window_limit => 5, stop_timestamp => 1})),
     ?assertEqual(
         ?LIST_CONTINUE_RESULT(

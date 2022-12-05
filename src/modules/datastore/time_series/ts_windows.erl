@@ -184,7 +184,7 @@ reorganize(WindowsInOlderDataNode, WindowsInCurrentDataNode, MaxWindowsInOlderDa
 
 
 %%%===================================================================
-%%% Encoding/decoding  API
+%%% Encoding/decoding API
 %%%===================================================================
 
 -spec encode(windows_collection()) -> binary().
@@ -203,6 +203,17 @@ encode(Windows) ->
 decode(Term) ->
     InputList = json_utils:decode(Term),
     from_list(lists:map(fun
+        % Old window format
+        ([Timestamp, ValuesCount, ValuesSum]) ->
+            {Timestamp, #window{
+                aggregated_measurements = {ValuesCount, ValuesSum}
+            }};
+        ([Timestamp, Value]) ->
+            {Timestamp, #window{
+                aggregated_measurements = Value
+            }};
+
+        % New window format
         ([Timestamp, FirstMeasurementTimestamp, LastMeasurementTimestamp | AggregatedMeasurements]) ->
             {Timestamp, #window{
                 aggregated_measurements = aggregated_measurements_from_json(AggregatedMeasurements),

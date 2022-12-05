@@ -69,7 +69,7 @@ get_ctx() ->
 
 -spec get_record_version() -> datastore_model:record_version().
 get_record_version() ->
-    2.
+    3.
 
 
 -spec upgrade_record(datastore_model:record_version(), datastore_model:record()) ->
@@ -86,6 +86,26 @@ upgrade_record(1, {?MODULE, TimeSeriesCollectionHeads}
             {metric_config, Resolution, Retention, Aggregator},
             SplittingStrategy,
             DataNode
+        }
+    end, TimeSeriesCollectionHeads)}};
+
+upgrade_record(2, {?MODULE, TimeSeriesCollectionHeads}
+) ->
+    {3, {?MODULE, tsc_structure:map(fun(_TimeSeriesName, _MetricName, OldMetric) ->
+        {metric,
+            {metric_config, Resolution, Retention, Aggregator},
+            SplittingStrategy,
+            DataNode
+        } = OldMetric,
+
+        Data = ts_metric_data_node:get(DataNode),
+        % Metrics format has changed - prune existing data
+        {metric,
+            {metric_config, Resolution, Retention, Aggregator},
+            SplittingStrategy,
+            ts_metric_data_node:set(Data#data_node{
+                windows = ts_windows:init(), older_node_key = undefined, older_node_timestamp = undefined
+            })
         }
     end, TimeSeriesCollectionHeads)}}.
 
@@ -121,5 +141,18 @@ get_record_struct(2) ->
                 {max_windows_in_tail_doc, integer}
             ]}},
             DataRecordStruct
+        ]}}}}
+    ]};
+get_record_struct(3) ->
+    {record, [DataRecordStruct]} = ts_metric_data_node:get_record_struct(1),
+    {record, [
+        {time_series_collection_heads, #{string => #{string => {record, [
+            {config, {custom, string, {persistent_record, encode, decode, metric_config}}},
+            {splitting_strategy, {record, [
+                {max_docs_count, integer},
+                {max_windows_in_head_doc, integer},
+                {max_windows_in_tail_doc, integer}
+            ]}},
+            DataRecordStruct % New version is needed as metrics format has changes and upgrade fun has to prune old data
         ]}}}}
     ]}.

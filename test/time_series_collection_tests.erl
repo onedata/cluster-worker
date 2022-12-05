@@ -899,7 +899,10 @@ compare_slice(ExpectedSlice, SliceLayout, ListWindowsOptions) ->
     Result = call_get_slice(SliceLayout, ListWindowsOptions),
     ?assertMatch({ok, _}, Result),
     {ok, Slice} = Result,
-    AreSlicesEqual = Slice =:= ExpectedSlice,
+    MappedExpectedSlice = tsc_structure:map(fun(_, _, ValuesList) -> lists:map(fun({T, V}) -> #window_info{
+        timestamp = T, value = V, first_measurement_timestamp = undefined, last_measurement_timestamp = undefined
+    } end, ValuesList) end, ExpectedSlice),
+    AreSlicesEqual = Slice =:= MappedExpectedSlice,
     AreSlicesEqual orelse eunit_utils:debug_log("ExpectedSlice: ~p~nActualSlice  : ~p", [ExpectedSlice, Slice]),
     AreSlicesEqual.
 

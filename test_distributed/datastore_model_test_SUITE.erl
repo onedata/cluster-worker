@@ -15,6 +15,7 @@
 -include("datastore_test_utils.hrl").
 -include("global_definitions.hrl").
 -include("datastore_performance_tests_base.hrl").
+-include("modules/datastore/datastore_time_series.hrl").
 -include_lib("ctool/include/time_series/common.hrl").
 -include_lib("ctool/include/aai/aai.hrl").
 -include_lib("ctool/include/errors.hrl").
@@ -97,54 +98,54 @@
 
 all() ->
     ?ALL([
-        get_links_after_expiration_time_should_succeed,
-        create_should_succeed,
-        delete_all_should_succeed,
-        create_should_return_already_exists_error,
-        save_should_succeed,
-        update_should_succeed,
-        update_should_return_missing_error,
-        update_should_save_default_when_missing,
-        get_should_succeed,
-        get_should_return_missing_error,
-        exists_should_return_false,
-        exists_should_return_true,
-        delete_should_ignore_missing_value,
-        delete_should_mark_value_deleted,
-        fold_should_return_all_values,
-        secure_fold_should_return_empty_list,
-        secure_fold_should_return_not_empty_list,
-        fold_should_return_all_values2,
-        fold_keys_should_return_all_keys,
-        add_links_should_succeed,
-        check_and_add_links_test,
-        get_links_should_succeed,
-        disk_fetch_links_should_succeed,
-        get_links_should_return_missing_error,
-        delete_links_should_succeed,
-        delete_links_should_ignore_missing_links,
-        mark_links_deleted_should_succeed,
-        fold_links_should_succeed,
-        fold_links_token_should_succeed,
-        fold_links_token_should_return_error_on_db_error,
-        get_links_trees_should_return_all_trees,
-        fold_links_token_should_succeed_after_token_timeout,
-        links_performance,
-        expired_doc_should_not_exist,
-        deleted_doc_should_expire,
-        link_doc_should_expire,
-        link_del_should_delay_inactivate,
-        fold_links_id_should_succeed,
-        fold_links_inclusive_id_should_succeed,
-        fold_links_token_and_id_should_succeed,
-        memory_only_stress_performance_test,
-        stress_performance_test,
-        infinite_log_create_test,
-        infinite_log_destroy_test,
-        infinite_log_operations_test,
-        infinite_log_operations_direct_access_test,
-        infinite_log_set_ttl_test,
-        infinite_log_age_pruning_test,
+%%        get_links_after_expiration_time_should_succeed,
+%%        create_should_succeed,
+%%        delete_all_should_succeed,
+%%        create_should_return_already_exists_error,
+%%        save_should_succeed,
+%%        update_should_succeed,
+%%        update_should_return_missing_error,
+%%        update_should_save_default_when_missing,
+%%        get_should_succeed,
+%%        get_should_return_missing_error,
+%%        exists_should_return_false,
+%%        exists_should_return_true,
+%%        delete_should_ignore_missing_value,
+%%        delete_should_mark_value_deleted,
+%%        fold_should_return_all_values,
+%%        secure_fold_should_return_empty_list,
+%%        secure_fold_should_return_not_empty_list,
+%%        fold_should_return_all_values2,
+%%        fold_keys_should_return_all_keys,
+%%        add_links_should_succeed,
+%%        check_and_add_links_test,
+%%        get_links_should_succeed,
+%%        disk_fetch_links_should_succeed,
+%%        get_links_should_return_missing_error,
+%%        delete_links_should_succeed,
+%%        delete_links_should_ignore_missing_links,
+%%        mark_links_deleted_should_succeed,
+%%        fold_links_should_succeed,
+%%        fold_links_token_should_succeed,
+%%        fold_links_token_should_return_error_on_db_error,
+%%        get_links_trees_should_return_all_trees,
+%%        fold_links_token_should_succeed_after_token_timeout,
+%%        links_performance,
+%%        expired_doc_should_not_exist,
+%%        deleted_doc_should_expire,
+%%        link_doc_should_expire,
+%%        link_del_should_delay_inactivate,
+%%        fold_links_id_should_succeed,
+%%        fold_links_inclusive_id_should_succeed,
+%%        fold_links_token_and_id_should_succeed,
+%%        memory_only_stress_performance_test,
+%%        stress_performance_test,
+%%        infinite_log_create_test,
+%%        infinite_log_destroy_test,
+%%        infinite_log_operations_test,
+%%        infinite_log_operations_direct_access_test,
+%%        infinite_log_set_ttl_test,
+%%        infinite_log_age_pruning_test,
         time_series_test,
         multinode_time_series_test,
         time_series_document_fetch_test,
@@ -1110,21 +1111,15 @@ time_series_test(Config) ->
         % are calculated using formula for the sum of an arithmetic sequence
         ExpCompleteSlice = tsc_structure:map(fun(_, _, #metric_config{resolution = Resolution, retention = Retention}) ->
             lists:sublist(lists:reverse(lists:map(fun(N) ->
-                {N, N + N + Resolution - 1.0}
+                #window_info{
+                    timestamp = N,
+                    value = N + N + Resolution - 1.0,
+                    first_measurement_timestamp = N,
+                    last_measurement_timestamp = N + Resolution - 1
+                }
             end, lists:seq(0, MeasurementsCount - 1, Resolution))), Retention)
         end, CollectionConfig),
-        ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
-
-        ExpGetTimestampsAns = tsc_structure:map(fun(_, _, #metric_config{resolution = Resolution}) ->
-            maps:from_list(lists:filtermap(fun
-                (Generator) when Generator rem Resolution =:= 0 ->
-                    {true, {1080 + Generator, {1080 + Generator, 1080 + Generator + Resolution - 1}}};
-                (_) ->
-                    false
-            end, PossibleResolutions))
-        end, CollectionConfig),
-        ?assertEqual(ExpGetTimestampsAns, get_windows_timestamps(Worker, Model, Id,
-            lists:map(fun(PossibleResolution) -> 1080 + PossibleResolution end, PossibleResolutions))),
+        ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id, true)),
 
         % Test errors when wrong time series or metric is given in the consume spec
         ?assertEqual(
@@ -1142,7 +1137,7 @@ time_series_test(Config) ->
         ),
 
         % Test if adding measurement to not existing metric or time series has not changed collection
-        ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id))
+        ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id, true))
     end, ?TEST_MODELS).
 
 
@@ -1209,10 +1204,13 @@ time_series_document_fetch_test(Config) ->
         ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
         ExpCompleteSlice = tsc_structure:map(fun
             (_, _, #metric_config{retention = Retention, aggregator = last}) ->
-                lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts));
+                MappedMeasurements = lists:map(fun({Timestamp, Value}) ->
+                    #window_info{timestamp = Timestamp, value = Value}
+                end, Measurements),
+                lists:sublist(lists:reverse(MappedMeasurements), maps:get(Retention, ExpectedWindowsCounts));
             (_, _, #metric_config{retention = Retention, aggregator = avg}) ->
                 MappedMeasurements = lists:map(fun({Timestamp, Value}) ->
-                    {Timestamp, float(Value)}
+                    #window_info{timestamp = Timestamp, value = float(Value)}
                 end, Measurements),
                 lists:sublist(lists:reverse(MappedMeasurements), maps:get(Retention, ExpectedWindowsCounts))
         end, CollectionConfig),
@@ -1280,11 +1278,13 @@ time_series_config_incorporation_test(Config) ->
 
         ExpCompleteSlice = #{
             <<"TS1">> => #{
-                <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(0, MeasurementsCount - 1))),
+                <<"M1">> => lists:reverse(lists:map(fun(I) ->
+                        #window_info{timestamp = I, value = 2 * I}
+                    end, lists:seq(0, MeasurementsCount - 1))),
                 <<"M2">> => []
             },
             <<"TS2">> => #{
-                <<"M3">> => [{1, 10}],
+                <<"M3">> => [#window_info{timestamp = 1, value = 10}],
                 <<"M4">> => []
             }
         },
@@ -2317,9 +2317,13 @@ verify_layout(Worker, Model, CollectionId) ->
 
 %% @private
 get_complete_slice(Worker, Model, CollectionId) ->
+    get_complete_slice(Worker, Model, CollectionId, false).
+
+%% @private
+get_complete_slice(Worker, Model, CollectionId, ExtendedInfo) ->
     {ok, Layout} = rpc:call(Worker, Model, time_series_collection_get_layout, [CollectionId]),
     tsc_structure:build_from_layout(fun(TimeSeriesName, MetricName) ->
-        gather_windows(Worker, Model, CollectionId, TimeSeriesName, MetricName, 9999999999, [])
+        gather_windows(Worker, Model, CollectionId, TimeSeriesName, MetricName, 9999999999, ExtendedInfo, [])
     end, Layout).
 
 
@@ -2327,7 +2331,10 @@ get_complete_slice(Worker, Model, CollectionId) ->
 verify_complete_slice(Worker, Model, Id, CollectionConfig, Measurements) ->
     ExpectedWindowsCounts = #{10000 => 10000, 20000 => 50000, 30000 => 70000, 40000 => 90000, 50000 => 110000},
     ExpCompleteSlice = tsc_structure:map(fun(_, _, #metric_config{retention = Retention}) ->
-        lists:sublist(lists:reverse(Measurements), maps:get(Retention, ExpectedWindowsCounts))
+        MappedMeasurements = lists:map(fun({Timestamp, Value}) ->
+            #window_info{timestamp = Timestamp, value = Value}
+        end, Measurements),
+        lists:sublist(lists:reverse(MappedMeasurements), maps:get(Retention, ExpectedWindowsCounts))
     end, CollectionConfig),
     ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)).
 
@@ -2341,31 +2348,20 @@ verify_empty_slice(Worker, Model, Id, CollectionConfig) ->
 
 
 %% @private
-gather_windows(Worker, Model, CollectionId, TimeSeriesName, MetricName, StartTimestamp, Acc) ->
+gather_windows(Worker, Model, CollectionId, TimeSeriesName, MetricName, StartTimestamp, ExtendedInfo, Acc) ->
     {ok, #{
-        TimeSeriesName := #{MetricName := Windows}
+        TimeSeriesName := #{MetricName := WindowInfos}
     }} = rpc:call(Worker, Model, time_series_collection_get_slice, [
-        CollectionId, #{TimeSeriesName => [MetricName]}, #{start_timestamp => StartTimestamp, window_limit => 1000}
+        CollectionId,
+        #{TimeSeriesName => [MetricName]},
+        #{start_timestamp => StartTimestamp, window_limit => 1000, extended_info => ExtendedInfo}
     ]),
-    NewAcc = Acc ++ Windows,
-    case length(Windows) of
+    NewAcc = Acc ++ WindowInfos,
+    case length(WindowInfos) of
         1000 ->
-            {LastTimestamp, _} = lists:last(Windows),
+            #window_info{timestamp = LastTimestamp} = lists:last(WindowInfos),
             NewStartTimestamp = LastTimestamp - 1,
-            gather_windows(Worker, Model, CollectionId, TimeSeriesName, MetricName, NewStartTimestamp, NewAcc);
+            gather_windows(Worker, Model, CollectionId, TimeSeriesName, MetricName, NewStartTimestamp, ExtendedInfo, NewAcc);
         _ ->
             NewAcc
     end.
-
-
-%% @private
-get_windows_timestamps(Worker, Model, CollectionId, MetricWindowsSpec) ->
-    {ok, Layout} = rpc:call(Worker, Model, time_series_collection_get_layout, [CollectionId]),
-    WindowsSpec = tsc_structure:build_from_layout(fun(_TimeSeriesName, _MetricName) ->
-        MetricWindowsSpec
-    end, Layout),
-
-    {ok, Timestamps} = ?assertMatch({ok, _}, rpc:call(Worker, Model, time_series_collection_get_windows_timestamps, [
-        CollectionId, WindowsSpec
-    ])),
-    Timestamps.
