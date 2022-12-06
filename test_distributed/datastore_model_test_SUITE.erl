@@ -85,7 +85,8 @@
     time_series_test/1,
     multinode_time_series_test/1,
     time_series_document_fetch_test/1,
-    time_series_config_incorporation_test/1
+    time_series_config_incorporation_test/1,
+    time_series_upgrade_test/1
 ]).
 
 % for rpc
@@ -149,7 +150,8 @@ all() ->
         time_series_test,
         multinode_time_series_test,
         time_series_document_fetch_test,
-        time_series_config_incorporation_test
+        time_series_config_incorporation_test,
+        time_series_upgrade_test
     ], [
         links_performance,
         create_get_performance,
@@ -1216,7 +1218,7 @@ time_series_document_fetch_test(Config) ->
 
         Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
 
-        % Test if documents deleted from disc are fetched when needed
+        % Test if documents deleted from memory are fetched when needed
         lists:foreach(fun(Key) ->
             assert_key_on_disc(Worker, Model, Key, false),
             MemCtx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
@@ -1299,6 +1301,69 @@ time_series_config_incorporation_test(Config) ->
         ?assertMatch(ok, rpc:call(Worker, Model, time_series_collection_delete, [Id])),
         ?assertEqual([], get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys)
     end, ?TEST_MODELS).
+
+
+time_series_upgrade_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        % Mock encode and record version to save documents in prev structure
+        ok = test_utils:mock_expect(Worker, ts_windows, encode,
+            fun(Windows) ->
+                json_utils:encode(lists:map(fun
+                    ({Timestamp, #window{aggregated_measurements = {ValuesCount, ValuesSum}}}) -> [Timestamp, ValuesCount, ValuesSum];
+                    ({Timestamp, #window{aggregated_measurements = Value}}) -> [Timestamp, Value]
+                end, ts_windows:to_list(Windows)))
+            end),
+        ok = test_utils:mock_expect(Worker, ts_hub, get_record_version, fun() -> 2 end),
+
+        % Create time series - windows are stored in couchbase using prev structure
+        InitialKeys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)),
+        {Id, CollectionConfig} = create_time_series_collection(Worker, Model, fun(N) ->
+            ApplyFun = case N of
+                5 -> avg;
+                _ -> last
+            end,
+            #metric_config{resolution = ?SECOND_RESOLUTION, retention = 10000 * N, aggregator = ApplyFun}
+        end),
+        Measurements = gen_measurements(1000, 0, 2),
+        ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
+            <<"TS0">> => #{?ALL_METRICS => Measurements},
+            <<"TS1">> => #{?ALL_METRICS => Measurements}
+        }])),
+
+        % Delete documents from memory to force get directly from couchbase
+        Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
+        lists:foreach(fun(Key) ->
+            assert_key_on_disc(Worker, Model, Key, false),
+            MemCtx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
+            ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
+            assert_key_not_in_memory(Worker, Model, Key)
+        end, Keys),
+
+        % Delete mocks forcing prev structure
+        ok = test_utils:mock_expect(Worker, ts_windows, encode, fun(Windows) -> meck:passthrough([Windows]) end),
+        ok = test_utils:mock_expect(Worker, ts_hub, get_record_version, fun() -> meck:passthrough([]) end),
+
+        % All windows should be removed when prev format is discovered
+        ExpEmptySlice = tsc_structure:map(fun(_, _, _) ->
+            []
+        end, CollectionConfig),
+        ?assertEqual(ExpEmptySlice, get_complete_slice(Worker, Model, Id)),
+
+        % It should be possible to use collection after change of record version
+        Measurements2 = gen_measurements(1, 1, 1),
+        ?assertEqual(ok, rpc:call(Worker, Model, time_series_collection_consume_measurements, [Id, #{
+            <<"TS0">> => #{?ALL_METRICS => Measurements2},
+            <<"TS1">> => #{?ALL_METRICS => Measurements2}
+        }])),
+        ExpFinalSlice = tsc_structure:map(fun
+            (_, _, #metric_config{aggregator = last}) ->
+                [#window_info{timestamp = 1, value = 0}];
+            (_, _, #metric_config{aggregator = avg}) ->
+                [#window_info{timestamp = 1, value = 0.0}]
+        end, CollectionConfig),
+        ?assertEqual(ExpFinalSlice, get_complete_slice(Worker, Model, Id))
+    end, ?TEST_CACHED_MODELS).
 
 
 %%%===================================================================
@@ -1898,6 +1963,11 @@ init_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_li
     ok = test_utils:mock_new(Workers, datastore_model),
     ok = test_utils:mock_new(Workers, datastore),
     init_per_testcase(?DEFAULT_CASE(Case), Config);
+init_per_testcase(time_series_upgrade_test = Case, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_new(Workers, [ts_windows, ts_hub]),
+    test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, time_series_max_doc_size, 500),
+    init_per_testcase(?DEFAULT_CASE(Case), Config);
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     application:load(cluster_worker),
@@ -1934,6 +2004,10 @@ end_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_lis
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{}),
     test_utils:mock_unload(Workers, [datastore_model, datastore]);
+end_per_testcase(time_series_upgrade_test, Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_unload(Worker, [ts_windows, ts_hub]),
+    rpc:call(Worker, application, unset_env, [?CLUSTER_WORKER_APP_NAME, time_series_max_doc_size]);
 end_per_testcase(_Case, _Config) ->
     ok.
 

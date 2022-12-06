@@ -23,8 +23,8 @@
 ]).
 %% Encoding/decoding  API
 -export([encode/1, decode/1]).
-%% Exported for unit tests
--export([get/2, get_size/1]).
+%% Exported for unit and ct tests
+-export([get/2, get_size/1, to_list/1]).
 
 -compile({no_auto_import, [get/1]}).
 

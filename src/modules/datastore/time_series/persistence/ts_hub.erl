@@ -102,9 +102,7 @@ upgrade_record(2, {?MODULE, TimeSeriesCollectionHeads}
         {metric,
             MetricConfig,
             SplittingStrategy,
-            ts_metric_data_node:set(#data_node{
-                windows = ts_windows:init(), older_node_key = undefined, older_node_timestamp = undefined
-            })
+            #data_node{windows = ts_windows:init(), older_node_key = undefined, older_node_timestamp = undefined}
         }
     end, TimeSeriesCollectionHeads)}}.
 
