@@ -17,7 +17,7 @@
 
 
 %% API
--export([aggregate/3, consolidate_measurement_timestamp/2, to_info/4, info_to_json/1]).
+-export([aggregate/3, consolidate_measurement_timestamp/2, to_info/4, info_to_json/1, json_to_info/1]).
 
 
 -type timestamp_seconds() :: time_series:time_seconds().
@@ -112,6 +112,7 @@ to_info(
     }.
 
 
+-spec info_to_json(window_info()) -> json_utils:json_term().
 info_to_json(#window_info{
     timestamp = Timestamp,
     value = Value,
@@ -123,6 +124,21 @@ info_to_json(#window_info{
         <<"value">> => Value,
         <<"firstMeasurementTimestamp">> => FirstMeasurementTimestamp,
         <<"lastMeasurementTimestamp">> => LastMeasurementTimestamp
+    }.
+
+
+-spec json_to_info(json_utils:json_term()) -> window_info().
+json_to_info(#{
+    <<"timestamp">> := Timestamp,
+    <<"value">> := Value,
+    <<"firstMeasurementTimestamp">> := FirstMeasurementTimestamp,
+    <<"lastMeasurementTimestamp">> := LastMeasurementTimestamp
+}) ->
+    #window_info{
+        timestamp = Timestamp,
+        value = Value,
+        first_measurement_timestamp = FirstMeasurementTimestamp,
+        last_measurement_timestamp = LastMeasurementTimestamp
     }.
 
 

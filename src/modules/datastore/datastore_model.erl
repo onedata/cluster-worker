@@ -462,14 +462,19 @@ set_expiry(Ctx, Expiry) ->
 -spec ensure_expiry_set_on_delete(ctx() | datastore:disc_driver_ctx()) -> ctx() | datastore:disc_driver_ctx().
 ensure_expiry_set_on_delete(Ctx = #{disc_driver := undefined}) ->
     Ctx;
-ensure_expiry_set_on_delete(Ctx = #{disc_driver_ctx := DriverCtx}) ->
-    Ctx#{disc_driver_ctx := ensure_expiry_set_on_delete(DriverCtx)};
 ensure_expiry_set_on_delete(Ctx) ->
     case Ctx of
         #{expiry := _} ->
             Ctx;
+        #{sync_enabled := true, disc_driver_ctx := DriverCtx} ->
+            UpdatedCtx = #{expiry := Expiry} =
+                set_expiry(Ctx, application:get_env(?CLUSTER_WORKER_APP_NAME, document_expiry, ?EXPIRY)),
+            UpdatedCtx#{disc_driver_ctx := set_expiry(DriverCtx, Expiry)};
         #{sync_enabled := true} ->
             set_expiry(Ctx, application:get_env(?CLUSTER_WORKER_APP_NAME, document_expiry, ?EXPIRY));
+        #{disc_driver_ctx := DriverCtx} ->
+            UpdatedCtx = #{expiry := Expiry} = set_expiry(Ctx, 1),
+            UpdatedCtx#{disc_driver_ctx := set_expiry(DriverCtx, Expiry)};
         _ ->
             set_expiry(Ctx, 1)
     end.
