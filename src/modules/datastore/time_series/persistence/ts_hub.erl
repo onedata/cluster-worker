@@ -141,7 +141,7 @@ get_record_struct(2) ->
         ]}}}}
     ]};
 get_record_struct(3) ->
-    {record, [DataRecordStruct]} = ts_metric_data_node:get_record_struct(1),
+    {record, [{value, DataRecordStruct}]} = ts_metric_data_node:get_record_struct(1),
     {record, [
         {time_series_collection_heads, #{string => #{string => {record, [
             {config, {custom, string, {persistent_record, encode, decode, metric_config}}},
@@ -150,6 +150,6 @@ get_record_struct(3) ->
                 {max_windows_in_head_doc, integer},
                 {max_windows_in_tail_doc, integer}
             ]}},
-            DataRecordStruct % New version is needed as metrics' format has changed and upgrade fun has to prune old data
+            {head_data, DataRecordStruct} % New version is needed as metrics' format has changed and upgrade fun has to prune old data
         ]}}}}
     ]}.
