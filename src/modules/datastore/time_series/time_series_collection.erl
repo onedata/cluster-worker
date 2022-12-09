@@ -100,7 +100,7 @@
 -type batch() :: datastore_doc:batch().
 
 
--define(handle_errors(Batch, FunctionArgs, Class, Reason, Stacktrace),
+-define(handle_exception(Batch, FunctionArgs, Class, Reason, Stacktrace),
     case {Class, Reason} of
         {_, {fetch_error, not_found}} ->
             erlang:raise(Class, Reason, Stacktrace);
@@ -109,13 +109,7 @@
         {throw, {{error, _} = Error, UpdatedDatastoreBatch}} ->
             {Error, UpdatedDatastoreBatch};
         _ ->
-            ErrorRef = str_utils:rand_hex(5),
-            ?error_stacktrace(
-                "[~p:~p] Unexpected error (ref. ~s):~n~w:~p~nArgs: ~p",
-                [?MODULE, ?FUNCTION_NAME, ErrorRef, Class, Reason, FunctionArgs],
-                Stacktrace
-            ),
-            {?ERROR_UNEXPECTED_ERROR(ErrorRef), Batch}
+            {?examine_exception(Class, Reason, Stacktrace, "Args: ~p", [FunctionArgs]), Batch}
     end
 ).
 
@@ -150,7 +144,7 @@ create(Ctx, Id, Config, Batch) ->
                 {ok, ts_persistence:finalize(PersistenceCtx)}
         end
     catch Class:Reason:Stacktrace ->
-        ?handle_errors(Batch, [Id, Config], Class, Reason, Stacktrace)
+        ?handle_exception(Batch, [Id, Config], Class, Reason, Stacktrace)
     end.
 
 
@@ -167,7 +161,7 @@ delete(Ctx, Id, Batch) ->
 
         {ok, ts_persistence:finalize(FinalPersistenceCtx)}
     catch Class:Reason:Stacktrace ->
-        ?handle_errors(Batch, [Id], Class, Reason, Stacktrace)
+        ?handle_exception(Batch, [Id], Class, Reason, Stacktrace)
     end.
 
 
@@ -184,7 +178,7 @@ generate_dump(Ctx, Id, Batch) ->
         ),
         {{ok, Dump}, ts_persistence:finalize(FinalPersistenceCtx)}
     catch Class:Reason:Stacktrace ->
-        ?handle_errors(Batch, [Id], Class, Reason, Stacktrace)
+        ?handle_exception(Batch, [Id], Class, Reason, Stacktrace)
     end.
 
 
@@ -202,7 +196,7 @@ create_from_dump(Ctx, Id, Dump, Batch) ->
         {ok, ts_persistence:finalize(FinalPersistenceCtx)}
     catch Class:Reason:Stacktrace ->
         % ClonedData can be large structure - do not log it
-        ?handle_errors(Batch, [Id], Class, Reason, Stacktrace)
+        ?handle_exception(Batch, [Id], Class, Reason, Stacktrace)
     end.
 
 
@@ -234,7 +228,7 @@ incorporate_config(Ctx, Id, ConfigToIncorporate, Batch) ->
                 {ok, ts_persistence:finalize(FinalPersistenceCtx)}
         end
     catch Class:Reason:Stacktrace ->
-        ?handle_errors(Batch, [Id, ConfigToIncorporate], Class, Reason, Stacktrace)
+        ?handle_exception(Batch, [Id, ConfigToIncorporate], Class, Reason, Stacktrace)
     end.
 
 
@@ -245,7 +239,7 @@ get_layout(Ctx, Id, Batch) ->
         Layout = tsc_structure:to_layout(TimeSeriesCollectionHeads),
         {{ok, Layout}, ts_persistence:finalize(PersistenceCtx)}
     catch Class:Reason:Stacktrace ->
-        ?handle_errors(Batch, [Id], Class, Reason, Stacktrace)
+        ?handle_exception(Batch, [Id], Class, Reason, Stacktrace)
     end.
 
 
@@ -265,7 +259,7 @@ consume_measurements(Ctx, Id, ConsumeSpec, Batch) ->
                 {?make_missing_layout_error(TimeSeriesCollectionHeads, RequestLayout), Batch}
         end
     catch Class:Reason:Stacktrace ->
-        ?handle_errors(Batch, [Id, ConsumeSpec], Class, Reason, Stacktrace)
+        ?handle_exception(Batch, [Id, ConsumeSpec], Class, Reason, Stacktrace)
     end.
 
 
@@ -287,7 +281,7 @@ get_slice(Ctx, Id, SliceLayout, ListWindowsOptions, Batch) ->
                 {?make_missing_layout_error(TimeSeriesCollectionHeads, ExpandedSliceLayout), Batch}
         end
     catch Class:Reason:Stacktrace ->
-        ?handle_errors(Batch, [Id, SliceLayout, ListWindowsOptions], Class, Reason, Stacktrace)
+        ?handle_exception(Batch, [Id, SliceLayout, ListWindowsOptions], Class, Reason, Stacktrace)
     end.
 
 
