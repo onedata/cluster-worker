@@ -18,21 +18,22 @@
 
 %% API
 -export([init/0, list/3, list_full_data/1, map_list_options/3,
-    insert/4, prepend_windows_list/2, prune_overflowing/2, split/2,
+    update/3, prepend_windows_list/2, prune_overflowing/2, split/2,
     is_size_exceeded/2, get_remaining_windows_count/2, reorganize/4
 ]).
 %% Encoding/decoding  API
--export([encode/1, decode/1]).
+-export([db_encode/1, db_decode/1]).
 %% Exported for unit and ct tests
 -export([get/2, get_size/1, to_list/1]).
 
 -compile({no_auto_import, [get/1]}).
 
 
--type windows_collection() :: gb_trees:tree(ts_window:timestamp_seconds(), ts_window:window()).
--type descending_windows_list() :: [{ts_window:window_id(), ts_window:window()}].
--type descending_window_infos_list() :: [ts_window:window_info()].
--type insert_strategy() :: {aggregate_measurement, metric_config:aggregator()} | override.
+-type windows_collection() :: gb_trees:tree(ts_window:timestamp_seconds(), ts_window:record()).
+-type descending_windows_list() :: [{ts_window:id(), ts_window:record()}].
+-type descending_infos_list() :: [ts_window:info()].
+-type update_spec() :: {override_with, ts_window:record()} |
+    {consume_measurement,  ts_window:measurement(), metric_config:aggregator()}.
 
 % List options provided with datastore requests and internal list options that extend
 % listing possibilities for datastore internal usage
@@ -61,8 +62,8 @@
     window_limit => non_neg_integer()
 }.
 
--export_type([windows_collection/0, descending_windows_list/0, descending_window_infos_list/0,
-    insert_strategy/0, list_options/0, internal_list_options/0]).
+-export_type([windows_collection/0, descending_windows_list/0, descending_infos_list/0,
+    update_spec/0, list_options/0, internal_list_options/0]).
 
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
 -define(MAX_WINDOW_LIMIT, 1000).
@@ -77,7 +78,7 @@ init() ->
 
 
 -spec list(windows_collection(), ts_window:timestamp_seconds() | undefined, internal_list_options()) ->
-    {ok | {continue, internal_list_options()}, descending_windows_list() | descending_window_infos_list()}.
+    {ok | {continue, internal_list_options()}, descending_windows_list() | descending_infos_list()}.
 list(Windows, Timestamp, Options) ->
     SanitizedWindowLimit = case maps:find(window_limit, Options) of
         error ->
@@ -102,16 +103,14 @@ map_list_options(ListOption, Aggregator, false = _ExtendedInfo) ->
     maps:remove(extended_info, ListOption#{return_type => basic_info, aggregator => Aggregator}).
 
 
--spec insert(windows_collection(), ts_window:timestamp_seconds(), ts_window:measurement() | ts_window:window(),
-    insert_strategy()) -> windows_collection().
-insert(Windows, WindowTimestamp, Window, override) ->
+-spec update(windows_collection(), ts_window:timestamp_seconds(), update_spec()) -> windows_collection().
+update(Windows, WindowTimestamp, {override_with, Window}) ->
     set_value(WindowTimestamp, Window, Windows);
-insert(Windows, WindowTimestamp, {MeasurementTimestamp, _} = NewMeasurement, {aggregate_measurement, Aggregator}) ->
-    CurrentWindow = get(WindowTimestamp, Windows),
-    NewWindow = ts_window:consolidate_measurement_timestamp(
-        ts_window:aggregate(CurrentWindow, NewMeasurement, Aggregator),
-        MeasurementTimestamp
-    ),
+update(Windows, WindowTimestamp, {consume_measurement, NewMeasurement, Aggregator}) ->
+    NewWindow = case get(WindowTimestamp, Windows) of
+        undefined -> ts_window:new(NewMeasurement, Aggregator);
+        CurrentWindow -> ts_window:consume_measurement(CurrentWindow, NewMeasurement, Aggregator)
+    end,
     set_value(WindowTimestamp, NewWindow, Windows).
 
 
@@ -186,56 +185,19 @@ reorganize(WindowsInOlderDataNode, WindowsInCurrentDataNode, MaxWindowsInOlderDa
 %%% Encoding/decoding API
 %%%===================================================================
 
--spec encode(windows_collection()) -> binary().
-encode(Windows) ->
-    json_utils:encode(lists:map(fun({Timestamp, #window{
-        aggregated_measurements = AggregatedMeasurements,
-        first_measurement_timestamp = FirstMeasurementTimestamp,
-        last_measurement_timestamp = LastMeasurementTimestamp
-    }}) ->
-        [Timestamp, FirstMeasurementTimestamp, LastMeasurementTimestamp |
-            aggregated_measurements_to_json(AggregatedMeasurements)]
+-spec db_encode(windows_collection()) -> binary().
+db_encode(Windows) ->
+    json_utils:encode(lists:map(fun({Timestamp, Window}) ->
+        [Timestamp | ts_window:db_encode(Window)]
     end, to_list(Windows))).
 
 
--spec decode(binary()) -> windows_collection().
-decode(Term) ->
+-spec db_decode(binary()) -> windows_collection().
+db_decode(Term) ->
     InputList = json_utils:decode(Term),
-    from_list(lists:map(fun
-        % Old window format
-        ([Timestamp, ValuesCount, ValuesSum]) ->
-            {Timestamp, #window{
-                aggregated_measurements = {ValuesCount, ValuesSum}
-            }};
-        ([Timestamp, Value]) ->
-            {Timestamp, #window{
-                aggregated_measurements = Value
-            }};
-
-        % New window format
-        ([Timestamp, FirstMeasurementTimestamp, LastMeasurementTimestamp | AggregatedMeasurements]) ->
-            {Timestamp, #window{
-                aggregated_measurements = aggregated_measurements_from_json(AggregatedMeasurements),
-                first_measurement_timestamp = FirstMeasurementTimestamp,
-                last_measurement_timestamp = LastMeasurementTimestamp
-            }}
+    from_list(lists:map(fun([Timestamp | EncodedWindow]) ->
+        {Timestamp, ts_window:db_decode(EncodedWindow)}
     end, InputList)).
-
-
--spec aggregated_measurements_to_json(ts_window:aggregated_measurements()) -> list().
-aggregated_measurements_to_json({ValuesCount, ValuesSum}) ->
-    [ValuesCount, ValuesSum];
-
-aggregated_measurements_to_json(Value) ->
-    [Value].
-
-
--spec aggregated_measurements_from_json(list()) -> ts_window:aggregated_measurements().
-aggregated_measurements_from_json([ValuesCount, ValuesSum]) ->
-    {ValuesCount, ValuesSum};
-
-aggregated_measurements_from_json([Value]) ->
-    Value.
 
 
 %%=====================================================================
@@ -254,7 +216,7 @@ init_windows_set() ->
     gb_trees:empty().
 
 
--spec get(ts_window:timestamp_seconds(), windows_collection()) -> ts_window:window() | undefined.
+-spec get(ts_window:timestamp_seconds(), windows_collection()) -> ts_window:record() | undefined.
 get(Timestamp, Windows) ->
     case gb_trees:lookup(reverse_timestamp(Timestamp), Windows) of
         {value, Value} -> Value;
@@ -262,7 +224,7 @@ get(Timestamp, Windows) ->
     end.
 
 
--spec set_value(ts_window:timestamp_seconds(), ts_window:window(), windows_collection()) -> windows_collection().
+-spec set_value(ts_window:timestamp_seconds(), ts_window:record(), windows_collection()) -> windows_collection().
 set_value(Timestamp, Value, Windows) ->
     gb_trees:enter(reverse_timestamp(Timestamp), Value, Windows).
 
@@ -285,15 +247,15 @@ get_size(Windows) ->
 
 
 -spec list_internal(ts_window:timestamp_seconds() | undefined, windows_collection(), internal_list_options()) ->
-    {ok | {continue, internal_list_options()}, descending_windows_list() | descending_window_infos_list()}.
+    {ok | {continue, internal_list_options()}, descending_windows_list() | descending_infos_list()}.
 list_internal(undefined, Windows, Options) ->
     list_internal(gb_trees:iterator(Windows), Options);
 list_internal(Timestamp, Windows, Options) ->
     list_internal(gb_trees:iterator_from(reverse_timestamp(Timestamp), Windows), Options).
 
 
--spec list_internal(gb_trees:iter(ts_window:timestamp_seconds(), ts_window:window()), internal_list_options()) ->
-    {ok | {continue, internal_list_options()}, descending_windows_list() | descending_window_infos_list()}.
+-spec list_internal(gb_trees:iter(ts_window:timestamp_seconds(), ts_window:record()), internal_list_options()) ->
+    {ok | {continue, internal_list_options()}, descending_windows_list() | descending_infos_list()}.
 list_internal(_Iterator, #{window_limit := 0}) ->
     {ok, []};
 list_internal(Iterator, Options) ->
@@ -355,8 +317,8 @@ prepend_windows_list_internal(Windows, NewWindowsList) ->
 %% Internal functions
 %%=====================================================================
 
--spec map_to_info_or_full_data(ts_window:window_id(), ts_window:window(), internal_list_options()) ->
-    ts_window:window_info() | {ts_window:window_id(), ts_window:window()}.
+-spec map_to_info_or_full_data(ts_window:id(), ts_window:record(), internal_list_options()) ->
+    ts_window:info() | {ts_window:id(), ts_window:record()}.
 map_to_info_or_full_data(WindowId, Window, #{return_type := full_data}) ->
     {WindowId, Window};
 

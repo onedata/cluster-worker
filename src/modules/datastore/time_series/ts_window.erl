@@ -17,82 +17,101 @@
 
 
 %% API
--export([aggregate/3, consolidate_measurement_timestamp/2, to_info/4, info_to_json/1, json_to_info/1]).
+-export([new/2, consume_measurement/3, db_encode/1, db_decode/1, to_info/4, info_to_json/1, json_to_info/1]).
 
 
 -type timestamp_seconds() :: time_series:time_seconds().
 -type value() :: number().
--type window_id() :: timestamp_seconds().
+-type id() :: timestamp_seconds().
 -type aggregated_measurements() :: value() | {ValuesCount :: non_neg_integer(), ValuesSum :: value()}.
--type window() :: #window{}.
--type window_info() :: #window_info{}.
+-type record() :: #window{}.
+-type info() :: #window_info{}.
 -type measurement() :: {timestamp_seconds(), value()}.
 
--export_type([timestamp_seconds/0, value/0, window_id/0, aggregated_measurements/0, 
-    window/0, window_info/0, measurement/0]).
+-export_type([timestamp_seconds/0, value/0, id/0, aggregated_measurements/0, record/0, info/0, measurement/0]).
 
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
--spec aggregate(window() | undefined, measurement(), metric_config:aggregator()) -> window().
-aggregate(undefined, {_NewTimestamp, NewValue}, avg) ->
-    #window{aggregated_measurements = {1, NewValue}};
+-spec new(measurement(), metric_config:aggregator()) -> record().
+new({Timestamp, Value}, avg) ->
+    #window{
+        aggregated_measurements = {1, Value},
+        first_measurement_timestamp = Timestamp,
+        last_measurement_timestamp = Timestamp
+    };
 
-aggregate(undefined, {_NewTimestamp, NewValue}, _) ->
-    #window{aggregated_measurements = NewValue};
-
-aggregate(#window{aggregated_measurements = {CurrentCount, CurrentSum}} = CurrentWindow, {_NewTimestamp, NewValue}, avg) ->
-    CurrentWindow#window{aggregated_measurements = {CurrentCount + 1, CurrentSum + NewValue}};
-
-aggregate(#window{aggregated_measurements = Aggregated} = CurrentWindow, {_NewTimestamp, NewValue}, sum) ->
-    CurrentWindow#window{aggregated_measurements = Aggregated + NewValue};
-
-aggregate(#window{aggregated_measurements = Aggregated} = CurrentWindow, {_NewTimestamp, NewValue}, max) ->
-    CurrentWindow#window{aggregated_measurements = max(Aggregated, NewValue)};
-
-aggregate(#window{aggregated_measurements = Aggregated} = CurrentWindow, {_NewTimestamp, NewValue}, min) ->
-    CurrentWindow#window{aggregated_measurements = min(Aggregated, NewValue)};
-
-aggregate(#window{last_measurement_timestamp = LastMeasurementTimestamp} = CurrentWindow, {NewTimestamp, NewValue}, last) ->
-    case NewTimestamp >= LastMeasurementTimestamp of
-        true -> CurrentWindow#window{aggregated_measurements = NewValue};
-        _ -> CurrentWindow
-    end;
-
-aggregate(#window{first_measurement_timestamp = FirstMeasurementTimestamp} = CurrentWindow, {NewTimestamp, NewValue}, first) ->
-    case NewTimestamp < FirstMeasurementTimestamp of
-        true -> CurrentWindow#window{aggregated_measurements = NewValue};
-        _ -> CurrentWindow
-    end.
+new({Timestamp, Value}, _) ->
+    #window{
+        aggregated_measurements = Value,
+        first_measurement_timestamp = Timestamp,
+        last_measurement_timestamp = Timestamp
+    }.
 
 
--spec consolidate_measurement_timestamp(window(), timestamp_seconds()) -> window().
-consolidate_measurement_timestamp(#window{
+-spec consume_measurement(record(), measurement(), metric_config:aggregator()) -> record().
+consume_measurement(#window{
     first_measurement_timestamp = FirstMeasurementTimestamp,
     last_measurement_timestamp = LastMeasurementTimestamp
-} = Window, Current) ->
-    Window#window{
-        first_measurement_timestamp = case FirstMeasurementTimestamp =:= undefined orelse Current < FirstMeasurementTimestamp of
-            true -> Current;
+} = Window, {MeasurementTimestamp, _} = Measurement, Aggregator) ->
+    UpdatedWindow = aggregate_measurement(Window, Measurement, Aggregator),
+    UpdatedWindow#window{
+        first_measurement_timestamp = case MeasurementTimestamp < FirstMeasurementTimestamp of
+            true -> MeasurementTimestamp;
             false -> FirstMeasurementTimestamp
         end,
-        last_measurement_timestamp = case LastMeasurementTimestamp =:= undefined orelse Current > LastMeasurementTimestamp of
-            true -> Current;
+        last_measurement_timestamp = case MeasurementTimestamp > LastMeasurementTimestamp of
+            true -> MeasurementTimestamp;
             false -> LastMeasurementTimestamp
         end
     }.
 
 
--spec to_info(window_id(), window(), basic_info | extended_info, metric_config:aggregator()) -> window_info().
+-spec db_encode(record()) -> list().
+db_encode(#window{
+    aggregated_measurements = AggregatedMeasurements,
+    first_measurement_timestamp = FirstMeasurementTimestamp,
+    last_measurement_timestamp = LastMeasurementTimestamp
+}) ->
+    [FirstMeasurementTimestamp, LastMeasurementTimestamp | aggregated_measurements_to_json(AggregatedMeasurements)].
+
+
+-spec db_decode(list()) -> record().
+% Old window format
+% NOTE: Decoder for old format is only to prevent decoding process from crushing.
+%       Such windows will be pruned during document update process.
+db_decode([ValuesCount, ValuesSum]) ->
+    #window{
+        aggregated_measurements = {ValuesCount, ValuesSum},
+        first_measurement_timestamp = 0,
+        last_measurement_timestamp = 0
+    };
+db_decode([Value]) ->
+    #window{
+        aggregated_measurements = Value,
+        first_measurement_timestamp = 0,
+        last_measurement_timestamp = 0
+    };
+
+% New window format
+db_decode([FirstMeasurementTimestamp, LastMeasurementTimestamp | AggregatedMeasurements]) ->
+    #window{
+        aggregated_measurements = aggregated_measurements_from_json(AggregatedMeasurements),
+        first_measurement_timestamp = FirstMeasurementTimestamp,
+        last_measurement_timestamp = LastMeasurementTimestamp
+    }.
+
+
+-spec to_info(id(), record(), basic_info | extended_info, metric_config:aggregator()) -> info().
 to_info(
     WindowId,
     #window{aggregated_measurements = Measurements},
     basic_info,
     Aggregator
 ) ->
-    #window_info{timestamp = WindowId, value = calculate_window_value(Measurements, Aggregator)};
+    #window_info{timestamp = WindowId, value = aggregated_measurements_to_value(Measurements, Aggregator)};
 
 to_info(
     WindowId,
@@ -106,13 +125,13 @@ to_info(
 ) ->
     #window_info{
         timestamp = WindowId,
-        value = calculate_window_value(Measurements, Aggregator),
+        value = aggregated_measurements_to_value(Measurements, Aggregator),
         first_measurement_timestamp = FirstMeasurementTimestamp,
         last_measurement_timestamp = LastMeasurementTimestamp
     }.
 
 
--spec info_to_json(window_info()) -> json_utils:json_term().
+-spec info_to_json(info()) -> json_utils:json_term().
 info_to_json(#window_info{
     timestamp = Timestamp,
     value = Value,
@@ -122,12 +141,12 @@ info_to_json(#window_info{
     #{
         <<"timestamp">> => Timestamp,
         <<"value">> => Value,
-        <<"firstMeasurementTimestamp">> => FirstMeasurementTimestamp,
-        <<"lastMeasurementTimestamp">> => LastMeasurementTimestamp
+        <<"firstMeasurementTimestamp">> => utils:undefined_to_null(FirstMeasurementTimestamp),
+        <<"lastMeasurementTimestamp">> => utils:undefined_to_null(LastMeasurementTimestamp)
     }.
 
 
--spec json_to_info(json_utils:json_term()) -> window_info().
+-spec json_to_info(json_utils:json_term()) -> info().
 json_to_info(#{
     <<"timestamp">> := Timestamp,
     <<"value">> := Value,
@@ -137,8 +156,8 @@ json_to_info(#{
     #window_info{
         timestamp = Timestamp,
         value = Value,
-        first_measurement_timestamp = FirstMeasurementTimestamp,
-        last_measurement_timestamp = LastMeasurementTimestamp
+        first_measurement_timestamp = utils:null_to_undefined(FirstMeasurementTimestamp),
+        last_measurement_timestamp = utils:null_to_undefined(LastMeasurementTimestamp)
     }.
 
 
@@ -146,9 +165,55 @@ json_to_info(#{
 %% Internal functions
 %%=====================================================================
 
--spec calculate_window_value(aggregated_measurements(), metric_config:aggregator()) -> value().
-calculate_window_value({Count, Sum}, avg) ->
+%% @private
+-spec aggregate_measurement(record(), measurement(), metric_config:aggregator()) -> record().
+aggregate_measurement(#window{aggregated_measurements = {CurrentCount, CurrentSum}} = CurrentWindow, {_NewTimestamp, NewValue}, avg) ->
+    CurrentWindow#window{aggregated_measurements = {CurrentCount + 1, CurrentSum + NewValue}};
+
+aggregate_measurement(#window{aggregated_measurements = Aggregated} = CurrentWindow, {_NewTimestamp, NewValue}, sum) ->
+    CurrentWindow#window{aggregated_measurements = Aggregated + NewValue};
+
+aggregate_measurement(#window{aggregated_measurements = Aggregated} = CurrentWindow, {_NewTimestamp, NewValue}, max) ->
+    CurrentWindow#window{aggregated_measurements = max(Aggregated, NewValue)};
+
+aggregate_measurement(#window{aggregated_measurements = Aggregated} = CurrentWindow, {_NewTimestamp, NewValue}, min) ->
+    CurrentWindow#window{aggregated_measurements = min(Aggregated, NewValue)};
+
+aggregate_measurement(#window{last_measurement_timestamp = LastMeasurementTimestamp} = CurrentWindow, {NewTimestamp, NewValue}, last) ->
+    case NewTimestamp >= LastMeasurementTimestamp of
+        true -> CurrentWindow#window{aggregated_measurements = NewValue};
+        _ -> CurrentWindow
+    end;
+
+aggregate_measurement(#window{first_measurement_timestamp = FirstMeasurementTimestamp} = CurrentWindow, {NewTimestamp, NewValue}, first) ->
+    case NewTimestamp < FirstMeasurementTimestamp of
+        true -> CurrentWindow#window{aggregated_measurements = NewValue};
+        _ -> CurrentWindow
+    end.
+
+
+%% @private
+-spec aggregated_measurements_to_value(aggregated_measurements(), metric_config:aggregator()) -> value().
+aggregated_measurements_to_value({Count, Sum}, avg) ->
     Sum / Count;
 
-calculate_window_value(Aggregated, _) ->
+aggregated_measurements_to_value(Aggregated, _) ->
     Aggregated.
+
+
+%% @private
+-spec aggregated_measurements_to_json(aggregated_measurements()) -> list().
+aggregated_measurements_to_json({ValuesCount, ValuesSum}) ->
+    [ValuesCount, ValuesSum];
+
+aggregated_measurements_to_json(Value) ->
+    [Value].
+
+
+%% @private
+-spec aggregated_measurements_from_json(list()) -> aggregated_measurements().
+aggregated_measurements_from_json([ValuesCount, ValuesSum]) ->
+    {ValuesCount, ValuesSum};
+
+aggregated_measurements_from_json([Value]) ->
+    Value.

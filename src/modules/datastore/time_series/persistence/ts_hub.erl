@@ -99,6 +99,8 @@ upgrade_record(2, {?MODULE, TimeSeriesCollectionHeads}
         } = OldMetric,
 
         % Metrics' format has changed - prune existing data
+        % NOTE: This update takes place between 21.02.0-alpha28 and 21.02.1
+        % when all time-series ale small enough to be stored in head
         {metric,
             MetricConfig,
             SplittingStrategy,

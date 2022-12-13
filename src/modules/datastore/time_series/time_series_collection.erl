@@ -12,15 +12,11 @@
 %%% measurements from particular period of time. E.g.,
 %%% MyTimeSeriesCollection = #{
 %%%    TimeSeries1 = #{
-%%%       Metric1 = [Window1, Window2, ...],
+%%%       Metric1 = [#window{}, #window{}, ...],
 %%%       Metric2 = ...
 %%%    },
 %%%    TimeSeries2 = ...
 %%% }
-%%% Window = {WindowTimestamp, aggregator(PrevAggregatedValue, MeasurementValue)} where
-%%% PrevAggregatedValue is result of previous aggregator function executions
-%%% (window can be created using several measurements).
-%%% See ts_windows:insert_value/4 to see possible aggregation functions.
 %%%
 %%% @see tsc_structure module for more information about the structure of
 %%% time series collection as perceived by higher level modules.
@@ -91,7 +87,7 @@
 
 -type config() :: structure(metric_config:record()).
 -type consume_spec() :: structure([ts_window:measurement()]).
--type slice() :: structure(ts_windows:descending_window_infos_list()).
+-type slice() :: structure(ts_windows:descending_infos_list()).
 -export_type([config/0, consume_spec/0, slice/0]).
 
 

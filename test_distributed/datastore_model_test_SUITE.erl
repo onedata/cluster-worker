@@ -1307,7 +1307,7 @@ time_series_upgrade_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         % Mock encode and record version to save documents in prev structure
-        ok = test_utils:mock_expect(Worker, ts_windows, encode,
+        ok = test_utils:mock_expect(Worker, ts_windows, db_encode,
             fun(Windows) ->
                 json_utils:encode(lists:map(fun
                     ({Timestamp, #window{aggregated_measurements = {ValuesCount, ValuesSum}}}) -> [Timestamp, ValuesCount, ValuesSum];
@@ -1341,7 +1341,7 @@ time_series_upgrade_test(Config) ->
         end, Keys),
 
         % Delete mocks forcing prev structure
-        ok = test_utils:mock_expect(Worker, ts_windows, encode, fun(Windows) -> meck:passthrough([Windows]) end),
+        ok = test_utils:mock_expect(Worker, ts_windows, db_encode, fun(Windows) -> meck:passthrough([Windows]) end),
         ok = test_utils:mock_expect(Worker, ts_hub, get_record_version, fun() -> meck:passthrough([]) end),
 
         % All windows should be removed when prev format is discovered

@@ -61,14 +61,14 @@
     aggregated_measurements :: ts_window:aggregated_measurements(),
     % First and last timestamp among measurements that have been
     % used to calculate value of aggregated_measurements field
-    first_measurement_timestamp :: ts_window:timestamp_seconds() | undefined,
-    last_measurement_timestamp :: ts_window:timestamp_seconds() | undefined
+    first_measurement_timestamp :: ts_window:timestamp_seconds(),
+    last_measurement_timestamp :: ts_window:timestamp_seconds()
 }).
 
 
 % Information about window used to generate slices
 -record(window_info, {
-    timestamp :: ts_window:window_id(),  % id of window (timestamp representing beginning of the window)
+    timestamp :: ts_window:id(),  % id of window (timestamp representing beginning of the window)
     value :: ts_window:value(), % value generated from #window.aggregated_measurements
                                 % using ts_window:calculate_window_value function
 

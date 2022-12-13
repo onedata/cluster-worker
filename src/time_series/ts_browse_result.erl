@@ -38,9 +38,7 @@ to_json(#time_series_layout_get_result{layout = Layout}) ->
 to_json(#time_series_slice_get_result{slice = Slice}) ->
     #{
         <<"slice">> => tsc_structure:map(fun(_TimeSeriesName, _MetricName, Windows) ->
-            lists:map(fun(Window) ->
-                ts_window:info_to_json(Window)
-            end, Windows)
+            lists:map(fun ts_window:info_to_json/1, Windows)
         end, Slice)
     }.
 
@@ -52,8 +50,6 @@ from_json(#{<<"layout">> := Layout}) ->
 from_json(#{<<"slice">> := SliceJson}) ->
     #time_series_slice_get_result{slice = 
         tsc_structure:map(fun(_TimeSeriesName, _MetricName, WindowsJson) ->
-            lists:map(fun(WindowJson) ->
-                ts_window:json_to_info(WindowJson)
-            end, WindowsJson)
+            lists:map(fun ts_window:json_to_info/1, WindowsJson)
         end, SliceJson)
     }.

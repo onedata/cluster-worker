@@ -71,7 +71,7 @@ get_ctx() ->
 get_record_struct(1) ->
     {record, [
         {value, {record, [
-            {windows, {custom, json, {ts_windows, encode, decode}}},
+            {windows, {custom, json, {ts_windows, db_encode, db_decode}}},
             {older_node_key, string},
             {older_node_timestamp, integer}
         ]}}

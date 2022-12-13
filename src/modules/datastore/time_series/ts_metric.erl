@@ -85,9 +85,8 @@ consume_measurements(TimeSeriesName, MetricName, Measurements, PersistenceCtx0) 
             DataNodeKey,
             1,
             DocSplittingStrategy,
-            {aggregate_measurement, Aggregator},
             WindowToBeUpdated,
-            Measurement,
+            {consume_measurement, Measurement, Aggregator},
             PersistenceAcc
         )
     end, PersistenceCtx1, Measurements).
@@ -99,14 +98,14 @@ consume_measurements(TimeSeriesName, MetricName, Measurements, PersistenceCtx0) 
     ts_windows:list_options(),
     ts_persistence:ctx()
 ) ->
-    {ts_windows:descending_window_infos_list(), ts_persistence:ctx()}.
+    {ts_windows:descending_infos_list(), ts_persistence:ctx()}.
 list_windows(TimeSeriesName, MetricName, Options, PersistenceCtx0) ->
     PersistenceCtx = set_as_currently_processed(TimeSeriesName, MetricName, PersistenceCtx0),
     list_windows(ts_persistence:get_currently_processed_metric(PersistenceCtx), Options, PersistenceCtx).
 
 %% @private
 -spec list_windows(record(), ts_windows:list_options(), ts_persistence:ctx()) ->
-    {ts_windows:descending_window_infos_list(), ts_persistence:ctx()}.
+    {ts_windows:descending_infos_list(), ts_persistence:ctx()}.
 list_windows(#metric{
     head_data = Data,
     config = #metric_config{aggregator = Aggregator} = Config
@@ -228,8 +227,7 @@ create_from_dump(TimeSeriesName, MetricName, #metric_dump{
 
 %% @private
 -spec update_window(data_node(), ts_metric_data_node:key(), non_neg_integer(), splitting_strategy(),
-    ts_windows:insert_strategy(), ts_window:window_id(), ts_window:measurement() | ts_window:window(),
-    ts_persistence:ctx()) -> ts_persistence:ctx().
+    ts_window:id(), ts_windows:update_spec(), ts_persistence:ctx()) -> ts_persistence:ctx().
 update_window(
     #data_node{
         windows = Windows
@@ -237,9 +235,9 @@ update_window(
     #splitting_strategy{
         max_docs_count = 1,
         max_windows_in_head_doc = MaxWindowsCount
-    }, InsertStrategy, WindowToBeUpdated, WindowOrMeasurement, PersistenceCtx) ->
+    }, WindowToBeUpdated, UpdateSpec, PersistenceCtx) ->
     % All windows are stored in single data node - update it
-    UpdatedWindows = ts_windows:insert(Windows, WindowToBeUpdated, WindowOrMeasurement, InsertStrategy),
+    UpdatedWindows = ts_windows:update(Windows, WindowToBeUpdated, UpdateSpec),
     FinalWindows = ts_windows:prune_overflowing(UpdatedWindows, MaxWindowsCount),
     ts_persistence:update(DataNodeKey, Data#data_node{windows = FinalWindows}, PersistenceCtx);
 
@@ -248,7 +246,7 @@ update_window(
         older_node_key = undefined,
         older_node_timestamp = OlderNodeTimestamp
     }, _DataNodeKey, _DataDocPosition,
-    _DocSplittingStrategy, _InsertStrategy, WindowToBeUpdated, _WindowOrMeasurement, PersistenceCtx)
+    _DocSplittingStrategy, WindowToBeUpdated, _UpdateSpec, PersistenceCtx)
     when OlderNodeTimestamp =/= undefined andalso OlderNodeTimestamp >= WindowToBeUpdated ->
     % There are too many newer windows - skip it
     PersistenceCtx;
@@ -258,9 +256,9 @@ update_window(
         older_node_key = undefined,
         windows = Windows
     } = Data, DataNodeKey, DataDocPosition,
-    DocSplittingStrategy, InsertStrategy, WindowToBeUpdated, WindowOrMeasurement, PersistenceCtx) ->
+    DocSplittingStrategy, WindowToBeUpdated, UpdateSpec, PersistenceCtx) ->
     % Updating last data node
-    UpdatedWindows = ts_windows:insert(Windows, WindowToBeUpdated, WindowOrMeasurement, InsertStrategy),
+    UpdatedWindows = ts_windows:update(Windows, WindowToBeUpdated, UpdateSpec),
     {MaxWindowsCount, SplitPosition} = get_max_windows_and_split_position(
         DataNodeKey, DocSplittingStrategy, PersistenceCtx),
 
@@ -280,12 +278,12 @@ update_window(
         older_node_key = OlderNodeKey,
         older_node_timestamp = OlderNodeTimestamp
     }, _DataNodeKey, DataDocPosition,
-    DocSplittingStrategy, InsertStrategy, WindowToBeUpdated, WindowOrMeasurement, PersistenceCtx)
+    DocSplittingStrategy, WindowToBeUpdated, UpdateSpec, PersistenceCtx)
     when OlderNodeTimestamp >= WindowToBeUpdated ->
     % Window should be stored in one one previous data nodes
     {OlderDataNode, UpdatedPersistenceCtx} = ts_persistence:get(OlderNodeKey, PersistenceCtx),
     update_window(OlderDataNode, OlderNodeKey, DataDocPosition + 1,
-        DocSplittingStrategy, InsertStrategy, WindowToBeUpdated, WindowOrMeasurement, UpdatedPersistenceCtx);
+        DocSplittingStrategy, WindowToBeUpdated, UpdateSpec, UpdatedPersistenceCtx);
 
 update_window(
     #data_node{
@@ -294,9 +292,9 @@ update_window(
     } = Data, DataNodeKey, DataDocPosition,
     #splitting_strategy{
         max_windows_in_tail_doc = MaxWindowsInTail
-    } = DocSplittingStrategy, InsertStrategy, WindowToBeUpdated, WindowOrMeasurement, PersistenceCtx) ->
+    } = DocSplittingStrategy, WindowToBeUpdated, UpdateSpec, PersistenceCtx) ->
     % Updating data node in the middle of data nodes' list (older_node_key is not undefined)
-    WindowsWithAggregatedMeasurement = ts_windows:insert(Windows, WindowToBeUpdated, WindowOrMeasurement, InsertStrategy),
+    WindowsWithAggregatedMeasurement = ts_windows:update(Windows, WindowToBeUpdated, UpdateSpec),
     {MaxWindowsCount, SplitPosition} = get_max_windows_and_split_position(
         DataNodeKey, DocSplittingStrategy, PersistenceCtx),
 
@@ -352,8 +350,8 @@ prepend_sorted_windows(DataNodeKey,
         0 ->
             % Use update function to reorganize documents and allow further adding to head
             {Timestamp, WindowValue} = lists:last(WindowsToPrepend),
-            UpdatedPersistenceCtx = update_window(Data, DataNodeKey, 1, DocSplittingStrategy, override,
-                Timestamp, WindowValue, PersistenceCtxAfterGet),
+            UpdatedPersistenceCtx = update_window(Data, DataNodeKey, 1, DocSplittingStrategy,
+                Timestamp, {override_with, WindowValue}, PersistenceCtxAfterGet),
             {lists:droplast(WindowsToPrepend), UpdatedPersistenceCtx};
         WindowsToUseCount ->
             % Set whole windows batch as windows in argument are sorted
@@ -391,9 +389,9 @@ prune_overflowing_node(_NewerNodeKey, _NewerDataNode, Key, #data_node{older_node
 
 
 %% @private
--spec list_windows_internal(data_node(), ts_window:window_id() | undefined, ts_windows:internal_list_options(),
+-spec list_windows_internal(data_node(), ts_window:id() | undefined, ts_windows:internal_list_options(),
     ts_persistence:ctx()) ->
-    {ts_windows:descending_window_infos_list() | ts_windows:descending_windows_list(), ts_persistence:ctx()}.
+    {ts_windows:descending_infos_list() | ts_windows:descending_windows_list(), ts_persistence:ctx()}.
 list_windows_internal(
     #data_node{
         windows = Windows,
@@ -439,7 +437,7 @@ delete_data_nodes_internal(DataNodeKey, #data_node{older_node_key = OlderNodeKey
 
 %% @private
 -spec get_window_id(ts_window:timestamp_seconds() | undefined, metric_config:record()) ->
-    ts_window:window_id() | undefined.
+    ts_window:id() | undefined.
 get_window_id(undefined, _) ->
     undefined;
 get_window_id(_Time, #metric_config{resolution = 0}) ->
