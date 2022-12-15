@@ -100,7 +100,7 @@
 -type batch() :: datastore_doc:batch().
 
 
--define(handle_exception(Batch, FunctionArgs, Class, Reason, Stacktrace),
+-define(handle_exception(Batch, FunArgs, Class, Reason, Stacktrace),
     case {Class, Reason} of
         {_, {fetch_error, not_found}} ->
             erlang:raise(Class, Reason, Stacktrace);
@@ -109,7 +109,7 @@
         {throw, {{error, _} = Error, UpdatedDatastoreBatch}} ->
             {Error, UpdatedDatastoreBatch};
         _ ->
-            {?examine_exception(Class, Reason, Stacktrace, "Args: ~p", [FunctionArgs]), Batch}
+            {?examine_exception(Class, Reason, Stacktrace, [FunArgs]), Batch}
     end
 ).
 
