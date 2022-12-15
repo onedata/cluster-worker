@@ -152,6 +152,7 @@ get_record_struct(3) ->
                 {max_windows_in_head_doc, integer},
                 {max_windows_in_tail_doc, integer}
             ]}},
-            {head_data, DataRecordStruct} % New version is needed as metrics' format has changed and upgrade fun has to prune old data
+            {head_data, DataRecordStruct} % change of file name in couchbase ; additionally format of record inside
+                                          % head_data has changed and upgrade fun prunes old data as a result
         ]}}}}
     ]}.

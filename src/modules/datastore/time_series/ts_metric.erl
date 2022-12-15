@@ -40,6 +40,10 @@
 
 -export_type([record/0, splitting_strategy/0, data_node/0, dump/0]).
 
+
+-define(MAX_WINDOW_LISTING_LIMIT, 1000).
+
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -98,21 +102,27 @@ consume_measurements(TimeSeriesName, MetricName, Measurements, PersistenceCtx0) 
     ts_windows:list_options(),
     ts_persistence:ctx()
 ) ->
-    {ts_windows:descending_infos_list(), ts_persistence:ctx()}.
+    {ts_windows:descending_list(ts_window:info()), ts_persistence:ctx()}.
 list_windows(TimeSeriesName, MetricName, Options, PersistenceCtx0) ->
     PersistenceCtx = set_as_currently_processed(TimeSeriesName, MetricName, PersistenceCtx0),
     list_windows(ts_persistence:get_currently_processed_metric(PersistenceCtx), Options, PersistenceCtx).
 
 %% @private
 -spec list_windows(record(), ts_windows:list_options(), ts_persistence:ctx()) ->
-    {ts_windows:descending_infos_list(), ts_persistence:ctx()}.
+    {ts_windows:descending_list(ts_window:info()), ts_persistence:ctx()}.
 list_windows(#metric{
     head_data = Data,
     config = #metric_config{aggregator = Aggregator} = Config
 }, Options, PersistenceCtx) ->
     Window = get_window_id(maps:get(start_timestamp, Options, undefined), Config),
-    InternalOptions = ts_windows:map_list_options(Options, Aggregator, maps:get(extended_info, Options, false)),
-    list_windows_internal(Data, Window, InternalOptions, PersistenceCtx).
+    ListingPostprocessor = fun(WindowId, WindowRecord) ->
+        ts_window:to_info(WindowId, WindowRecord, Aggregator, maps:get(extended_info, Options, false))
+    end,
+    SanitizedWindowLimit = case maps:find(window_limit, Options) of
+        error -> ?MAX_WINDOW_LISTING_LIMIT;
+        {ok, Limit} -> min(Limit, ?MAX_WINDOW_LISTING_LIMIT)
+    end,
+    list_windows_internal(Data, Window, Options#{window_limit => SanitizedWindowLimit}, ListingPostprocessor, PersistenceCtx).
 
 
 -spec delete_data_nodes(
@@ -182,8 +192,9 @@ reconfigure(#metric{
 } = CurrentMetric, NewDocSplittingStrategy, PersistenceCtx) ->
     % Doc splitting strategy has changed - get all windows from head and data nodes, delete all data nodes
     % and clean all windows from head and then set them once more
+    ListingPostprocessor = fun(WindowId, WindowRecord) -> {WindowId, WindowRecord} end,
     {ExistingWindows, UpdatedPersistenceCtx} = list_windows_internal(
-        Data, undefined, #{return_type => full_data}, PersistenceCtx),
+        Data, undefined, #{}, ListingPostprocessor, PersistenceCtx),
     PersistenceCtxAfterCleaning = delete_data_nodes(CurrentMetric, UpdatedPersistenceCtx),
 
     NewMetric = build(Config, NewDocSplittingStrategy), % init cleans all windows from head
@@ -335,7 +346,7 @@ update_window(
 %% @end
 %%--------------------------------------------------------------------
 -spec prepend_sorted_windows(ts_metric_data_node:key(), splitting_strategy(),
-    ts_windows:descending_windows_list(), ts_persistence:ctx()) -> ts_persistence:ctx().
+    ts_windows:descending_list({ts_window:id(), ts_window:record()}), ts_persistence:ctx()) -> ts_persistence:ctx().
 prepend_sorted_windows(_DataNodeKey, _DocSplittingStrategy, [], PersistenceCtx) ->
     PersistenceCtx;
 prepend_sorted_windows(DataNodeKey,
@@ -389,38 +400,42 @@ prune_overflowing_node(_NewerNodeKey, _NewerDataNode, Key, #data_node{older_node
 
 
 %% @private
--spec list_windows_internal(data_node(), ts_window:id() | undefined, ts_windows:internal_list_options(),
-    ts_persistence:ctx()) ->
-    {ts_windows:descending_infos_list() | ts_windows:descending_windows_list(), ts_persistence:ctx()}.
+-spec list_windows_internal(data_node(), ts_window:id() | undefined, ts_windows:list_options(),
+    ts_windows:listing_postprocessor(MappingResult), ts_persistence:ctx()) ->
+    {ts_windows:descending_list(MappingResult), ts_persistence:ctx()}.
 list_windows_internal(
     #data_node{
         windows = Windows,
         older_node_key = undefined
-    }, Window, Options, PersistenceCtx) ->
-    {_, WindowsToReturn} = ts_windows:list(Windows, Window, Options),
+    }, Window, Options, ListingPostprocessor, PersistenceCtx) ->
+    {_, WindowsToReturn} = ts_windows:list(Windows, Window, Options, ListingPostprocessor),
     {WindowsToReturn, PersistenceCtx};
 
 list_windows_internal(
     #data_node{
         older_node_key = OlderNodeKey,
         older_node_timestamp = OlderNodeTimestamp
-    }, Window, Options, PersistenceCtx)
+    }, Window, Options, ListingPostprocessor, PersistenceCtx)
     when OlderNodeTimestamp >= Window ->
     {OlderDataNode, UpdatedPersistenceCtx} = ts_persistence:get(OlderNodeKey, PersistenceCtx),
-    list_windows_internal(OlderDataNode, Window, Options, UpdatedPersistenceCtx);
+    list_windows_internal(OlderDataNode, Window, Options, ListingPostprocessor, UpdatedPersistenceCtx);
 
 list_windows_internal(
     #data_node{
         windows = Windows,
         older_node_key = OlderNodeKey
-    }, Window, Options, PersistenceCtx) ->
-    case ts_windows:list(Windows, Window, Options) of
-        {ok, WindowsToReturn} ->
+    }, Window, Options, ListingPostprocessor, PersistenceCtx) ->
+    case ts_windows:list(Windows, Window, Options, ListingPostprocessor) of
+        {done, WindowsToReturn} ->
             {WindowsToReturn, PersistenceCtx};
-        {{continue, NewOptions}, WindowsToReturn} ->
+        {partial, WindowsToReturn} ->
             {OlderDataNode, UpdatedPersistenceCtx} = ts_persistence:get(OlderNodeKey, PersistenceCtx),
+            NewOptions = case Options of
+                #{window_limit := Limit} -> Options#{window_limit := Limit - length(WindowsToReturn)};
+                _ -> Options
+            end,
             {NextWindowsToReturn, FinalPersistenceCtx} =
-                list_windows_internal(OlderDataNode, undefined, NewOptions, UpdatedPersistenceCtx),
+                list_windows_internal(OlderDataNode, undefined, NewOptions, ListingPostprocessor, UpdatedPersistenceCtx),
             {WindowsToReturn ++ NextWindowsToReturn, FinalPersistenceCtx}
     end.
 

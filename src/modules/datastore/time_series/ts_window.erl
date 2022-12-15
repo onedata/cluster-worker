@@ -104,15 +104,7 @@ db_decode([FirstMeasurementTimestamp, LastMeasurementTimestamp | AggregatedMeasu
     }.
 
 
--spec to_info(id(), record(), basic_info | extended_info, metric_config:aggregator()) -> info().
-to_info(
-    WindowId,
-    #window{aggregated_measurements = Measurements},
-    basic_info,
-    Aggregator
-) ->
-    #window_info{timestamp = WindowId, value = aggregated_measurements_to_value(Measurements, Aggregator)};
-
+-spec to_info(id(), record(), metric_config:aggregator(), boolean()) -> info().
 to_info(
     WindowId,
     #window{
@@ -120,15 +112,23 @@ to_info(
         first_measurement_timestamp = FirstMeasurementTimestamp,
         last_measurement_timestamp = LastMeasurementTimestamp
     },
-    extended_info,
-    Aggregator
+    Aggregator,
+    true = _ExtendedInfo
 ) ->
     #window_info{
         timestamp = WindowId,
         value = aggregated_measurements_to_value(Measurements, Aggregator),
         first_measurement_timestamp = FirstMeasurementTimestamp,
         last_measurement_timestamp = LastMeasurementTimestamp
-    }.
+    };
+
+to_info(
+    WindowId,
+    #window{aggregated_measurements = Measurements},
+    Aggregator,
+    false = _ExtendedInfo
+) ->
+    #window_info{timestamp = WindowId, value = aggregated_measurements_to_value(Measurements, Aggregator)}.
 
 
 -spec info_to_json(info()) -> json_utils:json_term().

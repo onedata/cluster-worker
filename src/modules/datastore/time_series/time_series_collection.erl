@@ -87,7 +87,7 @@
 
 -type config() :: structure(metric_config:record()).
 -type consume_spec() :: structure([ts_window:measurement()]).
--type slice() :: structure(ts_windows:descending_infos_list()).
+-type slice() :: structure(ts_windows:descending_list(ts_window:info())).
 -export_type([config/0, consume_spec/0, slice/0]).
 
 
