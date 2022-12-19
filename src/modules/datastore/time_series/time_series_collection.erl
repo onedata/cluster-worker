@@ -259,7 +259,7 @@ consume_measurements(Ctx, Id, ConsumeSpec, Batch) ->
     end.
 
 
--spec get_slice(ctx(), id(), layout(), ts_windows:list_options(), batch() | undefined) ->
+-spec get_slice(ctx(), id(), layout(), ts_metric:list_options(), batch() | undefined) ->
     {{ok, slice()} | {error, term()}, batch() | undefined}.
 get_slice(Ctx, Id, SliceLayout, ListWindowsOptions, Batch) ->
     try

@@ -33,15 +33,31 @@
 -export([build/2, insert/4, consume_measurements/4, list_windows/4, delete_data_nodes/3,
     reconfigure/4, delete/3, generate_dump/2, create_from_dump/4]).
 
+
+%% @formatter:off
+-type list_options() :: #{
+    % newest timestamp from which descending listing will begin
+    start_timestamp => ts_window:timestamp_seconds(),
+    % oldest timestamp when the listing should stop (unless it hits the window_limit)
+    stop_timestamp => ts_window:timestamp_seconds(),
+    % maximum number of time windows to be listed
+    window_limit => non_neg_integer(),
+    % If true, additional fields of #window_info{} record are set (if false, only timestamp and value are defined)
+    extended_info => boolean()
+}.
+%% @formatter:on
+
+
 -type record() :: #metric{}.
 -type splitting_strategy() :: #splitting_strategy{}.
 -type data_node() :: #data_node{}.
 -type dump() :: #metric_dump{}.
 
--export_type([record/0, splitting_strategy/0, data_node/0, dump/0]).
+-export_type([list_options/0, record/0, splitting_strategy/0, data_node/0, dump/0]).
 
 
 -define(MAX_WINDOW_LISTING_LIMIT, 1000).
+-define(INFINITE_WINDOW_LISTING_LIMIT, 999999999999999).
 
 
 %%%===================================================================
@@ -82,7 +98,7 @@ consume_measurements(TimeSeriesName, MetricName, Measurements, PersistenceCtx0) 
             splitting_strategy = DocSplittingStrategy,
             head_data = Data
         } = ts_persistence:get_currently_processed_metric(PersistenceAcc),
-        WindowToBeUpdated = get_window_id(NewTimestamp, Config),
+        WindowToBeUpdated = resolve_starting_window_id(NewTimestamp, Config),
         DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceAcc),
         update_window(
             Data,
@@ -99,7 +115,7 @@ consume_measurements(TimeSeriesName, MetricName, Measurements, PersistenceCtx0) 
 -spec list_windows(
     time_series:name(),
     time_series:metric_name(),
-    ts_windows:list_options(),
+    list_options(),
     ts_persistence:ctx()
 ) ->
     {ts_windows:descending_list(ts_window:info()), ts_persistence:ctx()}.
@@ -108,21 +124,26 @@ list_windows(TimeSeriesName, MetricName, Options, PersistenceCtx0) ->
     list_windows(ts_persistence:get_currently_processed_metric(PersistenceCtx), Options, PersistenceCtx).
 
 %% @private
--spec list_windows(record(), ts_windows:list_options(), ts_persistence:ctx()) ->
+-spec list_windows(record(), list_options(), ts_persistence:ctx()) ->
     {ts_windows:descending_list(ts_window:info()), ts_persistence:ctx()}.
 list_windows(#metric{
     head_data = Data,
     config = #metric_config{aggregator = Aggregator} = Config
 }, Options, PersistenceCtx) ->
-    Window = get_window_id(maps:get(start_timestamp, Options, undefined), Config),
-    ListingPostprocessor = fun(WindowId, WindowRecord) ->
-        ts_window:to_info(WindowId, WindowRecord, Aggregator, maps:get(extended_info, Options, false))
-    end,
+    StartWindowId = resolve_starting_window_id(maps:get(start_timestamp, Options, undefined), Config),
     SanitizedWindowLimit = case maps:find(window_limit, Options) of
         error -> ?MAX_WINDOW_LISTING_LIMIT;
         {ok, Limit} -> min(Limit, ?MAX_WINDOW_LISTING_LIMIT)
     end,
-    list_windows_internal(Data, Window, Options#{window_limit => SanitizedWindowLimit}, ListingPostprocessor, PersistenceCtx).
+    StopTimestamp = maps:get(stop_timestamp, Options, undefined),
+    InfoExtent = case maps:get(extended_info, Options, false) of
+        false -> basic;
+        true -> extended
+    end,
+    ListingPostprocessor = fun(WindowId, WindowRecord) ->
+        ts_window:to_info(WindowId, WindowRecord, Aggregator, InfoExtent)
+    end,
+    list_windows_internal(Data, StartWindowId, StopTimestamp, SanitizedWindowLimit, ListingPostprocessor, PersistenceCtx).
 
 
 -spec delete_data_nodes(
@@ -166,7 +187,7 @@ reconfigure(#metric{
     PersistenceCtx;
 reconfigure(#metric{
     head_data = #data_node{
-        windows = ExistingWindowsSet
+        windows = WindowSetFromHead
     } = Data,
     splitting_strategy = #splitting_strategy{
         max_windows_in_tail_doc = MaxInTail
@@ -183,9 +204,12 @@ reconfigure(#metric{
         splitting_strategy = NewDocSplittingStrategy
     },
     PersistenceCtxAfterInit = ts_persistence:insert_metric(NewMetric, PersistenceCtx),
-    ExistingWindows = ts_windows:list_full_data(ExistingWindowsSet),
+    ListingPostprocessor = fun(WindowId, WindowRecord) -> {WindowId, WindowRecord} end,
+    {_, WindowListFromHead} = ts_windows:list(
+        WindowSetFromHead, undefined, undefined, ?INFINITE_WINDOW_LISTING_LIMIT, ListingPostprocessor
+    ),
     DataNodeKey = ts_persistence:get_time_series_collection_id(PersistenceCtxAfterInit),
-    prepend_sorted_windows(DataNodeKey, NewDocSplittingStrategy, ExistingWindows, PersistenceCtxAfterInit);
+    prepend_sorted_windows(DataNodeKey, NewDocSplittingStrategy, WindowListFromHead, PersistenceCtxAfterInit);
 reconfigure(#metric{
     head_data = Data,
     config = Config
@@ -194,7 +218,8 @@ reconfigure(#metric{
     % and clean all windows from head and then set them once more
     ListingPostprocessor = fun(WindowId, WindowRecord) -> {WindowId, WindowRecord} end,
     {ExistingWindows, UpdatedPersistenceCtx} = list_windows_internal(
-        Data, undefined, #{}, ListingPostprocessor, PersistenceCtx),
+        Data, undefined, undefined, ?INFINITE_WINDOW_LISTING_LIMIT, ListingPostprocessor, PersistenceCtx
+    ),
     PersistenceCtxAfterCleaning = delete_data_nodes(CurrentMetric, UpdatedPersistenceCtx),
 
     NewMetric = build(Config, NewDocSplittingStrategy), % init cleans all windows from head
@@ -223,7 +248,7 @@ generate_dump(#metric{
 create_from_dump(_TimeSeriesName, _MetricName, #metric_dump{data_nodes = []}, PersistenceCtx) ->
     PersistenceCtx;
 create_from_dump(TimeSeriesName, MetricName, #metric_dump{
-    head_record = #metric{head_data = HeadData}, 
+    head_record = #metric{head_data = HeadData},
     data_nodes = DataNodes
 }, PersistenceCtx) ->
     PersistenceCtx2 = set_as_currently_processed(TimeSeriesName, MetricName, PersistenceCtx),
@@ -246,9 +271,9 @@ update_window(
     #splitting_strategy{
         max_docs_count = 1,
         max_windows_in_head_doc = MaxWindowsCount
-    }, WindowToBeUpdated, UpdateSpec, PersistenceCtx) ->
+    }, WindowId, UpdateSpec, PersistenceCtx) ->
     % All windows are stored in single data node - update it
-    UpdatedWindows = ts_windows:update(Windows, WindowToBeUpdated, UpdateSpec),
+    UpdatedWindows = ts_windows:update(Windows, WindowId, UpdateSpec),
     FinalWindows = ts_windows:prune_overflowing(UpdatedWindows, MaxWindowsCount),
     ts_persistence:update(DataNodeKey, Data#data_node{windows = FinalWindows}, PersistenceCtx);
 
@@ -360,9 +385,9 @@ prepend_sorted_windows(DataNodeKey,
         ts_windows:get_remaining_windows_count(ExistingWindows, MaxWindowsCount) of
         0 ->
             % Use update function to reorganize documents and allow further adding to head
-            {Timestamp, WindowValue} = lists:last(WindowsToPrepend),
+            {WindowId, WindowValue} = lists:last(WindowsToPrepend),
             UpdatedPersistenceCtx = update_window(Data, DataNodeKey, 1, DocSplittingStrategy,
-                Timestamp, {override_with, WindowValue}, PersistenceCtxAfterGet),
+                WindowId, {override_with, WindowValue}, PersistenceCtxAfterGet),
             {lists:droplast(WindowsToPrepend), UpdatedPersistenceCtx};
         WindowsToUseCount ->
             % Set whole windows batch as windows in argument are sorted
@@ -400,42 +425,41 @@ prune_overflowing_node(_NewerNodeKey, _NewerDataNode, Key, #data_node{older_node
 
 
 %% @private
--spec list_windows_internal(data_node(), ts_window:id() | undefined, ts_windows:list_options(),
+-spec list_windows_internal(
+    data_node(),
+    ts_window:id() | undefined,
+    ts_window:id() | undefined,
+    non_neg_integer(),
     ts_windows:listing_postprocessor(MappingResult), ts_persistence:ctx()) ->
     {ts_windows:descending_list(MappingResult), ts_persistence:ctx()}.
-list_windows_internal(
-    #data_node{
-        windows = Windows,
-        older_node_key = undefined
-    }, Window, Options, ListingPostprocessor, PersistenceCtx) ->
-    {_, WindowsToReturn} = ts_windows:list(Windows, Window, Options, ListingPostprocessor),
+list_windows_internal(#data_node{
+    windows = Windows,
+    older_node_key = undefined
+}, StartWindowId, StopTimestamp, Limit, ListingPostprocessor, PersistenceCtx) ->
+    {_, WindowsToReturn} = ts_windows:list(Windows, StartWindowId, StopTimestamp, Limit, ListingPostprocessor),
     {WindowsToReturn, PersistenceCtx};
 
-list_windows_internal(
-    #data_node{
-        older_node_key = OlderNodeKey,
-        older_node_timestamp = OlderNodeTimestamp
-    }, Window, Options, ListingPostprocessor, PersistenceCtx)
-    when OlderNodeTimestamp >= Window ->
+list_windows_internal(#data_node{
+    older_node_key = OlderNodeKey,
+    older_node_timestamp = OlderNodeTimestamp
+}, StartWindowId, StopTimestamp, Limit, ListingPostprocessor, PersistenceCtx)
+    when OlderNodeTimestamp >= StartWindowId ->
     {OlderDataNode, UpdatedPersistenceCtx} = ts_persistence:get(OlderNodeKey, PersistenceCtx),
-    list_windows_internal(OlderDataNode, Window, Options, ListingPostprocessor, UpdatedPersistenceCtx);
+    list_windows_internal(OlderDataNode, StartWindowId, StopTimestamp, Limit, ListingPostprocessor, UpdatedPersistenceCtx);
 
-list_windows_internal(
-    #data_node{
-        windows = Windows,
-        older_node_key = OlderNodeKey
-    }, Window, Options, ListingPostprocessor, PersistenceCtx) ->
-    case ts_windows:list(Windows, Window, Options, ListingPostprocessor) of
+list_windows_internal(#data_node{
+    windows = Windows,
+    older_node_key = OlderNodeKey
+}, StartWindowId, StopTimestamp, Limit, ListingPostprocessor, PersistenceCtx) ->
+    case ts_windows:list(Windows, StartWindowId, StopTimestamp, Limit, ListingPostprocessor) of
         {done, WindowsToReturn} ->
             {WindowsToReturn, PersistenceCtx};
         {partial, WindowsToReturn} ->
             {OlderDataNode, UpdatedPersistenceCtx} = ts_persistence:get(OlderNodeKey, PersistenceCtx),
-            NewOptions = case Options of
-                #{window_limit := Limit} -> Options#{window_limit := Limit - length(WindowsToReturn)};
-                _ -> Options
-            end,
-            {NextWindowsToReturn, FinalPersistenceCtx} =
-                list_windows_internal(OlderDataNode, undefined, NewOptions, ListingPostprocessor, UpdatedPersistenceCtx),
+            NewLimit = Limit - length(WindowsToReturn),
+            {NextWindowsToReturn, FinalPersistenceCtx} = list_windows_internal(
+                OlderDataNode, undefined, StopTimestamp, NewLimit, ListingPostprocessor, UpdatedPersistenceCtx
+            ),
             {WindowsToReturn ++ NextWindowsToReturn, FinalPersistenceCtx}
     end.
 
@@ -451,13 +475,13 @@ delete_data_nodes_internal(DataNodeKey, #data_node{older_node_key = OlderNodeKey
 
 
 %% @private
--spec get_window_id(ts_window:timestamp_seconds() | undefined, metric_config:record()) ->
+-spec resolve_starting_window_id(ts_window:timestamp_seconds() | undefined, metric_config:record()) ->
     ts_window:id() | undefined.
-get_window_id(undefined, _) ->
+resolve_starting_window_id(undefined, _) ->
     undefined;
-get_window_id(_Time, #metric_config{resolution = 0}) ->
+resolve_starting_window_id(_Time, #metric_config{resolution = 0}) ->
     0;
-get_window_id(Time, #metric_config{resolution = Resolution}) ->
+resolve_starting_window_id(Time, #metric_config{resolution = Resolution}) ->
     Time - Time rem Resolution.
 
 
@@ -488,7 +512,7 @@ get_max_windows_and_split_position(
 
 
 %% @private
--spec split_node(ts_metric_data_node:key(), data_node(), ts_windows:windows_collection(), ts_windows:windows_collection(),
+-spec split_node(ts_metric_data_node:key(), data_node(), ts_windows:window_collection(), ts_windows:window_collection(),
     ts_window:timestamp_seconds(), non_neg_integer(), splitting_strategy(), ts_persistence:ctx()) ->
     {ts_metric_data_node:key() | undefined, data_node() | undefined, ts_persistence:ctx()}.
 split_node(DataNodeKey, Data, Windows1, _Windows2, SplitTimestamp, MaxCount,

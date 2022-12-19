@@ -21,8 +21,8 @@
 
 
 -type timestamp_seconds() :: time_series:time_seconds().
--type value() :: number().
 -type id() :: timestamp_seconds().
+-type value() :: number().
 -type aggregated_measurements() :: value() | {ValuesCount :: non_neg_integer(), ValuesSum :: value()}.
 -type record() :: #window{}.
 -type info() :: #window_info{}.
@@ -104,31 +104,19 @@ db_decode([FirstMeasurementTimestamp, LastMeasurementTimestamp | AggregatedMeasu
     }.
 
 
--spec to_info(id(), record(), metric_config:aggregator(), boolean()) -> info().
-to_info(
-    WindowId,
-    #window{
-        aggregated_measurements = Measurements,
-        first_measurement_timestamp = FirstMeasurementTimestamp,
-        last_measurement_timestamp = LastMeasurementTimestamp
-    },
-    Aggregator,
-    true = _ExtendedInfo
-) ->
+-spec to_info(id(), record(), metric_config:aggregator(), basic | extended) -> info().
+to_info(WindowId, Window, Aggregator, basic) ->
     #window_info{
         timestamp = WindowId,
-        value = aggregated_measurements_to_value(Measurements, Aggregator),
-        first_measurement_timestamp = FirstMeasurementTimestamp,
-        last_measurement_timestamp = LastMeasurementTimestamp
+        value = aggregated_measurements_to_value(Window#window.aggregated_measurements, Aggregator)
     };
-
-to_info(
-    WindowId,
-    #window{aggregated_measurements = Measurements},
-    Aggregator,
-    false = _ExtendedInfo
-) ->
-    #window_info{timestamp = WindowId, value = aggregated_measurements_to_value(Measurements, Aggregator)}.
+to_info(WindowId, Window, Aggregator, extended) ->
+    #window_info{
+        timestamp = WindowId,
+        value = aggregated_measurements_to_value(Window#window.aggregated_measurements, Aggregator),
+        first_measurement_timestamp = Window#window.first_measurement_timestamp,
+        last_measurement_timestamp = Window#window.last_measurement_timestamp
+    }.
 
 
 -spec info_to_json(info()) -> json_utils:json_term().
