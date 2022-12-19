@@ -20,7 +20,7 @@
 %% API
 -export([set/1, get/1]).
 %% datastore_model callbacks
--export([get_ctx/0, get_record_struct/1]).
+-export([get_ctx/0, get_record_version/0, upgrade_record/2, get_record_struct/1]).
 
 -record(ts_metric_data_node, {
     value :: ts_metric:data_node()
@@ -66,12 +66,35 @@ get(#ts_metric_data_node{value = Data}) ->
 get_ctx() ->
     ?CTX.
 
+
+-spec get_record_version() -> datastore_model:record_version().
+get_record_version() ->
+    2.
+
+
+-spec upgrade_record(datastore_model:record_version(), datastore_model:record()) ->
+    {datastore_model:record_version(), datastore_model:record()}.
+upgrade_record(1, {?MODULE, DataNode}
+) ->
+    % Update is not needed as versions differ in encoding/decoding method (fields are the same)
+    {2, {?MODULE, DataNode}}.
+
+
 -spec get_record_struct(datastore_model:record_version()) ->
     datastore_model:record_struct().
 get_record_struct(1) ->
     {record, [
         {value, {record, [
             {windows, {custom, json, {ts_windows, db_encode, db_decode}}},
+            {older_node_key, string},
+            {older_node_timestamp, integer}
+        ]}}
+    ]};
+get_record_struct(2) ->
+    {record, [
+        {value, {record, [
+            % Change custom type to string to prevent encoding field twice
+            {windows, {custom, string, {ts_windows, db_encode, db_decode}}},
             {older_node_key, string},
             {older_node_timestamp, integer}
         ]}}
