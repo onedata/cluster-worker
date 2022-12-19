@@ -86,7 +86,7 @@ consume_measurements(Ctx, Id, ConsumeSpec) ->
 
 
 %% @doc @see time_series_collection:get_slice/5
--spec get_slice(ctx(), time_series_collection:id(), time_series_collection:layout(), ts_windows:list_options()) ->
+-spec get_slice(ctx(), time_series_collection:id(), time_series_collection:layout(), ts_metric:list_options()) ->
     {ok, time_series_collection:slice()} | {error, term()}.
 get_slice(Ctx, Id, SliceLayout, Options) ->
     ?apply(Ctx, Id, [SliceLayout, Options]).
