@@ -240,13 +240,13 @@ update(DataDocKey, Data, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx
 
 -spec delete_data_node(key(), ctx()) -> ctx().
 delete_data_node(Key, #ctx{datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
-    {ok, UpdatedBatch} = datastore_doc:delete(DatastoreCtx, Key, Batch),
+    {ok, UpdatedBatch} = datastore_doc:delete(datastore_model:ensure_expiry_set_on_delete(DatastoreCtx), Key, Batch),
     Ctx#ctx{batch = UpdatedBatch}.
 
 
 -spec delete_hub(ctx()) -> ctx().
 delete_hub(#ctx{hub = #document{key = HubKey}, datastore_ctx = DatastoreCtx, batch = Batch} = Ctx) ->
-    {ok, UpdatedBatch} = datastore_doc:delete(DatastoreCtx, HubKey, Batch),
+    {ok, UpdatedBatch} = datastore_doc:delete(datastore_model:ensure_expiry_set_on_delete(DatastoreCtx), HubKey, Batch),
     Ctx#ctx{batch = UpdatedBatch, hub = deleted, is_hub_updated = false}.
 
 

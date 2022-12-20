@@ -86,7 +86,7 @@ consume_measurements(Ctx, Id, ConsumeSpec) ->
 
 
 %% @doc @see time_series_collection:get_slice/5
--spec get_slice(ctx(), time_series_collection:id(), time_series_collection:layout(), ts_windows:list_options()) ->
+-spec get_slice(ctx(), time_series_collection:id(), time_series_collection:layout(), ts_metric:list_options()) ->
     {ok, time_series_collection:slice()} | {error, term()}.
 get_slice(Ctx, Id, SliceLayout, Options) ->
     ?apply(Ctx, Id, [SliceLayout, Options]).
@@ -103,10 +103,11 @@ browse(Ctx, Id, #time_series_slice_get_request{} = SliceReq) ->
     #time_series_slice_get_request{
         layout = SliceLayout, 
         start_timestamp = StartTimestamp, 
-        window_limit = WindowLimit
+        window_limit = WindowLimit,
+        extended_info = ExtendedInfo
     } = SliceReq,
     Opts = maps_utils:remove_undefined(#{
-        start_timestamp => StartTimestamp, window_limit => WindowLimit
+        start_timestamp => StartTimestamp, window_limit => WindowLimit, extended_info => ExtendedInfo
     }),
     case get_slice(Ctx, Id, SliceLayout, Opts) of
         {ok, Slice} -> {ok, #time_series_slice_get_result{slice = Slice}};

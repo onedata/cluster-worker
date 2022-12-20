@@ -69,7 +69,7 @@ get_ctx() ->
 
 -spec get_record_version() -> datastore_model:record_version().
 get_record_version() ->
-    2.
+    3.
 
 
 -spec upgrade_record(datastore_model:record_version(), datastore_model:record()) ->
@@ -86,6 +86,25 @@ upgrade_record(1, {?MODULE, TimeSeriesCollectionHeads}
             {metric_config, Resolution, Retention, Aggregator},
             SplittingStrategy,
             DataNode
+        }
+    end, TimeSeriesCollectionHeads)}};
+
+upgrade_record(2, {?MODULE, TimeSeriesCollectionHeads}
+) ->
+    {3, {?MODULE, tsc_structure:map(fun(_TimeSeriesName, _MetricName, OldMetric) ->
+        {metric,
+            MetricConfig,
+            SplittingStrategy,
+            _DataNode
+        } = OldMetric,
+
+        % Metrics' format has changed - prune existing data
+        % NOTE: This update takes place between 21.02.0-alpha28 and 21.02.1
+        % when all time-series ale small enough to be stored in head
+        {metric,
+            MetricConfig,
+            SplittingStrategy,
+            #data_node{windows = ts_windows:init(), older_node_key = undefined, older_node_timestamp = undefined}
         }
     end, TimeSeriesCollectionHeads)}}.
 
@@ -121,5 +140,19 @@ get_record_struct(2) ->
                 {max_windows_in_tail_doc, integer}
             ]}},
             DataRecordStruct
+        ]}}}}
+    ]};
+get_record_struct(3) ->
+    {record, [{value, DataRecordStruct}]} = ts_metric_data_node:get_record_struct(2), % use version 2 to improve encoding/decoding
+    {record, [
+        {time_series_collection_heads, #{string => #{string => {record, [
+            {config, {custom, string, {persistent_record, encode, decode, metric_config}}},
+            {splitting_strategy, {record, [
+                {max_docs_count, integer},
+                {max_windows_in_head_doc, integer},
+                {max_windows_in_tail_doc, integer}
+            ]}},
+            {head_data, DataRecordStruct} % change of field name in couchbase ; additionally format of record inside
+                                          % head_data has changed and upgrade fun prunes old data as a result
         ]}}}}
     ]}.
