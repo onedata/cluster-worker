@@ -12,80 +12,79 @@
 -module(ts_windows).
 -author("Michal Wrzeszcz").
 
+
+-include("modules/datastore/datastore_time_series.hrl").
+
+
 %% API
--export([init/0, list/3, list_all/1, insert_value/4, prepend_windows_list/2, prune_overflowing/2, split/2,
-    is_size_exceeded/2, get_remaining_windows_count/2, reorganize/4]).
+-export([init/0, list/5, update/3, prepend_windows_list/2, prune_overflowing/2, split/2,
+    is_size_exceeded/2, get_remaining_windows_count/2, reorganize/4
+]).
 %% Encoding/decoding  API
--export([encode/1, decode/1]).
-%% Exported for unit tests
--export([get_value/2, get_size/1]).
+-export([db_encode/1, db_decode/1]).
+%% Exported for unit and ct tests
+-export([get/2, get_size/1, to_list/1]).
 
--type timestamp_seconds() :: time_series:time_seconds().
--type value() :: number().
--type window_id() :: timestamp_seconds().
--type window_value() :: value() | {ValuesCount :: non_neg_integer(), ValuesSum :: value()}.
--type window() :: {timestamp_seconds(), window_value()}.
--type windows_collection() :: gb_trees:tree(timestamp_seconds(), window_value()).
--type descending_windows_list() :: [window()].
--type insert_strategy() :: {aggregate, metric_config:aggregator()} | ignore_existing.
+-compile({no_auto_import, [get/1]}).
 
--type list_options() :: #{
-    % newest timestamp from which descending listing will begin
-    start_timestamp => timestamp_seconds(),
-    % oldest timestamp when the listing should stop (unless it hits the window_limit)
-    stop_timestamp => timestamp_seconds(),
-    % maximum number of time windows to be listed
-    window_limit => non_neg_integer()
-}.
 
--export_type([timestamp_seconds/0, value/0, window_id/0, window_value/0, window/0, windows_collection/0,
-    descending_windows_list/0, insert_strategy/0, list_options/0]).
+-type window_collection() :: gb_trees:tree(ts_window:timestamp_seconds(), ts_window:record()).
+-type descending_list(Element) :: [Element].
+-type update_spec() :: {override_with, ts_window:record()} |
+{consume_measurement, ts_window:measurement(), metric_config:aggregator()}.
+
+% Mapping function that will be applied to each listed window_id/#window{} pair before the result is returned.
+-type listing_postprocessor(MappingResult) :: fun((ts_window:id(), ts_window:record()) -> MappingResult).
+
+-export_type([window_collection/0, descending_list/1, update_spec/0, listing_postprocessor/1]).
 
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
--define(MAX_WINDOW_LIMIT, 1000).
+-define(MINIMAL_TIMESTAMP, 0).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
--spec init() -> windows_collection().
+-spec init() -> window_collection().
 init() ->
     init_windows_set().
 
 
--spec list(windows_collection(), timestamp_seconds() | undefined, list_options()) ->
-    {ok | {continue, list_options()}, descending_windows_list()}.
-list(Windows, Timestamp, Options) ->
-    SanitizedWindowLimit = case maps:find(window_limit, Options) of
-        error ->
-            ?MAX_WINDOW_LIMIT;
-        {ok, Limit} ->
-            min(Limit, ?MAX_WINDOW_LIMIT)
+-spec list(
+    window_collection(),
+    ts_window:id() | undefined,
+    ts_window:timestamp_seconds() | undefined,
+    non_neg_integer(),
+    listing_postprocessor(MappingResult)
+) ->
+    {done | partial, descending_list(MappingResult)}.
+list(Windows, StartWindowId, undefined, Limit, ListingPostprocessor) ->
+    list(Windows, StartWindowId, ?MINIMAL_TIMESTAMP, Limit, ListingPostprocessor);
+list(Windows, StartWindowId, StopTimestamp, Limit, ListingPostprocessor) ->
+    list_internal(iterator(Windows, StartWindowId), StopTimestamp, Limit, ListingPostprocessor).
+
+
+-spec update(window_collection(), ts_window:id(), update_spec()) -> window_collection().
+update(Windows, WindowId, {override_with, Window}) ->
+    overwrite(WindowId, Window, Windows);
+update(Windows, WindowId, {consume_measurement, NewMeasurement, Aggregator}) ->
+    NewWindow = case get(WindowId, Windows) of
+        undefined -> ts_window:new(NewMeasurement, Aggregator);
+        CurrentWindow -> ts_window:consume_measurement(CurrentWindow, NewMeasurement, Aggregator)
     end,
-    list_internal(Timestamp, Windows, Options#{window_limit => SanitizedWindowLimit}).
+    overwrite(WindowId, NewWindow, Windows).
 
 
-%% @doc should be used only internally as the complete window list can be large
--spec list_all(windows_collection()) -> {ok | {continue, list_options()}, descending_windows_list()}.
-list_all(Windows) ->
-    list_internal(undefined, Windows, #{}).
-
-
--spec insert_value(windows_collection(), timestamp_seconds(), value() | window_value(), insert_strategy()) -> windows_collection().
-insert_value(Windows, WindowToBeUpdatedTimestamp, WindowValue, ignore_existing) ->
-    set_value(WindowToBeUpdatedTimestamp, WindowValue, Windows);
-insert_value(Windows, WindowToBeUpdatedTimestamp, NewValue, {aggregate, Aggregator}) ->
-    CurrentValue = get_value(WindowToBeUpdatedTimestamp, Windows),
-    NewWindowValue = aggregate(CurrentValue, NewValue, Aggregator),
-    set_value(WindowToBeUpdatedTimestamp, NewWindowValue, Windows).
-
-
--spec prepend_windows_list(windows_collection(), descending_windows_list()) -> windows_collection().
+-spec prepend_windows_list(window_collection(), descending_list({ts_window:id(), ts_window:record()})) ->
+    window_collection().
 prepend_windows_list(Windows, NewWindowsList) ->
-    prepend_windows_list_internal(Windows, NewWindowsList).
+    NewWindowsListToMerge = lists:map(fun({Timestamp, Window}) ->
+        {reverse_timestamp(Timestamp), Window}
+    end, NewWindowsList),
+    from_list(NewWindowsListToMerge ++ to_list(Windows)).
 
 
--spec prune_overflowing(windows_collection(), non_neg_integer()) -> windows_collection().
+-spec prune_overflowing(window_collection(), non_neg_integer()) -> window_collection().
 prune_overflowing(Windows, MaxWindowsCount) ->
     case get_size(Windows) > MaxWindowsCount of
         true ->
@@ -95,17 +94,18 @@ prune_overflowing(Windows, MaxWindowsCount) ->
     end.
 
 
--spec split(windows_collection(), non_neg_integer()) -> {windows_collection(), windows_collection(), timestamp_seconds()}.
+-spec split(window_collection(), non_neg_integer()) ->
+    {window_collection(), window_collection(), ts_window:timestamp_seconds()}.
 split(Windows, SplitPosition) ->
     split_internal(Windows, SplitPosition).
 
 
--spec is_size_exceeded(windows_collection(), non_neg_integer()) -> boolean().
+-spec is_size_exceeded(window_collection(), non_neg_integer()) -> boolean().
 is_size_exceeded(Windows, MaxWindowsCount) ->
     get_size(Windows) > MaxWindowsCount.
 
 
--spec get_remaining_windows_count(windows_collection(), non_neg_integer()) -> non_neg_integer().
+-spec get_remaining_windows_count(window_collection(), non_neg_integer()) -> non_neg_integer().
 get_remaining_windows_count(Windows, MaxWindowsCount) ->
     MaxWindowsCount - get_size(Windows).
 
@@ -118,10 +118,10 @@ get_remaining_windows_count(Windows, MaxWindowsCount) ->
 %% stored in current data node.
 %% @end
 %%--------------------------------------------------------------------
--spec reorganize(windows_collection(), windows_collection(), non_neg_integer(), non_neg_integer()) ->
-    ActionsToApplyOnDataNodes :: [{update_previous_data_node, windows_collection()} |
-    {update_current_data_node, timestamp_seconds(), windows_collection()} |
-    {split_current_data_node, {windows_collection(), windows_collection(), timestamp_seconds()}}].
+-spec reorganize(window_collection(), window_collection(), non_neg_integer(), non_neg_integer()) ->
+    ActionsToApplyOnDataNodes :: [{update_previous_data_node, window_collection()} |
+    {update_current_data_node, ts_window:timestamp_seconds(), window_collection()} |
+    {split_current_data_node, {window_collection(), window_collection(), ts_window:timestamp_seconds()}}].
 reorganize(WindowsInOlderDataNode, WindowsInCurrentDataNode, MaxWindowsInOlderDataNode, SplitPosition) ->
     WindowsInOlderDataNodeCount = get_size(WindowsInOlderDataNode),
     WindowsInCurrentDataNodeCount = get_size(WindowsInCurrentDataNode),
@@ -147,49 +147,22 @@ reorganize(WindowsInOlderDataNode, WindowsInCurrentDataNode, MaxWindowsInOlderDa
 
 
 %%%===================================================================
-%%% Encoding/decoding  API
+%%% Encoding/decoding API
 %%%===================================================================
 
--spec encode(windows_collection()) -> binary().
-encode(Windows) ->
-    json_utils:encode(lists:map(fun
-        ({Timestamp, {ValuesCount, ValuesSum}}) -> [Timestamp, ValuesCount, ValuesSum];
-        ({Timestamp, Value}) -> [Timestamp, Value]
+-spec db_encode(window_collection()) -> binary().
+db_encode(Windows) ->
+    json_utils:encode(lists:map(fun({WindowId, WindowRecord}) ->
+        [WindowId | ts_window:db_encode(WindowRecord)]
     end, to_list(Windows))).
 
 
--spec decode(binary()) -> windows_collection().
-decode(Term) ->
+-spec db_decode(binary()) -> window_collection().
+db_decode(Term) ->
     InputList = json_utils:decode(Term),
-    from_list(lists:map(fun
-        ([Timestamp, ValuesCount, ValuesSum]) -> {Timestamp, {ValuesCount, ValuesSum}};
-        ([Timestamp, Value]) -> {Timestamp, Value}
+    from_list(lists:map(fun([WindowId | EncodedWindowRecord]) ->
+        {WindowId, ts_window:db_decode(EncodedWindowRecord)}
     end, InputList)).
-
-
-%%=====================================================================
-%% Internal functions
-%%=====================================================================
-
--spec aggregate(window_value() | undefined, value(), metric_config:aggregator()) -> window_value().
-aggregate(undefined, NewValue, sum) ->
-    {1, NewValue};
-aggregate({CurrentCount, CurrentSum}, NewValue, sum) ->
-    {CurrentCount + 1, CurrentSum + NewValue};
-aggregate(undefined, NewValue, max) ->
-    NewValue;
-aggregate(CurrentValue, NewValue, max) ->
-    max(CurrentValue, NewValue);
-aggregate(undefined, NewValue, min) ->
-    NewValue;
-aggregate(CurrentValue, NewValue, min) ->
-    min(CurrentValue, NewValue);
-aggregate(_CurrentValue, NewValue, last) ->
-    NewValue;
-aggregate(undefined, NewValue, first) ->
-    NewValue;
-aggregate(CurrentValue, _NewValue, first) ->
-    CurrentValue.
 
 
 %%=====================================================================
@@ -198,80 +171,74 @@ aggregate(CurrentValue, _NewValue, first) ->
 %% to allow easy change of structure if needed
 %%=====================================================================
 
--spec reverse_timestamp(timestamp_seconds()) -> timestamp_seconds().
+-spec reverse_timestamp(ts_window:timestamp_seconds()) -> ts_window:timestamp_seconds().
 reverse_timestamp(Timestamp) ->
     ?EPOCH_INFINITY - Timestamp. % Reversed order of timestamps is required for listing
 
 
--spec init_windows_set() -> windows_collection().
+-spec init_windows_set() -> window_collection().
 init_windows_set() ->
     gb_trees:empty().
 
 
--spec get_value(timestamp_seconds(), windows_collection()) -> window_value() | undefined.
-get_value(Timestamp, Windows) ->
-    case gb_trees:lookup(reverse_timestamp(Timestamp), Windows) of
+-spec get(ts_window:id(), window_collection()) -> ts_window:record() | undefined.
+get(WindowId, WindowCollection) ->
+    case gb_trees:lookup(reverse_timestamp(WindowId), WindowCollection) of
         {value, Value} -> Value;
         none -> undefined
     end.
 
 
--spec set_value(timestamp_seconds(), window_value(), windows_collection()) -> windows_collection().
-set_value(Timestamp, Value, Windows) ->
-    gb_trees:enter(reverse_timestamp(Timestamp), Value, Windows).
+-spec overwrite(ts_window:id(), ts_window:record(), window_collection()) -> window_collection().
+overwrite(WindowId, WindowRecord, Windows) ->
+    gb_trees:enter(reverse_timestamp(WindowId), WindowRecord, Windows).
 
 
--spec get_first_timestamp(windows_collection()) -> timestamp_seconds().
+-spec get_first_timestamp(window_collection()) -> ts_window:timestamp_seconds().
 get_first_timestamp(Windows) ->
     {Timestamp, _} = gb_trees:smallest(Windows),
     reverse_timestamp(Timestamp).
 
 
--spec delete_last(windows_collection()) -> windows_collection().
+-spec delete_last(window_collection()) -> window_collection().
 delete_last(Windows) ->
     {_, _, UpdatedWindows} = gb_trees:take_largest(Windows),
     UpdatedWindows.
 
 
--spec get_size(windows_collection()) -> non_neg_integer().
+-spec get_size(window_collection()) -> non_neg_integer().
 get_size(Windows) ->
     gb_trees:size(Windows).
 
 
--spec list_internal(timestamp_seconds() | undefined, windows_collection(), list_options()) ->
-    {ok | {continue, list_options()}, descending_windows_list()}.
-list_internal(undefined, Windows, Options) ->
-    list_internal(gb_trees:iterator(Windows), Options);
-list_internal(Timestamp, Windows, Options) ->
-    list_internal(gb_trees:iterator_from(reverse_timestamp(Timestamp), Windows), Options).
-
-
--spec list_internal(gb_trees:iter(timestamp_seconds(), window_value()), list_options()) ->
-    {ok | {continue, list_options()}, descending_windows_list()}.
-list_internal(_Iterator, #{window_limit := 0}) ->
-    {ok, []};
-list_internal(Iterator, Options) ->
+-spec list_internal(
+    gb_trees:iter(ts_window:id(), ts_window:record()),
+    ts_window:timestamp_seconds(),
+    non_neg_integer(),
+    listing_postprocessor(MappingResult)
+) -> {done | partial, descending_list(MappingResult)}.
+list_internal(_Iterator, _StopTimestamp, 0, _ListingPostprocessor) ->
+    {done, []};
+list_internal(Iterator, StopTimestamp, Limit, ListingPostprocessor) ->
     case gb_trees:next(Iterator) of
         none ->
-            {{continue, Options}, []};
+            {partial, []};
         {Key, Value, NextIterator} ->
-            Timestamp = reverse_timestamp(Key),
-            case Options of
-                #{stop_timestamp := StopTimestamp} when Timestamp < StopTimestamp ->
-                    {ok, []};
-                #{stop_timestamp := StopTimestamp} when Timestamp =:= StopTimestamp ->
-                    {ok, [{Timestamp, Value}]};
-                #{window_limit := Limit} ->
-                    {FinishOrContinue, List} = list_internal(NextIterator, Options#{window_limit := Limit - 1}),
-                    {FinishOrContinue, [{Timestamp, Value} | List]};
-                _ ->
-                    {FinishOrContinue, List} = list_internal(NextIterator, Options),
-                    {FinishOrContinue, [{Timestamp, Value} | List]}
+            CurrentTimestamp = reverse_timestamp(Key),
+            if
+                CurrentTimestamp < StopTimestamp ->
+                    {done, []};
+                CurrentTimestamp =:= StopTimestamp ->
+                    {done, [ListingPostprocessor(CurrentTimestamp, Value)]};
+                true ->
+                    {Ans, List} = list_internal(NextIterator, StopTimestamp, Limit - 1, ListingPostprocessor),
+                    {Ans, [ListingPostprocessor(CurrentTimestamp, Value) | List]}
             end
     end.
 
 
--spec split_internal(windows_collection(), non_neg_integer()) -> {windows_collection(), windows_collection(), timestamp_seconds()}.
+-spec split_internal(window_collection(), non_neg_integer()) ->
+    {window_collection(), window_collection(), ts_window:timestamp_seconds()}.
 split_internal(Windows, 0) ->
     {init_windows_set(), Windows, get_first_timestamp(Windows)};
 split_internal(Windows, SplitPosition) ->
@@ -281,24 +248,25 @@ split_internal(Windows, SplitPosition) ->
     {gb_trees:from_orddict(Windows1), gb_trees:from_orddict(Windows2), reverse_timestamp(SplitKey)}.
 
 
--spec merge(windows_collection(), windows_collection()) -> windows_collection().
+-spec merge(window_collection(), window_collection()) -> window_collection().
 merge(Windows1, Windows2) ->
     from_list(to_list(Windows1) ++ to_list(Windows2)).
 
 
--spec to_list(windows_collection()) -> descending_windows_list().
+-spec to_list(window_collection()) -> descending_list({ts_window:id(), ts_window:record()}).
 to_list(Windows) ->
     gb_trees:to_list(Windows).
 
 
--spec from_list(descending_windows_list()) -> windows_collection().
+-spec from_list(descending_list({ts_window:id(), ts_window:record()})) -> window_collection().
 from_list(WindowsList) ->
     gb_trees:from_orddict(WindowsList).
 
 
--spec prepend_windows_list_internal(windows_collection(), descending_windows_list()) -> windows_collection().
-prepend_windows_list_internal(Windows, NewWindowsList) ->
-    NewWindowsListToMerge = lists:map(fun({Timestamp, Value}) ->
-        {reverse_timestamp(Timestamp), Value}
-    end, NewWindowsList),
-    from_list(NewWindowsListToMerge ++ to_list(Windows)).
+%% @private
+-spec iterator(window_collection(), ts_window:id() | undefined) ->
+    gb_trees:iter(ts_window:id(), ts_window:record()).
+iterator(Windows, undefined) ->
+    gb_trees:iterator(Windows);
+iterator(Windows, StartWindowId) ->
+    gb_trees:iterator_from(reverse_timestamp(StartWindowId), Windows).

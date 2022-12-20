@@ -28,7 +28,7 @@
 -export([fold_links/6]).
 -export([get_links_trees/2]).
 -export([fold_memory_keys/2]).
--export([set_expiry/2]).
+-export([set_expiry/2, ensure_expiry_set_on_delete/1]).
 %% for rpc
 -export([datastore_apply_all_subtrees/4]).
 
@@ -217,20 +217,8 @@ delete(Ctx, Key) ->
 delete(#{secure_fold_enabled := true} = Ctx, Key, Pred) ->
     UpdatedCtx = maps:remove(secure_fold_enabled, Ctx#{fold_enabled => true}),
     fold_critical_section(Ctx, fun() -> delete(UpdatedCtx, Key, Pred) end);
-delete(#{disc_driver := undefined} = Ctx, Key, Pred) ->
-    Result = datastore_apply(Ctx, Key, fun datastore:delete/3, [Pred]),
-    delete_all_links(Ctx, Key, Result),
-    delete_fold_link(Ctx, Key, Result);
 delete(Ctx, Key, Pred) ->
-    CtxWithExpiry = case Ctx of
-        #{expiry := _} ->
-            Ctx;
-        #{sync_enabled := true} ->
-            set_expiry(Ctx, application:get_env(?CLUSTER_WORKER_APP_NAME, document_expiry, ?EXPIRY));
-        _ ->
-            set_expiry(Ctx, 1)
-    end,
-    Result = datastore_apply(CtxWithExpiry, Key, fun datastore:delete/3, [Pred]),
+    Result = datastore_apply(ensure_expiry_set_on_delete(Ctx), Key, fun datastore:delete/3, [Pred]),
     delete_all_links(Ctx, Key, Result),
     delete_fold_link(Ctx, Key, Result).
 
@@ -469,6 +457,27 @@ get_fold_ctx_and_key(#{model := Model} = Ctx) ->
 -spec set_expiry(ctx(), non_neg_integer()) -> ctx().
 set_expiry(Ctx, Expiry) ->
     couchbase_driver:set_expiry(Ctx, Expiry).
+
+
+-spec ensure_expiry_set_on_delete(ctx() | datastore:disc_driver_ctx()) -> ctx() | datastore:disc_driver_ctx().
+ensure_expiry_set_on_delete(Ctx = #{disc_driver := undefined}) ->
+    Ctx;
+ensure_expiry_set_on_delete(Ctx) ->
+    case Ctx of
+        #{expiry := _} ->
+            Ctx;
+        #{sync_enabled := true, disc_driver_ctx := DriverCtx} ->
+            UpdatedCtx = #{expiry := Expiry} =
+                set_expiry(Ctx, application:get_env(?CLUSTER_WORKER_APP_NAME, document_expiry, ?EXPIRY)),
+            UpdatedCtx#{disc_driver_ctx := set_expiry(DriverCtx, Expiry)};
+        #{sync_enabled := true} ->
+            set_expiry(Ctx, application:get_env(?CLUSTER_WORKER_APP_NAME, document_expiry, ?EXPIRY));
+        #{disc_driver_ctx := DriverCtx} ->
+            UpdatedCtx = #{expiry := Expiry} = set_expiry(Ctx, 1),
+            UpdatedCtx#{disc_driver_ctx := set_expiry(DriverCtx, Expiry)};
+        _ ->
+            set_expiry(Ctx, 1)
+    end.
 
 %%%===================================================================
 %%% Internal functions

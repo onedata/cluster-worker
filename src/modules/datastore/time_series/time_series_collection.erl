@@ -12,15 +12,11 @@
 %%% measurements from particular period of time. E.g.,
 %%% MyTimeSeriesCollection = #{
 %%%    TimeSeries1 = #{
-%%%       Metric1 = [Window1, Window2, ...],
+%%%       Metric1 = [#window{}, #window{}, ...],
 %%%       Metric2 = ...
 %%%    },
 %%%    TimeSeries2 = ...
 %%% }
-%%% Window = {WindowTimestamp, aggregator(PrevAggregatedValue, MeasurementValue)} where
-%%% PrevAggregatedValue is result of previous aggregator function executions
-%%% (window can be created using several measurements).
-%%% See ts_windows:insert_value/4 to see possible aggregation functions.
 %%%
 %%% @see tsc_structure module for more information about the structure of
 %%% time series collection as perceived by higher level modules.
@@ -90,8 +86,8 @@
 %% be expanded to the actual set of time series / metrics.
 
 -type config() :: structure(metric_config:record()).
--type consume_spec() :: structure([{ts_windows:timestamp_seconds(), ts_windows:value()}]).
--type slice() :: structure(ts_windows:descending_windows_list()).
+-type consume_spec() :: structure([ts_window:measurement()]).
+-type slice() :: structure(ts_windows:descending_list(ts_window:info())).
 -export_type([config/0, consume_spec/0, slice/0]).
 
 
@@ -263,7 +259,7 @@ consume_measurements(Ctx, Id, ConsumeSpec, Batch) ->
     end.
 
 
--spec get_slice(ctx(), id(), layout(), ts_windows:list_options(), batch() | undefined) ->
+-spec get_slice(ctx(), id(), layout(), ts_metric:list_options(), batch() | undefined) ->
     {{ok, slice()} | {error, term()}, batch() | undefined}.
 get_slice(Ctx, Id, SliceLayout, ListWindowsOptions, Batch) ->
     try

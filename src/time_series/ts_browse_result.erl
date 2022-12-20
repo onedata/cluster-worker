@@ -16,7 +16,6 @@
 
 %% API
 -export([to_json/1, from_json/1]).
--export([to_json_with_compressed_windows/1]).
 
 -include("time_series/browsing.hrl").
 
@@ -39,21 +38,7 @@ to_json(#time_series_layout_get_result{layout = Layout}) ->
 to_json(#time_series_slice_get_result{slice = Slice}) ->
     #{
         <<"slice">> => tsc_structure:map(fun(_TimeSeriesName, _MetricName, Windows) ->
-            lists:map(fun({Timestamp, Value}) ->
-                #{
-                    <<"timestamp">> => Timestamp,
-                    <<"value">> => case Value of
-                        {Count, Aggregated} -> #{
-                            %% @TODO VFS-9589 - introduce average metric aggregator
-                            <<"count">> => Count,
-                            <<"aggregated">> => Aggregated
-                        };
-                        Aggregated -> #{
-                            <<"aggregated">> => Aggregated
-                        }
-                    end
-                }
-            end, Windows)
+            lists:map(fun ts_window:info_to_json/1, Windows)
         end, Slice)
     }.
 
@@ -65,40 +50,6 @@ from_json(#{<<"layout">> := Layout}) ->
 from_json(#{<<"slice">> := SliceJson}) ->
     #time_series_slice_get_result{slice = 
         tsc_structure:map(fun(_TimeSeriesName, _MetricName, WindowsJson) ->
-            lists:map(fun(#{<<"timestamp">> := Timestamp, <<"value">> := Value}) ->
-                {Timestamp, case Value of
-                    #{<<"count">> := Count, <<"aggregated">> := Aggregated} ->
-                        {Count, Aggregated};
-                    #{<<"aggregated">> := Aggregated} ->
-                        Aggregated
-                end}
-            end, WindowsJson)
+            lists:map(fun ts_window:json_to_info/1, WindowsJson)
         end, SliceJson)
-    }.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Works like to_json/1, but applies lossy compression on the window values,
-%% omitting additional information carried by some aggregators (such as measurement
-%% count in case of the sum aggregator).
-%% @TODO VFS-9589 - use to_json/1 after average metric aggregator is introduced
-%% @end
-%%--------------------------------------------------------------------
--spec to_json_with_compressed_windows(record()) -> json_utils:json_term().
-to_json_with_compressed_windows(#time_series_layout_get_result{} = TSBrowseResult) ->
-    to_json(TSBrowseResult);
-to_json_with_compressed_windows(#time_series_slice_get_result{slice = Slice}) ->
-    #{
-        <<"slice">> => tsc_structure:map(fun(_TimeSeriesName, _MetricName, Windows) ->
-            lists:map(fun({Timestamp, Value}) ->
-                #{
-                    <<"timestamp">> => Timestamp,
-                    <<"value">> => case Value of
-                        {_Count, Aggregated} -> Aggregated;
-                        Aggregated -> Aggregated
-                    end
-                }
-            end, Windows)
-        end, Slice)
     }.
