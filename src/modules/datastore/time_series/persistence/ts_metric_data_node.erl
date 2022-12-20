@@ -74,8 +74,7 @@ get_record_version() ->
 
 -spec upgrade_record(datastore_model:record_version(), datastore_model:record()) ->
     {datastore_model:record_version(), datastore_model:record()}.
-upgrade_record(1, {?MODULE, DataNode}
-) ->
+upgrade_record(1, {?MODULE, DataNode}) ->
     % Update is not needed as versions differ in encoding/decoding method (fields are the same)
     {2, {?MODULE, DataNode}}.
 
