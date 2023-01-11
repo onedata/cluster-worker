@@ -6,7 +6,10 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Eunit tests for the time_series_collection module.
+%%% Eunit tests for the time_series_collection module. 
+%%% NOTE: This SUITE verifies functionality of whole collection, not particular aggregators. 
+%%%       Thus, tests are not repeated for all aggregators. Instead, tests use only subset of 
+%%%       aggregators (more than one aggregator is required for some tests).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(time_series_collection_tests).
@@ -22,6 +25,7 @@
 -include("global_definitions.hrl").
 
 -define(MAX_DOC_SIZE, 200).
+
 
 %%%===================================================================
 %%% Setup and teardown
@@ -92,16 +96,16 @@ empty_collection_creation() ->
 
 
 metric_config_sanitization() ->
-    VeryLongName = <<"very_very_very_looong_name_with_at_least_50_characters">>,
+    VeryLongName = ?TOO_LONG_NAME,
     TestCases = [{
         ?ERROR_BAD_VALUE_NAME(<<"timeSeriesName">>),
-        #{<<1, 2, 3>> => #{<<"M1">> => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = sum}}}
+        #{<<1, 2, 3>> => #{<<"M1">> => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = avg}}}
     }, {
         ?ERROR_BAD_VALUE_NAME(<<"metricName">>),
-        #{<<"TS1">> => #{VeryLongName => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = sum}}}
+        #{<<"TS1">> => #{VeryLongName => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = avg}}}
     }, {
         ?ERROR_BAD_VALUE_NOT_IN_RANGE(<<"retention">>, 1, 1000000),
-        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0, resolution = ?MINUTE_RESOLUTION, aggregator = sum}}}
+        #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0, resolution = ?MINUTE_RESOLUTION, aggregator = avg}}}
     }, {
         ?ERROR_BAD_VALUE_NOT_IN_RANGE(<<"retention">>, 1, 1000000),
         #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 999999999, resolution = ?MINUTE_RESOLUTION, aggregator = max}}}
@@ -121,7 +125,7 @@ metric_config_sanitization() ->
 
         init_test_with_newly_created_collection(#{
             <<"TSX">> => #{
-                <<"MX">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = sum}
+                <<"MX">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = avg}
             }
         }),
         ?assertEqual(ExpError, call_incorporate_config(Config))
@@ -131,7 +135,7 @@ metric_config_sanitization() ->
 invalid_incorporate_config_request_with_conflicting_metric_config() ->
     init_test_with_newly_created_collection(#{
         <<"TS1">> => #{
-            <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = sum}
+            <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = avg}
         },
         <<"TS2">> => #{
             <<"M2">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = last}
@@ -140,7 +144,7 @@ invalid_incorporate_config_request_with_conflicting_metric_config() ->
     ?assertEqual(
         call_incorporate_config(#{
             <<"TS1">> => #{
-                <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = sum}
+                <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = avg}
             },
             <<"TS2">> => #{
                 <<"M2">> => #metric_config{resolution = ?YEAR_RESOLUTION, retention = 10, aggregator = max}
@@ -156,12 +160,12 @@ invalid_incorporate_config_request_with_conflicting_metric_config() ->
 invalid_consume_measurements_request() ->
     init_test_with_newly_created_collection(#{
         <<"TS1">> => #{
-            <<"M1">> => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 12, aggregator = sum},
+            <<"M1">> => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 12, aggregator = avg},
             <<"M2">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 24, aggregator = min},
             <<"M3">> => #metric_config{resolution = ?HOUR_RESOLUTION, retention = 36, aggregator = max}
         },
         <<"TSX">> => #{
-            <<"M1">> => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 12, aggregator = sum}
+            <<"M1">> => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 12, aggregator = avg}
         }
     }),
     ?assertEqual(
@@ -200,7 +204,7 @@ invalid_consume_measurements_request() ->
 invalid_get_slice_request() ->
     init_test_with_newly_created_collection(#{
         <<"TS1">> => #{
-            <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = sum}
+            <<"M1">> => #metric_config{resolution = ?DAY_RESOLUTION, retention = 5, aggregator = avg}
         },
         <<"TS2">> => #{
             <<"M1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = last},
@@ -234,7 +238,7 @@ invalid_get_slice_request() ->
 get_layout_request() ->
     init_test_with_newly_created_collection(#{
         <<"TS1">> => #{
-            <<"M1">> => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = sum}
+            <<"M1">> => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = avg}
         },
         <<"TS2">> => #{
             <<"M2.1">> => #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = min},
@@ -263,7 +267,7 @@ single_metric_single_node() ->
     MetricName = <<"M1">>,
     init_test_with_newly_created_collection(#{
         TimeSeriesName => #{
-            MetricName => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 10, aggregator = sum}
+            MetricName => #metric_config{resolution = ?FIVE_SECONDS_RESOLUTION, retention = 10, aggregator = avg}
         }
     }),
 
@@ -273,7 +277,7 @@ single_metric_single_node() ->
     % Measurements are arithmetic sequence so values of windows
     % are calculated using formula for the sum of an arithmetic sequence
     ExpWindows = lists:reverse(lists:map(fun(I) ->
-        {I, {5, 2.5 * I + 5}} end, lists:seq(10, 49, 5) ++ lists:seq(60, 69, 5))),
+        {I, 0.5 * I + 1} end, lists:seq(10, 49, 5) ++ lists:seq(60, 69, 5))),
     ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName)),
     ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName, #{start_timestamp => 1000})),
     ?assert(compare_windows_list([], TimeSeriesName, MetricName, #{start_timestamp => 1})),
@@ -288,7 +292,7 @@ single_metric_single_node() ->
 
     % Add a new measurement and verify if last window is dropped
     consume_measurements_foreach_metric([{100, 5}]),
-    ExpWindows4 = [{100, {1, 5}} | lists:sublist(ExpWindows, 9)],
+    ExpWindows4 = [{100, 5.0} | lists:sublist(ExpWindows, 9)],
     ?assert(compare_windows_list(ExpWindows4, TimeSeriesName, MetricName)),
 
     % Add a measurement and verify if nothing changed (measurement is too old)
@@ -298,9 +302,9 @@ single_metric_single_node() ->
     % Add measurement in the middle of existing windows and verify windows
     consume_measurements_foreach_metric([{53, 5}]),
     ExpWindows5 = lists:flatten([
-        {100, {1, 5}},
+        {100, 5.0},
         lists:sublist(ExpWindows, 1, 2),
-        {50, {1, 5}},
+        {50, 5.0},
         lists:sublist(ExpWindows, 3, 6)
     ]),
     ?assert(compare_windows_list(ExpWindows5, TimeSeriesName, MetricName)).
@@ -311,7 +315,7 @@ single_metric_infinite_resolution() ->
     MetricName = <<"M1">>,
     init_test_with_newly_created_collection(#{
         TimeSeriesName => #{
-            MetricName => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = sum}
+            MetricName => #metric_config{resolution = ?INFINITY_RESOLUTION, retention = 1, aggregator = avg}
         }
     }),
 
@@ -320,7 +324,7 @@ single_metric_infinite_resolution() ->
 
     % Measurements are arithmetic sequence so values of windows
     % are calculated using formula for the sum of an arithmetic sequence
-    ExpWindows = [{0, {50, 40 * (24.5 + 5) / 2 + 10 * (34.5 + 30) / 2}}],
+    ExpWindows = [{0, (40 * (24.5 + 5) / 2 + 10 * (34.5 + 30) / 2) / 50}],
     ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName)),
     ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName, #{start_timestamp => 1000})),
     ?assert(compare_windows_list(ExpWindows, TimeSeriesName, MetricName, #{window_limit => 2})),
@@ -411,7 +415,7 @@ single_time_series_single_node() ->
         {<<"M", (integer_to_binary(N))/binary>>, #metric_config{
             resolution = ?RAND_ELEMENT([?SECOND_RESOLUTION, ?FIVE_SECONDS_RESOLUTION, ?MINUTE_RESOLUTION]),
             retention = 60 div N + 10,
-            aggregator = sum}
+            aggregator = avg}
         }
     end, 5),
     init_test_with_newly_created_collection(#{
@@ -428,7 +432,7 @@ single_time_series_single_node() ->
         lists:sublist(
             lists:reverse(
                 lists:map(fun(N) ->
-                    {N, {Resolution, (N + N + Resolution - 1) * Resolution}}
+                    {N, N + N + Resolution - 1.0}
                 end, lists:seq(0, MeasurementCount, Resolution))
             ), Retention)
     end, MetricConfigs),
@@ -486,7 +490,7 @@ multiple_time_series_single_node() ->
         MetricConfig = #metric_config{
             resolution = ?RAND_ELEMENT([?SECOND_RESOLUTION, ?FIVE_SECONDS_RESOLUTION, ?MINUTE_RESOLUTION]),
             retention = 60 div N + 10,
-            aggregator = sum
+            aggregator = avg
         },
         Acc#{TimeSeriesName => TimeSeriesConfig#{<<"M", (integer_to_binary(N div 2))/binary>> => MetricConfig}}
     end, #{}, lists:seq(1, 5)),
@@ -503,7 +507,7 @@ multiple_time_series_single_node() ->
             lists:sublist(
                 lists:reverse(
                     lists:map(fun(N) ->
-                        {N, {Resolution, (N + N + Resolution - 1) * Resolution}}
+                        {N, N + N + Resolution - 1.0}
                     end, lists:seq(0, MeasurementCount, Resolution))
                 ), Retention)
         end, MetricConfigs)
@@ -620,7 +624,7 @@ update_subset() ->
 lifecycle_with_config_incorporation() ->
     init_test_with_newly_created_collection(#{
         <<"TS1">> => #{
-            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 200, aggregator = sum}
+            <<"M1">> => #metric_config{resolution = ?SECOND_RESOLUTION, retention = 200, aggregator = avg}
         }
     }),
 
@@ -634,7 +638,7 @@ lifecycle_with_config_incorporation() ->
     })),
     ?assert(compare_complete_slice(#{
         <<"TS1">> => #{
-            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, {1, 2 * I}} end, lists:seq(1, 200))),
+            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, 2.0 * I} end, lists:seq(1, 200))),
             <<"M2">> => []
         }
     })),
@@ -646,7 +650,7 @@ lifecycle_with_config_incorporation() ->
     })),
     ?assert(compare_complete_slice(#{
         <<"TS1">> => #{
-            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, {1, 2 * I}} end, lists:seq(1, 200))),
+            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, 2.0 * I} end, lists:seq(1, 200))),
             <<"M2">> => []
         },
         <<"TS2">> => #{
@@ -667,7 +671,7 @@ lifecycle_with_config_incorporation() ->
     })),
     ?assert(compare_complete_slice(#{
         <<"TS1">> => #{
-            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, {1, 2 * I}} end, lists:seq(1, 200))),
+            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, 2.0 * I} end, lists:seq(1, 200))),
             <<"M2">> => [],
             <<"M3">> => []
         },
@@ -720,7 +724,7 @@ lifecycle_with_config_incorporation() ->
 
     ?assert(compare_complete_slice(#{
         <<"TS1">> => #{
-            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, {1, 2 * I}} end, lists:seq(1, 200))),
+            <<"M1">> => lists:reverse(lists:map(fun(I) -> {I, 2.0 * I} end, lists:seq(1, 200))),
             <<"M2">> => [],
             <<"M3">> => lists:reverse(lists:map(fun(I) -> {I, 2 * I} end, lists:seq(891, 900)))
         },
@@ -892,7 +896,10 @@ compare_slice(ExpectedSlice, SliceLayout, ListWindowsOptions) ->
     Result = call_get_slice(SliceLayout, ListWindowsOptions),
     ?assertMatch({ok, _}, Result),
     {ok, Slice} = Result,
-    AreSlicesEqual = Slice =:= ExpectedSlice,
+    MappedExpectedSlice = tsc_structure:map(fun(_, _, ValuesList) -> lists:map(fun({T, V}) -> #window_info{
+        timestamp = T, value = V, first_measurement_timestamp = undefined, last_measurement_timestamp = undefined
+    } end, ValuesList) end, ExpectedSlice),
+    AreSlicesEqual = Slice =:= MappedExpectedSlice,
     AreSlicesEqual orelse eunit_utils:debug_log("ExpectedSlice: ~p~nActualSlice  : ~p", [ExpectedSlice, Slice]),
     AreSlicesEqual.
 

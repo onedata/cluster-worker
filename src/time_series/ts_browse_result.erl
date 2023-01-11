@@ -25,51 +25,31 @@
 
 -export_type([record/0, layout_result/0, slice_result/0]).
 
+
 %%%===================================================================
 %%% API
 %%%===================================================================
 
+
 -spec to_json(record()) -> json_utils:json_term().
 to_json(#time_series_layout_get_result{layout = Layout}) ->
-    Layout;
+    #{<<"layout">> => Layout};
 
 to_json(#time_series_slice_get_result{slice = Slice}) ->
     #{
-        <<"windows">> => tsc_structure:map(fun(_TimeSeriesName, _MetricName, Windows) ->
-            lists:map(fun({Timestamp, Value}) ->
-                #{
-                    <<"timestamp">> => Timestamp,
-                    <<"value">> => case Value of
-                        {Count, Aggregated} -> #{
-                            %% @TODO VFS-9589 - introduce average metric aggregator
-                            <<"count">> => Count,
-                            <<"aggregated">> => Aggregated
-                        };
-                        Aggregated -> #{
-                            <<"aggregated">> => Aggregated
-                        }
-                    end
-                }
-            end, Windows)
+        <<"slice">> => tsc_structure:map(fun(_TimeSeriesName, _MetricName, Windows) ->
+            lists:map(fun ts_window:info_to_json/1, Windows)
         end, Slice)
     }.
 
 
 -spec from_json(json_utils:json_term()) -> record().
-from_json(#{<<"windows">> := SliceJson}) ->
+from_json(#{<<"layout">> := Layout}) ->
+    #time_series_layout_get_result{layout = Layout};
+
+from_json(#{<<"slice">> := SliceJson}) ->
     #time_series_slice_get_result{slice = 
         tsc_structure:map(fun(_TimeSeriesName, _MetricName, WindowsJson) ->
-            lists:map(fun(#{<<"timestamp">> := Timestamp, <<"value">> := Value}) ->
-                {Timestamp, case Value of
-                    #{<<"count">> := Count, <<"aggregated">> := Aggregated} ->
-                        {Count, Aggregated};
-                    #{<<"aggregated">> := Aggregated} ->
-                        Aggregated
-                end}
-            end, WindowsJson)
+            lists:map(fun ts_window:json_to_info/1, WindowsJson)
         end, SliceJson)
-    };
-
-from_json(Layout) ->
-    #time_series_layout_get_result{layout = Layout}.
-    
+    }.

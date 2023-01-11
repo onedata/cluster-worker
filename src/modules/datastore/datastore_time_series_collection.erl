@@ -16,7 +16,7 @@
 -include("time_series/browsing.hrl").
 
 %% API
--export([create/3, incorporate_config/3, delete/2]).
+-export([create/3, incorporate_config/3, delete/2, clone/2]).
 -export([get_layout/2]).
 -export([consume_measurements/3]).
 -export([get_slice/4]).
@@ -24,8 +24,9 @@
 
 -type ctx() :: datastore_model:ctx().
 
--define(apply(Ctx, Id, Args), datastore_model:datastore_apply(
-    Ctx, Id, fun datastore:time_series_collection_operation/4, [?FUNCTION_NAME, Args]
+-define(apply(Ctx, Id, Args), ?apply(?FUNCTION_NAME, Ctx, Id, Args)).
+-define(apply(FunctionName, Ctx, Id, Args), datastore_model:datastore_apply(
+    Ctx, Id, fun datastore:time_series_collection_operation/4, [FunctionName, Args]
 )).
 
 %%%===================================================================
@@ -53,6 +54,23 @@ delete(Ctx, Id) ->
     ?apply(Ctx, Id, []).
 
 
+-spec clone(ctx(), time_series_collection:id()) ->
+    {ok, time_series_collection:id()} | {error, term()}.
+clone(Ctx, Id) ->
+    case ?apply(generate_dump, Ctx, Id, []) of
+        {ok, Dump} ->
+            % Generate a new key for the clone that is adjacent to retain the same routing.
+            % It must be generated on this layer as TP processes operate on a different type of keys.
+            NewCollectionId = datastore_key:new_adjacent_to(Id),
+            case ?apply(create_from_dump, Ctx, NewCollectionId, [Dump]) of
+                ok -> {ok, NewCollectionId};
+                {error, _} = SaveError -> SaveError
+            end;
+        {error, _} = GetError ->
+            GetError
+    end.
+
+
 %% @doc @see time_series_collection:get_layout/3
 -spec get_layout(ctx(), time_series_collection:id()) ->
     {ok, time_series_collection:layout()} | {error, term()}.
@@ -68,7 +86,7 @@ consume_measurements(Ctx, Id, ConsumeSpec) ->
 
 
 %% @doc @see time_series_collection:get_slice/5
--spec get_slice(ctx(), time_series_collection:id(), time_series_collection:layout(), ts_windows:list_options()) ->
+-spec get_slice(ctx(), time_series_collection:id(), time_series_collection:layout(), ts_metric:list_options()) ->
     {ok, time_series_collection:slice()} | {error, term()}.
 get_slice(Ctx, Id, SliceLayout, Options) ->
     ?apply(Ctx, Id, [SliceLayout, Options]).
@@ -85,10 +103,11 @@ browse(Ctx, Id, #time_series_slice_get_request{} = SliceReq) ->
     #time_series_slice_get_request{
         layout = SliceLayout, 
         start_timestamp = StartTimestamp, 
-        window_limit = WindowLimit
+        window_limit = WindowLimit,
+        extended_info = ExtendedInfo
     } = SliceReq,
     Opts = maps_utils:remove_undefined(#{
-        start_timestamp => StartTimestamp, window_limit => WindowLimit
+        start_timestamp => StartTimestamp, window_limit => WindowLimit, extended_info => ExtendedInfo
     }),
     case get_slice(Ctx, Id, SliceLayout, Opts) of
         {ok, Slice} -> {ok, #time_series_slice_get_result{slice = Slice}};
