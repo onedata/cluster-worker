@@ -17,16 +17,17 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% Model API
--export([acquire/5, create/4, delete/3, save_with_ttl/4]).
+-export([acquire/5, create/4, delete/3, adjust_expiry_threshold/4]).
 %% Convenience functions
 -export([append/4]).
 -export([get_node_by_number/4]).
+-export([current_timestamp/1]).
 
 -type record() :: #infinite_log_sentinel{}.
 -export_type([record/0]).
 
 %% Datastore API
--export([get_ctx/0, get_record_version/0, get_record_struct/1]).
+-export([get_ctx/0, get_record_version/0, get_record_struct/1, upgrade_record/2]).
 
 -define(CTX, #{
     model => ?MODULE
@@ -37,12 +38,12 @@
 %%=====================================================================
 
 -spec acquire(
-    infinite_log:ctx(), 
-    infinite_log:log_id(), 
-    skip_pruning | apply_pruning, 
-    infinite_log:access_mode(), 
+    infinite_log:ctx(),
+    infinite_log:log_id(),
+    skip_pruning | apply_pruning,
+    infinite_log:access_mode(),
     infinite_log:batch()
-) -> 
+) ->
     {{ok, term()} | {error, term()}, infinite_log:batch()}.
 acquire(Ctx, LogId, skip_pruning, _, Batch) ->
     case datastore_doc:fetch(Ctx, LogId, Batch) of
@@ -74,30 +75,29 @@ acquire(Ctx, LogId, apply_pruning, AccessMode, Batch) ->
 
 -spec create(infinite_log:ctx(), infinite_log:log_id(), term(), infinite_log:batch()) ->
     {ok | {error, term()}, infinite_log:batch()}.
-create(Ctx, LogId, Record, Batch) ->
-    persist(create, Ctx, LogId, Record, Batch).
+create(Ctx, LogId, Sentinel, Batch) ->
+    persist(create, Ctx, LogId, Sentinel, Batch).
 
 
--spec delete(infinite_log:ctx(), infinite_log:log_id(), infinite_log:batch()) -> 
+-spec delete(infinite_log:ctx(), infinite_log:log_id(), infinite_log:batch()) ->
     {ok | {error, term()}, infinite_log:batch()}.
 delete(Ctx, LogId, Batch) ->
     datastore_doc:delete(Ctx, LogId, Batch).
 
 
--spec save_with_ttl(infinite_log:ctx(), infinite_log:log_id(), time:seconds(), infinite_log:batch()) -> 
-    {ok | {error, term()}, infinite_log:batch()} .
-save_with_ttl(Ctx, LogId, Ttl, Batch) ->
+-spec adjust_expiry_threshold(infinite_log:ctx(), infinite_log:log_id(), time:seconds(), infinite_log:batch()) ->
+    {ok | {error, term()}, infinite_log:batch()}.
+adjust_expiry_threshold(Ctx, LogId, Threshold, Batch) ->
     {{ok, Record}, UpdatedBatch} = infinite_log_sentinel:acquire(Ctx, LogId, skip_pruning, allow_updates, Batch),
-    ExpirationTime = current_timestamp(Record) div 1000 + Ttl,
     save(Ctx, LogId, Record#infinite_log_sentinel{
-        expiration_time = ExpirationTime
+        expiry_threshold = Threshold
     }, UpdatedBatch).
 
 %%=====================================================================
 %% Convenience functions
 %%=====================================================================
 
--spec append(infinite_log:ctx(), record(), infinite_log:content(), infinite_log:batch()) -> 
+-spec append(infinite_log:ctx(), record(), infinite_log:content(), infinite_log:batch()) ->
     {ok | {error, term()}, infinite_log:batch()}.
 append(Ctx, Sentinel = #infinite_log_sentinel{log_id = LogId, total_entry_count = EntryCount, oldest_timestamp = OldestTimestamp}, Content, Batch) ->
     case transfer_entries_to_new_node_upon_full_buffer(Ctx, Sentinel, Batch) of
@@ -128,6 +128,11 @@ get_node_by_number(Ctx, Sentinel = #infinite_log_sentinel{log_id = LogId}, NodeN
             infinite_log_node:get(Ctx, LogId, NodeNumber, Batch)
     end.
 
+
+-spec current_timestamp(record()) -> infinite_log:timestamp_millis().
+current_timestamp(#infinite_log_sentinel{newest_timestamp = NewestTimestamp}) ->
+    global_clock:monotonic_timestamp_millis(NewestTimestamp).
+
 %%=====================================================================
 %% Internal functions
 %%=====================================================================
@@ -136,26 +141,35 @@ get_node_by_number(Ctx, Sentinel = #infinite_log_sentinel{log_id = LogId}, NodeN
 %% @private
 -spec save(infinite_log:ctx(), infinite_log:log_id(), record(), infinite_log:batch()) ->
     {ok | {error, term()}, infinite_log:batch()}.
-save(Ctx, LogId, Record, Batch) ->
-    persist(save, Ctx, LogId, Record, Batch).
+save(Ctx, LogId, Sentinel, Batch) ->
+    persist(save, Ctx, LogId, Sentinel, Batch).
 
 
 %% @private
 -spec persist(save | create, infinite_log:ctx(), infinite_log:log_id(), record(), infinite_log:batch()) ->
     {ok | {error, term()}, infinite_log:batch()}.
-persist(Operation, Ctx, LogId, Record, Batch) ->
-    Ctx1 = case Record#infinite_log_sentinel.expiration_time of
-        undefined -> Ctx;
-        Timestamp -> datastore_doc:set_expiry_in_ctx(Ctx, Timestamp - current_timestamp(Record) div 1000)
+persist(Operation, Ctx, LogId, Sentinel, Batch) ->
+    Ctx1 = case Sentinel#infinite_log_sentinel.expiry_threshold of
+        undefined ->
+            Ctx;
+        ThresholdSeconds ->
+            NowMillis = current_timestamp(Sentinel),
+            NewestLogTimestampMillis = case Sentinel#infinite_log_sentinel.total_entry_count of
+                0 -> NowMillis;
+                _ -> Sentinel#infinite_log_sentinel.newest_timestamp
+            end,
+            % expiry countdown always starts from the newest log timestamp rather than current time
+            AdjustedThresholdSeconds = max(0, ThresholdSeconds - (NowMillis - NewestLogTimestampMillis) div 1000),
+            datastore_doc:set_expiry_in_ctx(Ctx, AdjustedThresholdSeconds)
     end,
-    case datastore_doc:Operation(Ctx1, LogId, #document{key = LogId, value = Record}, Batch) of
+    case datastore_doc:Operation(Ctx1, LogId, #document{key = LogId, value = Sentinel}, Batch) of
         {{ok, _}, UpdatedBatch} -> {ok, UpdatedBatch};
         {{error, _}, _} = Error -> Error
     end.
 
 
 %% @private
--spec transfer_entries_to_new_node_upon_full_buffer(infinite_log:ctx(), record(), infinite_log:batch()) -> 
+-spec transfer_entries_to_new_node_upon_full_buffer(infinite_log:ctx(), record(), infinite_log:batch()) ->
     {{ok, record()} | {error, term()}, infinite_log:batch()}.
 transfer_entries_to_new_node_upon_full_buffer(Ctx, Sentinel = #infinite_log_sentinel{max_entries_per_node = MaxEntriesPerNode}, Batch) ->
     case infinite_log_node:get_node_entries_length(Sentinel, infinite_log_node:newest_node_number(Sentinel)) of
@@ -167,7 +181,7 @@ transfer_entries_to_new_node_upon_full_buffer(Ctx, Sentinel = #infinite_log_sent
 
 
 %% @private
--spec save_buffer_as_new_node(infinite_log:ctx(), record(), infinite_log:batch()) -> 
+-spec save_buffer_as_new_node(infinite_log:ctx(), record(), infinite_log:batch()) ->
     {{ok, record()} | {error, term()}, infinite_log:batch()}.
 save_buffer_as_new_node(Ctx, Sentinel = #infinite_log_sentinel{buffer = Buffer}, Batch) ->
     NodeNumber = infinite_log_node:newest_node_number(Sentinel),
@@ -182,40 +196,37 @@ save_buffer_as_new_node(Ctx, Sentinel = #infinite_log_sentinel{buffer = Buffer},
     end,
     case save_node(Ctx, Sentinel, NodeNumber, Buffer, Batch) of
         {ok, UpdatedBatch} ->
-            prune_upon_node_archivization(Ctx, UpdatedSentinel#infinite_log_sentinel{buffer = #infinite_log_node{}}, allow_updates, UpdatedBatch);
+            prune_upon_node_archivisation(Ctx, UpdatedSentinel#infinite_log_sentinel{buffer = #infinite_log_node{}}, allow_updates, UpdatedBatch);
         {{error, _}, _} = SaveError ->
             SaveError
     end.
 
 
 %% @private
--spec save_node(infinite_log:ctx(), record(), infinite_log_node:node_number(), infinite_log_node:record(), infinite_log:batch()) ->
+-spec save_node(
+    infinite_log:ctx(),
+    record(),
+    infinite_log_node:node_number(),
+    infinite_log_node:record(),
+    infinite_log:batch()
+) ->
     {ok | {error, term()}, infinite_log:batch()}.
-save_node(Ctx, #infinite_log_sentinel{expiration_time = undefined, age_pruning_threshold = undefined} = S, NodeNumber, Node, Batch) ->
-    save_node(Ctx, S, NodeNumber, Node, undefined, Batch);
-save_node(Ctx, #infinite_log_sentinel{expiration_time = undefined, age_pruning_threshold = AgeThreshold} = S, NodeNumber, Node, Batch) ->
-    save_node(Ctx, S, NodeNumber, Node, AgeThreshold, Batch);
-save_node(Ctx, #infinite_log_sentinel{expiration_time = ExpirationTime, age_pruning_threshold = undefined} = S, NodeNumber, Node, Batch) ->
-    Ttl = ExpirationTime - current_timestamp(S),
-    save_node(Ctx, S, NodeNumber, Node, Ttl, Batch);
-save_node(Ctx, #infinite_log_sentinel{expiration_time = ExpirationTime, age_pruning_threshold = AgeThreshold} = S, NodeNumber, Node, Batch) ->
-    Ttl = ExpirationTime - current_timestamp(S),
-    save_node(Ctx, S, NodeNumber, Node, min(Ttl, AgeThreshold), Batch).
+save_node(Ctx, #infinite_log_sentinel{log_id = LogId} = Sentinel, NodeNumber, Node, Batch) ->
+    case effective_node_age_pruning_threshold(Sentinel) of
+        undefined ->
+            infinite_log_node:save(Ctx, LogId, NodeNumber, Node, Batch);
+        ExpiryThresholdSeconds ->
+            NowMillis = current_timestamp(Sentinel),
+            infinite_log_node:save_with_expiry_threshold_adjustment(
+                Ctx, LogId, NodeNumber, Node, ExpiryThresholdSeconds, NowMillis, Batch
+            )
+    end.
 
 
 %% @private
--spec save_node(infinite_log:ctx(), record(), infinite_log_node:node_number(), infinite_log_node:record(), undefined | time:seconds(), infinite_log:batch()) ->
-    {ok | {error, term()}, infinite_log:batch()}.
-save_node(Ctx, #infinite_log_sentinel{log_id = LogId}, NodeNumber, Node, undefined, Batch) ->
-    infinite_log_node:save(Ctx, LogId, NodeNumber, Node, Batch);
-save_node(Ctx, #infinite_log_sentinel{log_id = LogId}, NodeNumber, Node, Ttl, Batch) ->
-    infinite_log_node:save_with_ttl(Ctx, LogId, NodeNumber, Node, Ttl, Batch).
-
-
-%% @private
--spec prune_upon_node_archivization(infinite_log:ctx(), record(), infinite_log:access_mode(), infinite_log:batch()) ->
+-spec prune_upon_node_archivisation(infinite_log:ctx(), record(), infinite_log:access_mode(), infinite_log:batch()) ->
     {{ok, record()} | {error, term()}, infinite_log:batch()}.
-prune_upon_node_archivization(Ctx, Sentinel, AccessMode, Batch) ->
+prune_upon_node_archivisation(Ctx, Sentinel, AccessMode, Batch) ->
     case apply_size_pruning(Ctx, Sentinel, AccessMode, Batch) of
         {{ok, _, NewSentinel}, UpdatedBatch} ->
             case apply_age_pruning(Ctx, NewSentinel, AccessMode, UpdatedBatch) of
@@ -244,14 +255,16 @@ apply_size_pruning(Ctx, Sentinel, AccessMode, Batch) ->
 %% @private
 -spec apply_age_pruning(infinite_log:ctx(), record(), infinite_log:access_mode(), infinite_log:batch()) ->
     {{ok, updated | unchanged, record()} | {error, term()}, infinite_log:batch()}.
-apply_age_pruning(_Ctx, #infinite_log_sentinel{age_pruning_threshold = undefined} = Sentinel, _, Batch) ->
-    {{ok, unchanged, Sentinel}, Batch};
 apply_age_pruning(Ctx, Sentinel, AccessMode, Batch) ->
-    Now = current_timestamp(Sentinel),
-    prune_while(Ctx, Sentinel, AccessMode, unchanged, fun(Acc) ->
-        % timestamps are in milliseconds, while the threshold is in seconds
-        Now >= Acc#infinite_log_sentinel.oldest_node_timestamp + Acc#infinite_log_sentinel.age_pruning_threshold * 1000
-    end, Batch).
+    case effective_node_age_pruning_threshold(Sentinel) of
+        undefined ->
+            {{ok, unchanged, Sentinel}, Batch};
+        PruningThresholdSeconds ->
+            NowMillis = current_timestamp(Sentinel),
+            prune_while(Ctx, Sentinel, AccessMode, unchanged, fun(Acc) ->
+                NowMillis >= Acc#infinite_log_sentinel.oldest_node_timestamp + PruningThresholdSeconds * 1000
+            end, Batch)
+    end.
 
 
 %% @private
@@ -290,7 +303,7 @@ prune_while(Ctx, Sentinel, AccessMode, UpdateStatus, Condition, Batch) ->
 %% a TTL, in such case it adjusts the sentinel to acknowledge that.
 %% @end
 %%--------------------------------------------------------------------
--spec prune_oldest_node(infinite_log:ctx(), record(), infinite_log:batch()) -> 
+-spec prune_oldest_node(infinite_log:ctx(), record(), infinite_log:batch()) ->
     {{ok, record()} | {error, term()}, infinite_log:batch()}.
 prune_oldest_node(Ctx, Sentinel = #infinite_log_sentinel{oldest_entry_index = PrunedCount, max_entries_per_node = MaxEntriesPerNode}, Batch) ->
     OldestNodeNumber = infinite_log_node:oldest_node_number(Sentinel),
@@ -325,11 +338,21 @@ prune_oldest_node(Ctx, Sentinel = #infinite_log_sentinel{oldest_entry_index = Pr
     end.
 
 
+%%--------------------------------------------------------------------
 %% @private
--spec current_timestamp(record()) -> infinite_log:timestamp().
-current_timestamp(#infinite_log_sentinel{newest_timestamp = NewestTimestamp}) ->
-    global_clock:monotonic_timestamp_millis(NewestTimestamp).
-
+%% @doc
+%% Determines the prevailing age pruning threshold for archival nodes.
+%% @end
+%%--------------------------------------------------------------------
+-spec effective_node_age_pruning_threshold(record()) -> undefined | time:seconds().
+effective_node_age_pruning_threshold(#infinite_log_sentinel{expiry_threshold = undefined, age_pruning_threshold = undefined}) ->
+    undefined;
+effective_node_age_pruning_threshold(#infinite_log_sentinel{expiry_threshold = undefined, age_pruning_threshold = AgeThreshold}) ->
+    AgeThreshold;
+effective_node_age_pruning_threshold(#infinite_log_sentinel{expiry_threshold = ExpiryThreshold, age_pruning_threshold = undefined}) ->
+    ExpiryThreshold;
+effective_node_age_pruning_threshold(#infinite_log_sentinel{expiry_threshold = ExpiryThreshold, age_pruning_threshold = AgeThreshold}) ->
+    min(ExpiryThreshold, AgeThreshold).
 
 %%%===================================================================
 %%% Datastore API
@@ -342,13 +365,14 @@ get_ctx() ->
 
 -spec get_record_version() -> datastore_model:record_version().
 get_record_version() ->
-    % this model contains `infinite_log_node` so its version cannot be lower
-    infinite_log_node:get_record_version().
+    % NOTE: this model contains `infinite_log_node` and must be upgraded whenever
+    % it changes.
+    2.
 
 
 -spec get_record_struct(datastore_model:record_version()) ->
     datastore_model:record_struct().
-get_record_struct(1 = Version) ->
+get_record_struct(1) ->
     {record, [
         {log_id, string},
         {max_entries_per_node, integer},
@@ -357,8 +381,57 @@ get_record_struct(1 = Version) ->
         {oldest_timestamp, integer},
         {newest_timestamp, integer},
         {oldest_node_timestamp, integer},
-        {buffer, infinite_log_node:get_record_struct(Version)},
-        {size_pruning_threshold , integer},
-        {age_pruning_threshold , integer},
-        {expiration_time , integer}
+        {buffer, infinite_log_node:get_record_struct(1)},
+        {size_pruning_threshold, integer},
+        {age_pruning_threshold, integer},
+        {expiration_time, integer}
+    ]};
+get_record_struct(2) ->
+    {record, [
+        {log_id, string},
+        {max_entries_per_node, integer},
+        {total_entry_count, integer},
+        {oldest_entry_index, integer},
+        {oldest_timestamp, integer},
+        {newest_timestamp, integer},
+        {oldest_node_timestamp, integer},
+        {buffer, infinite_log_node:get_record_struct(1)},
+        {size_pruning_threshold, integer},
+        {age_pruning_threshold, integer},
+        {expiry_threshold, integer}
     ]}.
+
+
+-spec upgrade_record(datastore_model:record_version(), datastore_model:record()) ->
+    {datastore_model:record_version(), datastore_model:record()}.
+upgrade_record(1, Record) ->
+    {
+        ?MODULE,
+        LogId,
+        MaxEntriesPerNode,
+        TotalEntryCount,
+        OldestEntryIndex,
+        OldestTimestamp,
+        NewestTimestamp,
+        OldestNodeTimestamp,
+        Buffer,
+        SizePruningThreshold,
+        AgePruningThreshold,
+        ExpirationTime
+    } = Record,
+    {2, {?MODULE,
+        LogId,
+        MaxEntriesPerNode,
+        TotalEntryCount,
+        OldestEntryIndex,
+        OldestTimestamp,
+        NewestTimestamp,
+        OldestNodeTimestamp,
+        Buffer,
+        SizePruningThreshold,
+        AgePruningThreshold,
+        _ExpiryThreshold = case ExpirationTime of
+            undefined -> undefined;
+            _ -> min(1, ExpirationTime - global_clock:timestamp_seconds())
+        end
+    }}.

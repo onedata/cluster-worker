@@ -18,7 +18,7 @@
 -export_type([key/0, ctx/0]).
 
 %% API
--export([create/2, create/3, destroy/2, append/3, list/2, list/3, set_ttl/3]). 
+-export([create/2, create/3, destroy/2, append/3, list/2, list/3, adjust_expiry_threshold/3]).
 
 %%%===================================================================
 %%% API
@@ -58,8 +58,8 @@ list(Ctx, Key, Opts) ->
         fun datastore:infinite_log_operation/4, [?FUNCTION_NAME, [Opts]]).
 
 
--spec set_ttl(ctx(), key(), time:seconds()) -> ok | {error, term()}.
-set_ttl(Ctx, Key, Ttl) ->
+-spec adjust_expiry_threshold(ctx(), key(), time:seconds()) -> ok | {error, term()}.
+adjust_expiry_threshold(Ctx, Key, Ttl) ->
     datastore_model:datastore_apply(Ctx, Key,
         fun datastore:infinite_log_operation/4, [?FUNCTION_NAME, [Ttl]]).
 

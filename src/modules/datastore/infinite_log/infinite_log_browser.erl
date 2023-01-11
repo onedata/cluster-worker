@@ -71,7 +71,7 @@
 % index of an entry within a node, starting from 0
 -type index_in_node() :: non_neg_integer().
 
--type timestamp() :: infinite_log:timestamp().
+-type timestamp() :: infinite_log:timestamp_millis().
 -type entry_index() :: infinite_log:entry_index().
 -type entry() :: infinite_log:entry().
 -type sentinel_record() :: infinite_log_sentinel:record().

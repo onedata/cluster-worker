@@ -23,8 +23,8 @@
 
 -record(infinite_log_node, {
     entries = []  :: [infinite_log:entry()],
-    oldest_timestamp = 0 :: infinite_log:timestamp(),
-    newest_timestamp = 0 :: infinite_log:timestamp()
+    oldest_timestamp = 0 :: infinite_log:timestamp_millis(),
+    newest_timestamp = 0 :: infinite_log:timestamp_millis()
 }).
 
 % Each infinite log instance has one #sentinel{} record with the id equal to the
@@ -40,17 +40,14 @@
     % modified when the log is pruned
     oldest_entry_index = 0 :: non_neg_integer(),
 
-    oldest_timestamp = 0 :: infinite_log:timestamp(),
-    newest_timestamp = 0 :: infinite_log:timestamp(),
-    oldest_node_timestamp = 0 :: infinite_log:timestamp(),
+    oldest_timestamp = 0 :: infinite_log:timestamp_millis(),
+    newest_timestamp = 0 :: infinite_log:timestamp_millis(),
+    oldest_node_timestamp = 0 :: infinite_log:timestamp_millis(),
     buffer = #infinite_log_node{} :: infinite_log_node:record(),
 
     size_pruning_threshold :: undefined | non_neg_integer(),
     age_pruning_threshold :: undefined | time:seconds(),
-    % the log's expiration time must be tracked so that newly created documents
-    % (archival nodes) are expired adequately and so that the interaction of TTL
-    % and the age-based pruning can be properly handled
-    expiration_time :: undefined | time:seconds()
+    expiry_threshold :: undefined | time:seconds()
 }).
 
 -endif.
