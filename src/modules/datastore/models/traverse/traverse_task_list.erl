@@ -28,7 +28,8 @@
 -include("modules/datastore/datastore_links.hrl").
 
 %% List API
--export([list/2, list/3, list_scheduled/3, list_scheduled/4, get_first_scheduled_link/3, list_node_jobs/3]).
+-export([list/2, list/3, list_scheduled/3, list_scheduled/4, get_first_scheduled_link/3,
+    check_and_delete_first_scheduled_link/4, list_node_jobs/3]).
 %% Modify API
 -export([add_link/6, add_scheduled_link/6, add_job_link/3, add_task_job_link/4,
     delete_link/6, delete_scheduled_link/6, delete_job_link/4,
@@ -144,6 +145,30 @@ get_first_scheduled_link(Pool, GroupId, EnvironmentId) ->
         not_found,
         #{}
     ).
+
+
+-spec check_and_delete_first_scheduled_link(traverse:pool(), traverse:group(),
+    traverse:environment_id(), traverse:id()) -> ok.
+check_and_delete_first_scheduled_link(Pool, GroupId, EnvironmentId, ExpectedTarget) ->
+    BasicKey = forest_key(Pool, scheduled),
+    FoldAns = datastore_model:fold_links(
+        traverse_task:get_ctx(),
+        ?LOAD_BALANCING_FOREST_KEY(BasicKey, GroupId, EnvironmentId),
+        all,
+        fun(Link, _) -> {stop, Link} end,
+        not_found,
+        #{}
+    ),
+
+    case FoldAns of
+        {ok, #link{target = ExpectedTarget, name = Name, tree_id = TreeId}} ->
+            [ok] = datastore_model:delete_links(traverse_task:get_ctx(),
+                ?LOAD_BALANCING_FOREST_KEY(BasicKey, GroupId, EnvironmentId), TreeId, [Name]),
+            ok;
+        _ ->
+            ok
+    end.
+
 
 %%--------------------------------------------------------------------
 %% @doc
