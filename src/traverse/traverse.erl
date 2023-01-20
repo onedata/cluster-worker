@@ -1137,7 +1137,7 @@ schedule_task_and_check_other_waiting(PoolName, GroupId, Executor, TaskId) ->
                 start_interrupted ->
                     ?info("Task ~p start interrupted on restart of node for pool ~p and executor ~p",
                         [TaskId, PoolName, Executor]),
-                    traverse_task_list:check_and_delete_first_scheduled_link(PoolName, GroupId, Executor, TaskId),
+                    traverse_task_list:delete_first_scheduled_link(PoolName, GroupId, Executor, TaskId),
                     % TODO VFS-6297 - what if node crashes before next line
                     traverse_tasks_scheduler:decrement_ongoing_tasks(PoolName),
                     schedule_waiting_tasks_if_possible(PoolName, Executor)

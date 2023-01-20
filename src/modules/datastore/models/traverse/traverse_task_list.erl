@@ -29,7 +29,7 @@
 
 %% List API
 -export([list/2, list/3, list_scheduled/3, list_scheduled/4, get_first_scheduled_link/3,
-    check_and_delete_first_scheduled_link/4, list_node_jobs/3]).
+    delete_first_scheduled_link/4, list_node_jobs/3]).
 %% Modify API
 -export([add_link/6, add_scheduled_link/6, add_job_link/3, add_task_job_link/4,
     delete_link/6, delete_scheduled_link/6, delete_job_link/4,
@@ -147,9 +147,9 @@ get_first_scheduled_link(Pool, GroupId, EnvironmentId) ->
     ).
 
 
--spec check_and_delete_first_scheduled_link(traverse:pool(), traverse:group(),
+-spec delete_first_scheduled_link(traverse:pool(), traverse:group(),
     traverse:environment_id(), traverse:id()) -> ok.
-check_and_delete_first_scheduled_link(Pool, GroupId, EnvironmentId, ExpectedTarget) ->
+delete_first_scheduled_link(Pool, GroupId, EnvironmentId, ExpectedTarget) ->
     BasicKey = forest_key(Pool, scheduled),
     FoldAns = datastore_model:fold_links(
         traverse_task:get_ctx(),
