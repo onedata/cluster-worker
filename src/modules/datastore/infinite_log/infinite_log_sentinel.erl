@@ -387,6 +387,7 @@ get_record_struct(1) ->
         {expiration_time, integer}
     ]};
 get_record_struct(2) ->
+    % changed expiration_time -> expiry_threshold
     {record, [
         {log_id, string},
         {max_entries_per_node, integer},
@@ -398,7 +399,7 @@ get_record_struct(2) ->
         {buffer, infinite_log_node:get_record_struct(1)},
         {size_pruning_threshold, integer},
         {age_pruning_threshold, integer},
-        {expiry_threshold, integer}
+        {expiry_threshold, integer}  % changed field
     ]}.
 
 
