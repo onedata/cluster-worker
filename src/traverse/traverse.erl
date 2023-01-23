@@ -1107,7 +1107,7 @@ schedule_waiting_tasks_if_possible(PoolName, Executor) ->
                 {ok, not_found} ->
                     deregister_group_and_schedule_waiting_tasks_if_possible(PoolName, Executor, GroupId);
                 {ok, TaskId} ->
-                    schedule_task_and_check_other_waiting(PoolName, Executor, TaskId)
+                    schedule_task_and_check_other_waiting(PoolName, GroupId, Executor, TaskId)
             end
     end.
 
@@ -1125,8 +1125,8 @@ deregister_group_and_schedule_waiting_tasks_if_possible(PoolName, Executor, Grou
             schedule_waiting_tasks_if_possible(PoolName, Executor)
     end.
 
--spec schedule_task_and_check_other_waiting(pool(), environment_id(), id()) -> ok | no_return().
-schedule_task_and_check_other_waiting(PoolName, Executor, TaskId) ->
+-spec schedule_task_and_check_other_waiting(pool(), group(), environment_id(), id()) -> ok | no_return().
+schedule_task_and_check_other_waiting(PoolName, GroupId, Executor, TaskId) ->
     case traverse_tasks_scheduler:increment_ongoing_tasks_and_choose_node(PoolName) of
         {ok, Node} ->
             case rpc:call(Node, ?MODULE, run_task, [PoolName, TaskId, Executor]) of
@@ -1137,6 +1137,7 @@ schedule_task_and_check_other_waiting(PoolName, Executor, TaskId) ->
                 start_interrupted ->
                     ?info("Task ~p start interrupted on restart of node for pool ~p and executor ~p",
                         [TaskId, PoolName, Executor]),
+                    traverse_task_list:delete_first_scheduled_link(PoolName, GroupId, Executor, TaskId),
                     % TODO VFS-6297 - what if node crashes before next line
                     traverse_tasks_scheduler:decrement_ongoing_tasks(PoolName),
                     schedule_waiting_tasks_if_possible(PoolName, Executor)
