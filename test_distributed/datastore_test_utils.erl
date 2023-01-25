@@ -155,9 +155,9 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_infinite_log:list(Ctx, Key, Opts)
         end},
-        {infinite_log_set_ttl, fun(Key, Ttl) ->
+        {infinite_log_adjust_expiry_threshold, fun(Key, Ttl) ->
             Ctx = get_ctx(Model),
-            datastore_infinite_log:set_ttl(Ctx, Key, Ttl)
+            datastore_infinite_log:adjust_expiry_threshold(Ctx, Key, Ttl)
         end},
 
         {time_series_collection_create, fun(Id, ConfigMap) ->

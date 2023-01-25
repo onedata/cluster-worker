@@ -126,26 +126,21 @@ info_to_json(#window_info{
     first_measurement_timestamp = FirstMeasurementTimestamp,
     last_measurement_timestamp = LastMeasurementTimestamp
 }) ->
-    #{
+    Data0 = #{
         <<"timestamp">> => Timestamp,
-        <<"value">> => Value,
-        <<"firstMeasurementTimestamp">> => utils:undefined_to_null(FirstMeasurementTimestamp),
-        <<"lastMeasurementTimestamp">> => utils:undefined_to_null(LastMeasurementTimestamp)
-    }.
+        <<"value">> => Value
+    },
+    Data1 = maps_utils:put_if_defined(Data0, <<"firstMeasurementTimestamp">>, FirstMeasurementTimestamp),
+    maps_utils:put_if_defined(Data1, <<"lastMeasurementTimestamp">>, LastMeasurementTimestamp).
 
 
 -spec json_to_info(json_utils:json_term()) -> info().
-json_to_info(#{
-    <<"timestamp">> := Timestamp,
-    <<"value">> := Value,
-    <<"firstMeasurementTimestamp">> := FirstMeasurementTimestamp,
-    <<"lastMeasurementTimestamp">> := LastMeasurementTimestamp
-}) ->
+json_to_info(JsonData) ->
     #window_info{
-        timestamp = Timestamp,
-        value = Value,
-        first_measurement_timestamp = utils:null_to_undefined(FirstMeasurementTimestamp),
-        last_measurement_timestamp = utils:null_to_undefined(LastMeasurementTimestamp)
+        timestamp = maps:get(<<"timestamp">>, JsonData),
+        value = maps:get(<<"value">>, JsonData),
+        first_measurement_timestamp = utils:null_to_undefined(maps:get(<<"firstMeasurementTimestamp">>, JsonData, null)),
+        last_measurement_timestamp = utils:null_to_undefined(maps:get(<<"lastMeasurementTimestamp">>, JsonData, null))
     }.
 
 
