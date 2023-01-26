@@ -16,7 +16,7 @@
 -include("modules/datastore/infinite_log.hrl").
 
 %% Model API
--export([get/4, save/5, delete/4, set_ttl/5, save_with_ttl/6]).
+-export([get/4, save/5, delete/4, adjust_expiry_threshold/6, save_with_expiry_threshold_adjustment/7]).
 %% Convenience functions
 -export([append_entry/2]).
 -export([get_node_entries_length/2]).
@@ -73,16 +73,33 @@ delete(Ctx, LogId, NodeNumber, Batch) ->
     datastore_doc:delete(Ctx, NodeId, Batch).
 
 
--spec set_ttl(infinite_log:ctx(), infinite_log:log_id(), node_number(), time:seconds(), infinite_log:batch()) ->
+-spec adjust_expiry_threshold(
+    infinite_log:ctx(),
+    infinite_log:log_id(),
+    node_number(),
+    time:seconds(),
+    infinite_log:timestamp_millis(),
+    infinite_log:batch()
+) ->
     {ok | {error, term()}, infinite_log:batch()}.
-set_ttl(Ctx, LogId, NodeNumber, Ttl, Batch) ->
+adjust_expiry_threshold(Ctx, LogId, NodeNumber, ThresholdSeconds, NowMillis, Batch) ->
     {{ok, Record}, UpdatedBatch} = get(Ctx, LogId, NodeNumber, Batch),
-    save_with_ttl(Ctx, LogId, NodeNumber, Record, Ttl, UpdatedBatch).
+    save_with_expiry_threshold_adjustment(Ctx, LogId, NodeNumber, Record, ThresholdSeconds, NowMillis, UpdatedBatch).
 
--spec save_with_ttl(infinite_log:ctx(), infinite_log:log_id(), node_number(), record(), time:seconds(), infinite_log:batch()) ->
+
+-spec save_with_expiry_threshold_adjustment(
+    infinite_log:ctx(),
+    infinite_log:log_id(),
+    node_number(),
+    record(),
+    time:seconds(),
+    infinite_log:timestamp_millis(),
+    infinite_log:batch()
+) ->
     {ok | {error, term()}, infinite_log:batch()}.
-save_with_ttl(Ctx, LogId, NodeNumber, Record, Ttl, Batch) ->
-    Ctx1 = datastore_doc:set_expiry_in_ctx(Ctx, Ttl),
+save_with_expiry_threshold_adjustment(Ctx, LogId, NodeNumber, Record, ThresholdSeconds, NowMillis, Batch) ->
+    AdjustedThresholdSeconds = max(0, ThresholdSeconds - (NowMillis - Record#infinite_log_node.newest_timestamp) div 1000),
+    Ctx1 = datastore_doc:set_expiry_in_ctx(Ctx, AdjustedThresholdSeconds),
     save(Ctx1, LogId, NodeNumber, Record, Batch).
 
 %%=====================================================================
@@ -149,6 +166,8 @@ get_ctx() ->
 
 -spec get_record_version() -> datastore_model:record_version().
 get_record_version() ->
+    % NOTE: this model is a part of `infinite_log_sentinel`, which must be
+    % upgraded if it changes.
     1.
 
 

@@ -60,7 +60,8 @@ from_json(Data = #{<<"mode">> := <<"slice">>}) ->
         },
         optional => #{
             <<"startTimestamp">> => {integer, {not_lower_than, 0}},
-            <<"windowLimit">> => {integer, {between, 1, ?MAX_WINDOW_LIMIT}}
+            <<"windowLimit">> => {integer, {between, 1, ?MAX_WINDOW_LIMIT}},
+            <<"extendedInfo">> => {boolean, any}
         }
     },
     SanitizedData = middleware_sanitizer:sanitize_data(Data, DataSpec),
@@ -68,7 +69,8 @@ from_json(Data = #{<<"mode">> := <<"slice">>}) ->
     #time_series_slice_get_request{
         layout = maps:get(<<"layout">>, SanitizedData),
         start_timestamp = maps:get(<<"startTimestamp">>, SanitizedData, undefined),
-        window_limit = maps:get(<<"windowLimit">>, SanitizedData, ?DEFAULT_WINDOW_LIMIT)
+        window_limit = maps:get(<<"windowLimit">>, SanitizedData, ?DEFAULT_WINDOW_LIMIT),
+        extended_info = maps:get(<<"extendedInfo">>, SanitizedData, false)
     };
 
 from_json(#{<<"mode">> := _InvalidMode}) ->

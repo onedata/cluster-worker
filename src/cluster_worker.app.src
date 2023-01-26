@@ -333,6 +333,20 @@
             % graphite metrics prefix
             {graphite_prefix, <<"onedata">>},
             % graphite connection timeout
-            {graphite_connect_timeout, 5000}
+            {graphite_connect_timeout, 5000},
+
+            %% ===================================================================
+            %% Audit logs
+            %% ===================================================================
+            % All audits logs have mandatory thresholds for pruning and expiry.
+            % Below envs control their default and maximum allowed values.
+
+            {audit_log_default_size_pruning_threshold, 5000},
+            {audit_log_default_age_pruning_threshold_seconds, 1209600}, % 14 days
+            {audit_log_default_expiry_threshold_seconds, 2592000}, % 30 days,
+
+            {audit_log_max_size_pruning_threshold, 500000},
+            {audit_log_max_age_pruning_threshold_seconds, 5184000}, % 60 days
+            {audit_log_max_expiry_threshold_seconds, 7776000} % 90 days
         ]}
     ]}.
