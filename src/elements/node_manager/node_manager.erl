@@ -71,6 +71,12 @@
     ], [worker_first, {posthook, init_supervisors}]}
 ]).
 
+-define(LISTENER_MANAGER_WORKER_SPEC(),
+    {listener_manager_worker, [
+        listeners(), fun apply_before_listeners_start_procedures/0, fun apply_after_listeners_stop_procedures/0
+    ], [{terminate_timeout, timer:minutes(1)}]}
+).
+
 -define(HELPER_ETS, node_manager_helper_ets).
 
 %%%===================================================================
@@ -571,7 +577,7 @@ handle_cast(?FORCE_STOP(ReasonMsg), State) ->
     ?critical("Received stop signal from cluster manager: ~s", [ReasonMsg]),
     ?critical("Force stopping application..."),
     init:stop(),
-    {stop, normal, State};
+    {noreply, State};
 
 handle_cast(?NODE_DOWN(Node), State) ->
     handle_node_status_change_async(Node, node_down, fun() ->
@@ -661,22 +667,10 @@ handle_info(Request, State) ->
     | shutdown
     | {shutdown, term()}
     | term().
-terminate(Reason, State) ->
+terminate(Reason, _State) ->
     % TODO VFS-6339 - Unregister node during normal stop not to start HA procedures
-    ?info("Shutting down ~p due to ~p", [?MODULE, Reason]),
+    ?info("Shutting down ~w due to ~p", [?MODULE, Reason]).
 
-    lists:foreach(fun(Module) ->
-        try
-            erlang:apply(Module, stop, [])
-        catch
-            E1:E2 ->
-                ?warning_stacktrace("Stop failed on module ~p: ~p:~p",
-                    [Module, E1, E2])
-        end
-    end, node_manager:listeners()),
-    ?info("All listeners stopped"),
-
-    ?CALL_PLUGIN(terminate, [Reason, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -752,6 +746,7 @@ cluster_init_step(?PREPARE_FOR_UPGRADE) ->
     ?info("The cluster is ready for upgrade"),
     ok;
 cluster_init_step(?UPGRADE_CLUSTER) ->
+    % this step internally requires calls to node manager, hence it is processed asynchronously
     case node() == consistent_hashing:get_assigned_node(?UPGRADE_CLUSTER) of
         true ->
             spawn(fun() ->
@@ -776,27 +771,21 @@ cluster_init_step(?START_CUSTOM_WORKERS) ->
     init_workers(Workers),
     ?info("Custom workers started successfully"),
     ok;
-cluster_init_step(?DB_AND_WORKERS_READY) ->
-    ?info("Database and workers ready - executing 'on_db_and_workers_ready' procedures..."),
-    % the procedures require calls to node manager, hence they are processed asynchronously
+cluster_init_step(?START_LISTENERS) ->
+    % this step internally requires calls to node manager, hence it is processed asynchronously
     spawn(fun() ->
         Result = try
-            ok = ?CALL_PLUGIN(on_db_and_workers_ready, []),
-            ?info("Successfully executed 'on_db_and_workers_ready' procedures"),
+            init_workers([?LISTENER_MANAGER_WORKER_SPEC()]),
             success
-        catch Type:Reason ->
-            ?error_stacktrace("Failed to execute 'on_db_and_workers_ready' procedures - ~p:~p", [
-                Type, Reason
+        catch Class:Reason ->
+            ?error_stacktrace("Failed to start the listener_manager_worker - ~w:~p", [
+                Class, Reason
             ]),
             failure
         end,
-        report_step_result(?DB_AND_WORKERS_READY, Result)
+        report_step_result(?START_LISTENERS, Result)
     end),
     async;
-cluster_init_step(?START_LISTENERS) ->
-    lists:foreach(fun(Module) ->
-        ok = erlang:apply(Module, start, [])
-    end, node_manager:listeners());
 cluster_init_step(?CLUSTER_READY) ->
     ?info("Cluster initialized successfully"),
     gen_server2:cast(?NODE_MANAGER_NAME, node_initialized),
@@ -849,6 +838,35 @@ upgrade_cluster(CurrentGen, InstalledGen, OldestUpgradableGen) when CurrentGen <
 upgrade_cluster(CurrentGen, _InstalledGen, _OldestKnownGen) ->
     {ok, _} = cluster_generation:save(CurrentGen),
     ?info("No upgrade needed - the cluster is in newest generation").
+
+
+%% @private
+%% @doc callback called by listener_manager_worker
+-spec apply_before_listeners_start_procedures() -> ok | no_return().
+apply_before_listeners_start_procedures() ->
+    ?info("Executing 'before_listeners_start' procedures..."),
+    try
+        ok = ?CALL_PLUGIN(before_listeners_start, []),
+        ?info("Successfully executed 'before_listeners_start' procedures")
+    catch Class:Reason ->
+        ?error_stacktrace("Failed to execute 'before_listeners_start' procedures", Class, Reason),
+        % this will crash the listener_manager_worker and cause an application shutdown
+        error({failed_to_execute_before_listeners_start_procedures})
+    end.
+
+
+%% @private
+%% @doc callback called by listener_manager_worker
+-spec apply_after_listeners_stop_procedures() -> ok.
+apply_after_listeners_stop_procedures() ->
+    ?info("Executing 'after_listeners_stop' procedures..."),
+    try
+        ok = ?CALL_PLUGIN(after_listeners_stop, []),
+        ?info("Successfully executed 'after_listeners_stop' procedures")
+    catch Class:Reason ->
+        ?error_stacktrace("Failed to execute 'after_listeners_stop' procedures", Class, Reason)
+        % do not crash here as we need to shut down regardless of the problems
+    end.
 
 
 %%--------------------------------------------------------------------
