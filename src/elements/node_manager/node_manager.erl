@@ -74,7 +74,7 @@
 -define(LISTENER_MANAGER_WORKER_SPEC(),
     {listener_manager_worker, [
         listeners(), fun apply_before_listeners_start_procedures/0, fun apply_after_listeners_stop_procedures/0
-    ], [{terminate_timeout, timer:minutes(1)}]}
+    ], [{terminate_timeout, infinity}]}
 ).
 
 -define(HELPER_ETS, node_manager_helper_ets).
