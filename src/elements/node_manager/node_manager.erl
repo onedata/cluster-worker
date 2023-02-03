@@ -72,9 +72,7 @@
 ]).
 
 -define(LISTENER_MANAGER_WORKER_SPEC(),
-    {listener_manager_worker, [
-        listeners(), fun apply_before_listeners_start_procedures/0, fun apply_after_listeners_stop_procedures/0
-    ], [{terminate_timeout, infinity}]}
+    {listener_manager_worker, [], [{terminate_timeout, infinity}]}
 ).
 
 -define(HELPER_ETS, node_manager_helper_ets).
@@ -838,35 +836,6 @@ upgrade_cluster(CurrentGen, InstalledGen, OldestUpgradableGen) when CurrentGen <
 upgrade_cluster(CurrentGen, _InstalledGen, _OldestKnownGen) ->
     {ok, _} = cluster_generation:save(CurrentGen),
     ?info("No upgrade needed - the cluster is in newest generation").
-
-
-%% @private
-%% @doc callback called by listener_manager_worker
--spec apply_before_listeners_start_procedures() -> ok | no_return().
-apply_before_listeners_start_procedures() ->
-    ?info("Executing 'before_listeners_start' procedures..."),
-    try
-        ok = ?CALL_PLUGIN(before_listeners_start, []),
-        ?info("Successfully executed 'before_listeners_start' procedures")
-    catch Class:Reason ->
-        ?error_stacktrace("Failed to execute 'before_listeners_start' procedures", Class, Reason),
-        % this will crash the listener_manager_worker and cause an application shutdown
-        error({failed_to_execute_before_listeners_start_procedures})
-    end.
-
-
-%% @private
-%% @doc callback called by listener_manager_worker
--spec apply_after_listeners_stop_procedures() -> ok.
-apply_after_listeners_stop_procedures() ->
-    ?info("Executing 'after_listeners_stop' procedures..."),
-    try
-        ok = ?CALL_PLUGIN(after_listeners_stop, []),
-        ?info("Successfully executed 'after_listeners_stop' procedures")
-    catch Class:Reason ->
-        ?error_stacktrace("Failed to execute 'after_listeners_stop' procedures", Class, Reason)
-        % do not crash here as we need to shut down regardless of the problems
-    end.
 
 
 %%--------------------------------------------------------------------
