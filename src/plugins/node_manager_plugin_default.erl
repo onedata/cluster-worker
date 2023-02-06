@@ -145,6 +145,10 @@ custom_workers() -> [].
 %% This callback is executed when cluster internals (database and workers)
 %% have finished initialization, but before the listeners (servers) are started.
 %% Use to run custom code required for application initialization.
+%%
+%% NOTE: this callback blocks the application supervisor and must not be used to
+%% interact with the main supervision tree.
+%%
 %% This callback is executed on all cluster nodes.
 %% @end
 %%--------------------------------------------------------------------
@@ -158,6 +162,10 @@ before_listeners_start() ->
 %% the listeners have already stopped, but the cluster internals
 %% (database and workers) are still running.
 %% Use to run custom code required for application shutdown.
+%%
+%% NOTE: this callback blocks the application supervisor and must not be used to
+%% interact with the main supervision tree.
+%%
 %% This callback is executed on all cluster nodes.
 %% @end
 %%--------------------------------------------------------------------

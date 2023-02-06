@@ -1,13 +1,13 @@
 %%%--------------------------------------------------------------------
 %%% @author Lukasz Opiola
-%%% @copyright (C) 2022 ACK CYFRONET AGH
+%%% @copyright (C) 2023 ACK CYFRONET AGH
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%--------------------------------------------------------------------
 %%% @doc
 %%% This module implements a simple worker logic used to handle
-%%% starting and stopping of listeners. The purpose is correlate
+%%% starting and stopping of listeners. The purpose is to correlate
 %%% the listeners start/stop with supervision tree setup and teardown.
 %%% @end
 %%%--------------------------------------------------------------------
@@ -22,6 +22,8 @@
 %% worker_plugin_behaviour callbacks
 -export([init/1, handle/1, cleanup/0]).
 
+-define(CALL_PLUGIN(Fun, Args), plugins:apply(node_manager_plugin, Fun, Args)).
+
 
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
@@ -29,17 +31,14 @@
 
 -spec init(Args :: term()) ->
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
-init([Listeners, BeforeListenersStartCallback, AfterListenersStopCallback]) ->
-    BeforeListenersStartCallback(),
+init([]) ->
+    apply_before_listeners_start_procedures(),
 
     lists:foreach(fun(Module) ->
         ok = erlang:apply(Module, start, [])
-    end, Listeners),
+    end, listeners()),
 
-    {ok, #{
-        listeners => Listeners,
-        after_listeners_stop_callback => AfterListenersStopCallback
-    }}.
+    {ok, #{}}.
 
 
 -spec handle(ping | healthcheck | {init_models, list()}) -> pong | ok.
@@ -55,7 +54,6 @@ handle(Request) ->
     Result :: ok | {error, Error},
     Error :: timeout | term().
 cleanup() ->
-    Listeners = worker_host:state_get(?MODULE, listeners),
     ?info("Stopping listeners..."),
     Success = lists:all(fun(Module) ->
         try erlang:apply(Module, stop, []) of
@@ -65,13 +63,49 @@ cleanup() ->
             ?warning_stacktrace("Failed to stop listener ~w - ~w:~p", [Module, Class, Reason]),
             false
         end
-    end, Listeners),
+    end, listeners()),
 
     case Success of
         true -> ?info("All listeners stopped");
         false -> ?warning("Some listeners could not be stopped, ignoring")
     end,
 
-    AfterListenersStopCallback = worker_host:state_get(?MODULE, after_listeners_stop_callback),
-    AfterListenersStopCallback().
+    apply_after_listeners_stop_procedures().
 
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%% @private
+-spec listeners() -> Listeners :: [atom()].
+listeners() ->
+    ?CALL_PLUGIN(listeners, []).
+
+
+%% @private
+%% @doc callback called by listener_manager_worker
+-spec apply_before_listeners_start_procedures() -> ok | no_return().
+apply_before_listeners_start_procedures() ->
+    ?info("Executing 'before_listeners_start' procedures..."),
+    try
+        ok = ?CALL_PLUGIN(before_listeners_start, []),
+        ?info("Successfully executed 'before_listeners_start' procedures")
+    catch Class:Reason ->
+        ?error_stacktrace("Failed to execute 'before_listeners_start' procedures", Class, Reason),
+        % this will crash the listener_manager_worker and cause an application shutdown
+        error({failed_to_execute_before_listeners_start_procedures})
+    end.
+
+
+%% @private
+%% @doc callback called by listener_manager_worker
+-spec apply_after_listeners_stop_procedures() -> ok.
+apply_after_listeners_stop_procedures() ->
+    ?info("Executing 'after_listeners_stop' procedures..."),
+    try
+        ok = ?CALL_PLUGIN(after_listeners_stop, []),
+        ?info("Finished executing 'after_listeners_stop' procedures")
+    catch Class:Reason ->
+        ?error_stacktrace("Failed to execute 'after_listeners_stop' procedures", Class, Reason)
+        % do not crash here as we need to shut down regardless of the problems
+    end.
