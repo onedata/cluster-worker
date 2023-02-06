@@ -392,6 +392,8 @@ send_request_and_check_delivery(Plugin, Key, Message, #{
                     ignored;
                 exit:{normal, _} ->
                     ignored;
+                exit:{{shutdown, _}, _} ->
+                    ignored;
                 _:{timeout, _} ->
                     send_request_and_check_delivery(Plugin, Key, Message, Options#{attempts => Attempts - 1});
                 Error:Reason:Stacktrace when Reason =/= potential_deadlock ->
@@ -419,6 +421,10 @@ send_request_and_check_delivery(Plugin, Key, Message, Options) ->
                     pes_process_manager:delete_key_to_server_mapping(Plugin, Key, Pid),
                     % Race with process termination - do not decrement attempts
                     send_request_and_check_delivery(Plugin, Key, Message, Options);
+                exit:{{shutdown, _}, _} ->
+                    pes_process_manager:delete_key_to_server_mapping(Plugin, Key, Pid),
+                    % Race with process termination - do not decrement attempts
+                    send_request_and_check_delivery(Plugin, Key, Message, Options);
                 _:{timeout, _} ->
                     send_request_and_check_delivery(Plugin, Key, Message, Options#{attempts => Attempts - 1});
                 Error:Reason:Stacktrace when Reason =/= potential_deadlock ->
@@ -443,6 +449,8 @@ send_to_all(Plugin, Message) ->
             _:{noproc, _} ->
                 Acc; % Ignore terminated process
             exit:{normal, _} ->
+                Acc; % Ignore terminated process
+            exit:{{shutdown, _}, _} ->
                 Acc; % Ignore terminated process
             _:{timeout, _} ->
                 [?ERROR_TIMEOUT | Acc];
