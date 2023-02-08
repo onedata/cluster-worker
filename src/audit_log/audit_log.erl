@@ -67,9 +67,9 @@
 
 % boundaries for thresholds that can be specified for an audit log;
 % if lower/greater values are provided, they are adjusted to these boundaries
--define(MIN_SIZE_PRUNING_THRESHOLD_SEC, cluster_worker:get_env(audit_log_max_size_pruning_threshold, 1)).
--define(MIN_AGE_PRUNING_THRESHOLD_SEC, cluster_worker:get_env(audit_log_max_age_pruning_threshold_seconds, 1)).
--define(MIN_EXPIRY_THRESHOLD_SEC, cluster_worker:get_env(audit_log_max_expiry_threshold_seconds, 86_400)).  % a day
+-define(MIN_SIZE_PRUNING_THRESHOLD_SEC, cluster_worker:get_env(audit_log_min_size_pruning_threshold, 1)).
+-define(MIN_AGE_PRUNING_THRESHOLD_SEC, cluster_worker:get_env(audit_log_min_age_pruning_threshold_seconds, 1)).
+-define(MIN_EXPIRY_THRESHOLD_SEC, cluster_worker:get_env(audit_log_min_expiry_threshold_seconds, 86_400)).  % a day
 -define(MAX_SIZE_PRUNING_THRESHOLD_SEC, cluster_worker:get_env(audit_log_max_size_pruning_threshold, 500_000)).
 -define(MAX_AGE_PRUNING_THRESHOLD_SEC, cluster_worker:get_env(audit_log_max_age_pruning_threshold_seconds, 5_184_000)). % 60 days
 -define(MAX_EXPIRY_THRESHOLD_SEC, cluster_worker:get_env(audit_log_max_expiry_threshold_seconds, 7_776_000)). % 90 days
