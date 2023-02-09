@@ -133,6 +133,10 @@ init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
     ]),
 
     case Ans of
+        {broken_root, Tree} when ReadOnly ->
+            % The tree is readonly so no data is lost permanently - this problem can appear
+            % if some documents are inaccessible because of network problems so do not log
+            {ok, Tree};
         {broken_root, Tree} ->
             % The tree has been broken by abnormal termination of application
             % Some data could be lost, proceeding with fixed root
