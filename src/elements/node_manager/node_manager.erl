@@ -486,8 +486,8 @@ handle_cast(configure_throttling, #state{throttling = true} = State) ->
     try
         ok = datastore_throttling:configure_throttling()
     catch
-        Error:Reason:Stacktrace ->
-            ?warning_stacktrace("configure_throttling failed due to ~p:~p", [Error, Reason], Stacktrace)
+        Class:Reason:Stacktrace ->
+            ?warning_exception("configure_throttling failed", Class, Reason, Stacktrace)
     end,
     {noreply, State};
 
@@ -790,7 +790,7 @@ cluster_init_step(?START_LISTENERS) ->
             init_workers([?LISTENER_MANAGER_WORKER_SPEC()]),
             success
         catch Class:Reason:Stacktrace ->
-            ?error_stacktrace("Failed to start the listener_manager_worker", Class, Reason, Stacktrace),
+            ?error_exception("Failed to start the listener_manager_worker", Class, Reason, Stacktrace),
             failure
         end,
         report_step_result(?START_LISTENERS, Result)

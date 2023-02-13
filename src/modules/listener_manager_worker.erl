@@ -59,8 +59,8 @@ cleanup() ->
         try erlang:apply(Module, stop, []) of
             ok -> true;
             {error, _} -> false
-        catch Class:Reason ->
-            ?warning_stacktrace("Failed to stop listener ~w - ~w:~p", [Module, Class, Reason]),
+        catch Class:Reason:Stacktrace ->
+            ?warning_exception("Failed to stop listener ~w", [Module], Class, Reason, Stacktrace),
             false
         end
     end, listeners()),
@@ -90,8 +90,8 @@ apply_before_listeners_start_procedures() ->
     try
         ok = ?CALL_PLUGIN(before_listeners_start, []),
         ?info("Successfully executed 'before_listeners_start' procedures")
-    catch Class:Reason ->
-        ?error_stacktrace("Failed to execute 'before_listeners_start' procedures", Class, Reason),
+    catch Class:Reason:Stacktrace ->
+        ?error_exception("Failed to execute 'before_listeners_start' procedures", Class, Reason, Stacktrace),
         % this will crash the listener_manager_worker and cause an application shutdown
         error({failed_to_execute_before_listeners_start_procedures})
     end.
@@ -105,7 +105,7 @@ apply_after_listeners_stop_procedures() ->
     try
         ok = ?CALL_PLUGIN(after_listeners_stop, []),
         ?info("Finished executing 'after_listeners_stop' procedures")
-    catch Class:Reason ->
-        ?error_stacktrace("Failed to execute 'after_listeners_stop' procedures", Class, Reason)
+    catch Class:Reason:Stacktrace ->
+        ?error_exception("Failed to execute 'after_listeners_stop' procedures", Class, Reason, Stacktrace)
         % do not crash here as we need to shut down regardless of the problems
     end.

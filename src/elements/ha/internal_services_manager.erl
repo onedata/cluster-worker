@@ -153,10 +153,10 @@ do_healthcheck(UniqueName, MasterNodeId, LastInterval) ->
         end
     catch
         Class:Reason:Stacktrace ->
-            ?warning_stacktrace(
-                "Healthcheck function of service ~s crashed (this may happen during cluster reorganization)~n"
-                "Error was: ~w:~p",
-                [UniqueName, Class, Reason], Stacktrace
+            ?warning_exception(
+                "Healthcheck function of service ~s crashed (this may happen during cluster reorganization)",
+                [UniqueName],
+                Class, Reason, Stacktrace
             ),
             {ok, LastInterval}
     end.
