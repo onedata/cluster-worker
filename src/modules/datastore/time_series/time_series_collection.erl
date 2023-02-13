@@ -105,7 +105,7 @@
         {throw, {{error, _} = Error, UpdatedDatastoreBatch}} ->
             {Error, UpdatedDatastoreBatch};
         _ ->
-            {?examine_exception(autoformat, [FunArgs], Class, Reason, Stacktrace), Batch}
+            {?examine_exception(?autoformat([FunArgs]), Class, Reason, Stacktrace), Batch}
     end
 ).
 
