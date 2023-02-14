@@ -91,7 +91,7 @@ apply_before_listeners_start_procedures() ->
         ok = ?CALL_PLUGIN(before_listeners_start, []),
         ?info("Successfully executed 'before_listeners_start' procedures")
     catch Class:Reason:Stacktrace ->
-        ?error_exception("Failed to execute 'before_listeners_start' procedures", Class, Reason, Stacktrace),
+        ?error_exception(Class, Reason, Stacktrace),
         % this will crash the listener_manager_worker and cause an application shutdown
         error({failed_to_execute_before_listeners_start_procedures})
     end.
@@ -106,6 +106,6 @@ apply_after_listeners_stop_procedures() ->
         ok = ?CALL_PLUGIN(after_listeners_stop, []),
         ?info("Finished executing 'after_listeners_stop' procedures")
     catch Class:Reason:Stacktrace ->
-        ?error_exception("Failed to execute 'after_listeners_stop' procedures", Class, Reason, Stacktrace)
+        ?error_exception(Class, Reason, Stacktrace)
         % do not crash here as we need to shut down regardless of the problems
     end.
