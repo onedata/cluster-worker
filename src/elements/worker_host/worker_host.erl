@@ -202,7 +202,9 @@ handle_info(Msg, State) ->
     | {shutdown, term()}
     | term().
 terminate(_Reason, #host_state{plugin = Plugin}) ->
+    ?info("Worker: ~s terminating...", [Plugin]),
     Plugin:cleanup(),
+    ?info("Worker: ~s terminated", [Plugin]),
     ok.
 
 %%--------------------------------------------------------------------
