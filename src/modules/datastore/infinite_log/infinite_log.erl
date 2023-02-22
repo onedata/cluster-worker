@@ -38,19 +38,21 @@
 %%%
 %%% The infinite log supports three ways of automatic cleaning:
 %%%
-%%%   * TTL (Time To Live) - a TTL can be explicitly set, making ALL the log
-%%%     data expire after a certain time. During that time, the log can still
-%%%     be read and new entries can still be appended.
-%%%
 %%%   * size based pruning - oldest nodes are pruned when the total log size
 %%%     exceed a certain threshold. The threshold is soft - the pruning happens
 %%%     when the log size is equal to threshold + max_elements_per_node, so that
 %%%     after the pruning, the number of entries left is equal to the threshold.
 %%%
 %%%   * age based pruning - oldest nodes are pruned when all entries in given
-%%%     node are older than the threshold. If this option is chosen, the nodes
-%%%     are assigned a TTL so that they expire on the database level, even if
-%%%     the pruning is not applied.
+%%%     node are older than the threshold. If this option is chosen, the archival
+%%%     nodes are assigned a TTL so that they expire on the database level, even
+%%%     if the pruning is not applied.
+%%%
+%%%   * expiry - the whole log is subject to expiry (if the expiry threshold is
+%%%     defined), i.e. a TTL is set for all the log documents. After a certain time,
+%%%     ALL the log data is deleted. For the sentinel, the expiry time is bumped
+%%%     every time a new log is prepended. For archival nodes, it works just like
+%%%     age based pruning.
 %%%
 %%% In case of size/age based pruning, only whole nodes are deleted (when all
 %%% entries in the node satisfy the pruning condition). The newest node
@@ -58,9 +60,10 @@
 %%% still contain some entries that satisfy the pruning threshold, but will not
 %%% be pruned unless the log grows.
 %%%
-%%% Setting a TTL causes the whole log to be completely deleted after given
-%%% time. In the specific case when the age-based pruning is also set, the TTL
-%%% overrides the document's expiration time, even if pruning threshold is longer.
+%%% Setting an expiry causes the whole log to be completely deleted after given
+%%% time (counting since the last update). In the specific case when the age-based
+%%% pruning is also set, the lower of the two thresholds prevails for archival nodes,
+%%% while the sentinel is affected only by the expiry.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(infinite_log).
@@ -69,14 +72,15 @@
 -include("modules/datastore/infinite_log.hrl").
 -include_lib("ctool/include/logging.hrl").
 
+
 %% API
 -export([create/4, destroy/3]).
 -export([append/4]).
 -export([list/4, list/5]).
--export([set_ttl/4]).
+-export([adjust_expiry_threshold/4]).
 
 % unit of timestamps used across the module for stamping entries and searching
--type timestamp() :: time:millis().
+-type timestamp_millis() :: time:millis().
 
 % id of an infinite log instance as stored in database
 -type log_id() :: binary().
@@ -85,18 +89,19 @@
 -type log_opts() :: #{
     max_entries_per_node => pos_integer(),
     size_pruning_threshold => undefined | non_neg_integer(),
-    age_pruning_threshold => undefined | time:seconds()
+    age_pruning_threshold => undefined | time:seconds(),
+    expiry_threshold => undefined | time:seconds()
 }.
 %% @formatter:on
 
 % content of a log entry, must be a text (suitable for JSON),
 % if needed may encode some arbitrary structures as a JSON or base64
 -type content() :: binary().
--type entry() :: {timestamp(), content()}.
+-type entry() :: {timestamp_millis(), content()}.
 % single entry in the log, numbered from 0 (oldest entry)
 -type entry_index() :: non_neg_integer().
 
--export_type([timestamp/0, log_id/0, log_opts/0, content/0, entry/0, entry_index/0]).
+-export_type([timestamp_millis/0, log_id/0, log_opts/0, content/0, entry/0, entry_index/0]).
 
 % Indicates if the calling process is suitable for updating the log data, or may
 % only cause read only access to the documents. In case of 'readonly' access
@@ -124,7 +129,8 @@ create(Ctx, LogId, Opts, InitialBatch) ->
         log_id = LogId,
         max_entries_per_node = maps:get(max_entries_per_node, Opts, ?DEFAULT_MAX_ENTRIES_PER_NODE),
         size_pruning_threshold = maps:get(size_pruning_threshold, Opts, undefined),
-        age_pruning_threshold = maps:get(age_pruning_threshold, Opts, undefined)
+        age_pruning_threshold = maps:get(age_pruning_threshold, Opts, undefined),
+        expiry_threshold = maps:get(expiry_threshold, Opts, undefined)
     }, InitialBatch).
 
 
@@ -190,24 +196,43 @@ list(Ctx, LogId, Opts, AccessMode, InitialBatch) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Makes the log expire (be deleted from database) after specified Time To Live.
+%% Makes the log expire (be deleted from database) after specified threshold.
+%% If a previous expiry threshold was set, it is overwritten.
 %% The procedure iterates through all documents used up by the log.
+%% The expiry countdown starts from the newest timestamp in every node rather than
+%% the current time (making them expire as if such threshold was preset when the log
+%% was created). This means that archival nodes may expire faster than the sentinel
+%% node, but it's guaranteed that after the threshold (and no activity in the meantime),
+%% all the data is gone.
 %% @end
 %%--------------------------------------------------------------------
--spec set_ttl(ctx(), log_id(), time:seconds(), batch()) -> {ok | {error, term()}, batch()}.
-set_ttl(Ctx, LogId, Ttl, InitialBatch) ->
-    case infinite_log_sentinel:acquire(Ctx, LogId, skip_pruning, allow_updates, InitialBatch) of
+-spec adjust_expiry_threshold(ctx(), log_id(), time:seconds(), batch()) -> {ok | {error, term()}, batch()}.
+adjust_expiry_threshold(Ctx, LogId, Threshold, InitialBatch) ->
+    case infinite_log_sentinel:acquire(Ctx, LogId, apply_pruning, allow_updates, InitialBatch) of
         {{error, _}, _} = AcquireError ->
             AcquireError;
-        {{ok, Sentinel}, AcquireBatch} ->
-            SetNodeTtl = fun(_LogId, NodeNumber, InternalBatch) ->
-                infinite_log_node:set_ttl(Ctx, LogId, NodeNumber, Ttl, InternalBatch)
+        {{ok, Sentinel}, AcquiredBatch} ->
+            {ArchivalNodesUpdateResult, UpdatedBatch} = case Sentinel#infinite_log_sentinel.age_pruning_threshold of
+                AgeThreshold when AgeThreshold /= undefined andalso AgeThreshold < Threshold ->
+                    % if the age based pruning threshold is lower, there is no point in
+                    % overwriting the archival nodes (lower threshold prevails)
+                    {ok, AcquiredBatch};
+                _ ->
+                    CurrentTimestamp = infinite_log_sentinel:current_timestamp(Sentinel),
+                    SetNodeExpiryThreshold = fun(_LogId, NodeNumber, InternalBatch) ->
+                        infinite_log_node:adjust_expiry_threshold(
+                            Ctx, LogId, NodeNumber, Threshold, CurrentTimestamp, InternalBatch
+                        )
+                    end,
+                    apply_for_archival_log_nodes(Sentinel, SetNodeExpiryThreshold, AcquiredBatch)
             end,
-            case apply_for_archival_log_nodes(Sentinel, SetNodeTtl, AcquireBatch) of
-                {{error, _}, _} = SetTtlError ->
-                    SetTtlError;
-                {ok, UpdatedBatch} ->
-                    infinite_log_sentinel:save_with_ttl(Ctx, LogId, Ttl, UpdatedBatch)
+            case ArchivalNodesUpdateResult of
+                {error, _} = SetExpiryThresholdError ->
+                    SetExpiryThresholdError;
+                ok ->
+                    infinite_log_sentinel:adjust_expiry_threshold(
+                        Ctx, LogId, Threshold, UpdatedBatch
+                    )
             end
     end.
 
@@ -253,10 +278,11 @@ safe_log_content_size(#infinite_log_sentinel{max_entries_per_node = MaxEntriesPe
     {ok | {error, term()}, batch()}.
 apply_for_archival_log_nodes(Sentinel = #infinite_log_sentinel{log_id = LogId}, Callback, InitialBatch) ->
     BufferNodeNumber = infinite_log_node:newest_node_number(Sentinel),
-    ArchivalNodeNumbers = lists:seq(0, BufferNodeNumber - 1),
+    OldestNodeNumber = infinite_log_node:oldest_node_number(Sentinel),
+    ArchivalNodeNumbers = lists:seq(OldestNodeNumber, BufferNodeNumber - 1),
     lists_utils:foldl_while(fun(NodeNumber, {ok, AccBatch}) ->
         case Callback(LogId, NodeNumber, AccBatch) of
-            {ok, _} = OkResponse->
+            {ok, _} = OkResponse ->
                 {cont, OkResponse};
             {{error, _}, _} = ErrorResponse ->
                 {halt, ErrorResponse}

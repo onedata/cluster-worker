@@ -16,6 +16,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include_lib("ctool/include/test/test_utils.hrl").
 -include("modules/datastore/infinite_log.hrl").
 
 -define(range(From, To), lists:seq(From, To, signum(To - From))).
@@ -34,7 +35,6 @@
 % appending to log is tested during listing tests
 -define(TEST_CASES, [
     {"create_and_destroy", fun create_and_destroy/2},
-    {"set_ttl", fun set_ttl/2},
 
     {"list", fun list/2},
     {"list_from_id", fun list_from_id/2},
@@ -45,13 +45,25 @@
     {"list_log_with_one_element", fun list_log_with_one_element/2},
     {"list_log_with_one_full_node", fun list_log_with_one_full_node/2},
 
+    {"expiry_threshold_for_static_log", fun expiry_threshold_for_static_log/2},
+    {"expiry_threshold_for_dynamic_log", fun expiry_threshold_for_dynamic_log/2},
+    {"expiry_threshold_adjustment_for_an_old_log", fun expiry_threshold_adjustment_for_an_old_log/2},
+    {"expiry_threshold_adjustment_to_a_lower_value", fun expiry_threshold_adjustment_to_a_lower_value/2},
+    {"expiry_threshold_adjustment_to_a_higher_value", fun expiry_threshold_adjustment_to_a_higher_value/2},
+
     {"size_based_pruning", fun size_based_pruning/2},
     {"size_based_pruning_with_low_threshold", fun size_based_pruning_with_low_threshold/2},
+
     {"age_based_pruning", fun age_based_pruning/2},
     {"age_based_pruning_with_zero_log_interval", fun age_based_pruning_with_zero_log_interval/2},
-    {"age_based_pruning_with_ttl_set", fun age_based_pruning_with_ttl_set/2},
 
-    {"list_inexistent_log", fun list_inexistent_log/2},
+    {"age_based_pruning_with_lower_expiry_threshold", fun age_based_pruning_with_lower_expiry_threshold/2},
+    {"age_based_pruning_with_higher_expiry_threshold", fun age_based_pruning_with_higher_expiry_threshold/2},
+
+    {"destroy_pruned_log", fun destroy_pruned_log/2},
+    {"destroy_log_with_missing_nodes", fun destroy_log_with_missing_nodes/2},
+
+    {"list_nonexistent_log", fun list_nonexistent_log/2},
     {"list_empty_log", fun list_empty_log/2},
     {"list_log_with_missing_nodes", fun list_log_with_missing_nodes/2},
 
@@ -114,46 +126,8 @@ create_and_destroy(LogId, MaxEntriesPerNode) ->
     end),
 
     ?assertEqual(ok, call_destroy(LogId)),
-    ?assertNot(sentinel_exists(LogId)),
-    foreach_archival_node_number(EntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
-        ?assertNot(node_exists(LogId, NodeNumber))
-    end),
-
-    ?assertEqual({error, not_found}, call_list(LogId, #{direction => ?FORWARD}, allow_updates)),
-    ?assertEqual({error, not_found}, call_list(LogId, #{direction => ?BACKWARD}, allow_updates)),
-    ?assertEqual({error, not_found}, call_append(LogId, <<"log">>)),
+    assert_all_log_data_deleted(LogId, MaxEntriesPerNode, EntryCount),
     ?assertEqual(ok, call_destroy(LogId)).
-
-
-set_ttl(LogId, MaxEntriesPerNode) ->
-    % the log is created in test setup
-    EntryCount = 5000,
-    append(#{count => EntryCount, first_at => 0, interval => 1}),
-
-    Ttl = rand:uniform(100000000),
-    ?assertEqual(ok, call_set_ttl(LogId, Ttl)),
-
-    clock_freezer_mock:simulate_seconds_passing(Ttl - 1),
-    ?assert(sentinel_exists(LogId)),
-    foreach_archival_node_number(EntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
-        ?assert(node_exists(LogId, NodeNumber))
-    end),
-
-    % newly appended logs should also be subject to the previously set TTL
-    NewLogsCount = 783,
-    append(#{count => NewLogsCount, interval => 0}),
-
-    % when the TTL passes, all log data should be deleted
-    clock_freezer_mock:simulate_seconds_passing(1),
-    ?assertNot(sentinel_exists(LogId)),
-    foreach_archival_node_number(EntryCount + NewLogsCount, MaxEntriesPerNode, fun(NodeNumber) ->
-        ?assertNot(node_exists(LogId, NodeNumber))
-    end),
-
-    ?assertEqual({error, not_found}, call_list(LogId, #{direction => ?FORWARD}, allow_updates)),
-    ?assertEqual({error, not_found}, call_list(LogId, #{direction => ?BACKWARD}, allow_updates)),
-    ?assertEqual({error, not_found}, call_append(LogId, <<"log">>)),
-    ?assertEqual({error, not_found}, call_set_ttl(LogId, Ttl)).
 
 
 list(_, _) ->
@@ -467,6 +441,129 @@ list_log_with_one_full_node(_, MaxEntriesPerNode) ->
     ?testList([MaxEntryIndex], ?FORWARD, {timestamp, MaxEntryIndex}, #{limit => MaxEntriesPerNode}).
 
 
+expiry_threshold_for_static_log(_, MaxEntriesPerNode) ->
+    expiry_threshold_for_static_log_base(MaxEntriesPerNode, preset),
+    expiry_threshold_for_static_log_base(MaxEntriesPerNode, adjust).
+
+expiry_threshold_for_static_log_base(MaxEntriesPerNode, Mode) ->
+    EntryCount = 3000,
+    Interval = ?RAND_INT(1000000),
+    ExpiryThreshold = ?RAND_INT(EntryCount * Interval div 1000 + 1, 100000000),
+
+    BaseOpts = #{max_entries_per_node => MaxEntriesPerNode},
+    LogId = create_log_for_test(case Mode of
+        preset -> BaseOpts#{expiry_threshold => ExpiryThreshold};
+        adjust -> BaseOpts
+    end),
+
+    append(#{count => EntryCount, first_at => 0, interval => Interval}),
+
+    Mode == adjust andalso ?assertEqual(ok, call_adjust_expiry_threshold(LogId, ExpiryThreshold)),
+
+    clock_freezer_mock:simulate_seconds_passing(ExpiryThreshold - 1),
+    ?assert(sentinel_exists(LogId)),
+    foreach_archival_node_number(EntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
+        NewestTimestampInNode = (NodeNumber + 1) * (MaxEntriesPerNode - 1) * Interval div 1000,
+        ShouldNodeExist = clock_freezer_mock:current_time_seconds() - NewestTimestampInNode < ExpiryThreshold,
+        ?assertEqual(ShouldNodeExist, node_exists(LogId, NodeNumber))
+    end),
+
+    % when the threshold passes, all log data should be deleted
+    clock_freezer_mock:simulate_seconds_passing(1),
+    assert_all_log_data_deleted(LogId, MaxEntriesPerNode, EntryCount).
+
+
+expiry_threshold_for_dynamic_log(_, MaxEntriesPerNode) ->
+    expiry_threshold_for_dynamic_log_base(MaxEntriesPerNode, preset),
+    expiry_threshold_for_dynamic_log_base(MaxEntriesPerNode, adjust).
+
+expiry_threshold_for_dynamic_log_base(MaxEntriesPerNode, Mode) ->
+    InitialEntryCount = MaxEntriesPerNode + 1,  % trigger creation of the first archival node
+    Interval = ?RAND_INT(1000000),
+    ExpiryThreshold = ?RAND_INT(InitialEntryCount * Interval div 1000 + 1, 100000000),
+
+    BaseOpts = #{max_entries_per_node => MaxEntriesPerNode},
+    LogId = create_log_for_test(case Mode of
+        preset -> BaseOpts#{expiry_threshold => ExpiryThreshold};
+        adjust -> BaseOpts
+    end),
+
+    append(#{count => InitialEntryCount, first_at => 0, interval => Interval}),
+
+    Mode == adjust andalso ?assertEqual(ok, call_adjust_expiry_threshold(LogId, ExpiryThreshold)),
+
+    clock_freezer_mock:simulate_seconds_passing(ExpiryThreshold - 1),
+    ?assert(sentinel_exists(LogId)),
+    foreach_archival_node_number(InitialEntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
+        NewestTimestampInNode = (NodeNumber + 1) * (MaxEntriesPerNode - 1) * Interval,
+        ShouldNodeExist = clock_freezer_mock:current_time_millis() - NewestTimestampInNode < ExpiryThreshold * 1000,
+        ?assertEqual(ShouldNodeExist, node_exists(LogId, NodeNumber))
+    end),
+
+    % newly appended logs should reset the expiry countdown for sentinel,
+    % but not for archival nodes
+    {NewEntryCount, _ExpiredNodeCount} = lists:foldl(fun(_, {NewEntryCountAcc, ExpiredNodeCountAcc}) ->
+        CurrentGrowth = MaxEntriesPerNode,
+        append(#{count => CurrentGrowth, interval => ?RAND_INT(0, 1000)}),
+        clock_freezer_mock:simulate_seconds_passing(ExpiryThreshold - 1),
+        ?assert(sentinel_exists(LogId)),
+        ?assertNot(nodes_up_to_number_exist(LogId, ExpiredNodeCountAcc)),
+        {NewEntryCountAcc + CurrentGrowth, ExpiredNodeCountAcc + 1}
+    end, {InitialEntryCount, 0}, lists:seq(1, 10)),
+
+    % when the threshold passes, all log data should be deleted
+    clock_freezer_mock:simulate_seconds_passing(1),
+    assert_all_log_data_deleted(LogId, MaxEntriesPerNode, NewEntryCount).
+
+
+expiry_threshold_adjustment_for_an_old_log(LogId, MaxEntriesPerNode) ->
+    ExpiryThreshold = ?RAND_INT(1000000, 100000000),
+    EntryCount = 3 * MaxEntriesPerNode,
+
+    append(#{count => EntryCount}),
+
+    clock_freezer_mock:simulate_seconds_passing(ExpiryThreshold * ?RAND_INT(1, 10)),
+
+    % if the log was old enough, it may be deleted immediately after expiry adjustment
+    % (the newest log timestamp is taken into account when setting the expiry)
+    ?assertEqual(ok, call_adjust_expiry_threshold(LogId, ExpiryThreshold)),
+    assert_all_log_data_deleted(LogId, MaxEntriesPerNode, EntryCount).
+
+
+expiry_threshold_adjustment_to_a_lower_value(LogId, MaxEntriesPerNode) ->
+    ExpiryThreshold = ?RAND_INT(1000000, 100000000),
+    EntryCount = 3 * MaxEntriesPerNode,
+    append(#{count => EntryCount}),
+
+    ?assertEqual(ok, call_adjust_expiry_threshold(LogId, ExpiryThreshold)),
+
+    clock_freezer_mock:simulate_seconds_passing(ExpiryThreshold div 2 - 1),
+
+    ?assertEqual(ok, call_adjust_expiry_threshold(LogId, ExpiryThreshold div 2)),
+    ?assert(sentinel_exists(LogId)),
+
+    clock_freezer_mock:simulate_seconds_passing(1),
+    assert_all_log_data_deleted(LogId, MaxEntriesPerNode, EntryCount).
+
+
+expiry_threshold_adjustment_to_a_higher_value(LogId, MaxEntriesPerNode) ->
+    ExpiryThreshold = ?RAND_INT(1000000, 100000000),
+    EntryCount = 3 * MaxEntriesPerNode + 1,
+    append(#{count => EntryCount}),
+
+    ?assertEqual(ok, call_adjust_expiry_threshold(LogId, ExpiryThreshold div 2)),
+
+    clock_freezer_mock:simulate_seconds_passing(ExpiryThreshold div 2 - 1),
+
+    ?assertEqual(ok, call_adjust_expiry_threshold(LogId, ExpiryThreshold)),
+
+    clock_freezer_mock:simulate_seconds_passing(1),
+    ?assert(sentinel_exists(LogId)),
+
+    clock_freezer_mock:simulate_seconds_passing(ExpiryThreshold div 2 + 1),
+    assert_all_log_data_deleted(LogId, MaxEntriesPerNode, EntryCount).
+
+
 size_based_pruning(LogId, MaxEntriesPerNode) ->
     Threshold = MaxEntriesPerNode,
     create_log_for_test(#{
@@ -552,10 +649,14 @@ age_based_pruning(LogId, MaxEntriesPerNode) ->
     }),
 
     append(#{count => MaxEntriesPerNode, first_at => 0, interval => 1000}),
+    % an extra interval needed after the last append to get MaxEntriesPerNode seconds
+    clock_freezer_mock:simulate_millis_passing(1000),
     ?testList([0], ?FORWARD, undefined, #{limit => 1}),
     ?testList([MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
 
     append(#{count => MaxEntriesPerNode, interval => 1000}),
+    % an extra interval needed after the last append to get MaxEntriesPerNode seconds
+    clock_freezer_mock:simulate_millis_passing(1000),
     ?testList([MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
     ?testList([2 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
 
@@ -610,8 +711,7 @@ age_based_pruning_with_zero_log_interval(LogId, MaxEntriesPerNode) ->
     ?testList([4 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
     ?testList([5 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}).
 
-
-age_based_pruning_with_ttl_set(_, MaxEntriesPerNode) ->
+age_based_pruning_with_lower_expiry_threshold(_, MaxEntriesPerNode) ->
     Threshold = 4 * rand:uniform(100000),
     LogId = create_log_for_test(#{
         max_entries_per_node => MaxEntriesPerNode,
@@ -623,10 +723,51 @@ age_based_pruning_with_ttl_set(_, MaxEntriesPerNode) ->
     append(#{count => MaxEntriesPerNode, first_at => Threshold div 4 * 2 * 1000, interval => 0}),
     append(#{count => MaxEntriesPerNode, first_at => Threshold div 4 * 3 * 1000, interval => 0}),
 
-    ?assertEqual(ok, call_set_ttl(LogId, Threshold div 4 * 3)),
+    % no logs should be pruned based on age yet
+    ?testList([0], ?FORWARD, undefined, #{limit => 1}),
+    ?testList([4 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
+
+    % however, adjusting the expiry to a lower value should cause the old enough
+    % nodes to be deleted
+    ?assertEqual(ok, call_adjust_expiry_threshold(LogId, Threshold div 4 * 3)),
+
+    ?testList([MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
+    ?testList([4 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
+    ?assertNot(nodes_up_to_number_exist(LogId, 0)),
+
+    clock_freezer_mock:simulate_seconds_passing(Threshold div 4),
+    ?testList([2 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
+    ?testList([4 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
+    ?assertNot(nodes_up_to_number_exist(LogId, 1)),
+
+    clock_freezer_mock:simulate_seconds_passing(Threshold div 4),
+    ?testList([3 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
+    ?testList([4 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
+    ?assertNot(nodes_up_to_number_exist(LogId, 2)),
+
+    % when the threshold passes, all log data should be deleted
+    clock_freezer_mock:simulate_seconds_passing(Threshold div 4),
+    assert_all_log_data_deleted(LogId, MaxEntriesPerNode, 4 * MaxEntriesPerNode).
+
+
+age_based_pruning_with_higher_expiry_threshold(_, MaxEntriesPerNode) ->
+    Threshold = 4 * rand:uniform(100000),
+    % the age based pruning should prevail for archival nodes, while the
+    % sentinel should be subject to the expiry threshold
+    LogId = create_log_for_test(#{
+        max_entries_per_node => MaxEntriesPerNode,
+        age_pruning_threshold => Threshold,
+        expiry_threshold => 2 * Threshold
+    }),
+
+    append(#{count => MaxEntriesPerNode, first_at => Threshold div 4 * 0 * 1000, interval => 0}),
+    append(#{count => MaxEntriesPerNode, first_at => Threshold div 4 * 1 * 1000, interval => 0}),
+    append(#{count => MaxEntriesPerNode, first_at => Threshold div 4 * 2 * 1000, interval => 0}),
+    append(#{count => MaxEntriesPerNode, first_at => Threshold div 4 * 3 * 1000, interval => 0}),
 
     ?testList([0], ?FORWARD, undefined, #{limit => 1}),
     ?testList([4 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
+    ?assert(nodes_up_to_number_exist(LogId, 2)),
 
     clock_freezer_mock:simulate_seconds_passing(Threshold div 4),
     ?testList([MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
@@ -638,22 +779,71 @@ age_based_pruning_with_ttl_set(_, MaxEntriesPerNode) ->
     ?testList([4 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
     ?assertNot(nodes_up_to_number_exist(LogId, 1)),
 
-    % when the TTL passes, all log data should be deleted, regardless of the
-    % age-based pruning threshold
+    % overwriting the expiry should not affect the archival nodes, since the age
+    % threshold is lower, but the sentinel should be affected
+    ?assertEqual(ok, call_adjust_expiry_threshold(LogId, 3 * Threshold)),
+
+    % when the age pruning threshold passes, all archival nodes should be pruned,
+    % but the sentinel node should still be there
     clock_freezer_mock:simulate_seconds_passing(Threshold div 4),
-    foreach_archival_node_number(4 * MaxEntriesPerNode, MaxEntriesPerNode, fun(NodeNumber) ->
-        ?assertNot(node_exists(LogId, NodeNumber))
-    end),
+    ?testList([3 * MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
+    ?testList([4 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
+    ?assertNot(nodes_up_to_number_exist(LogId, 2)),
+    ?assert(sentinel_exists(LogId)),
 
-    ?assertEqual({error, not_found}, call_list(LogId, #{direction => ?FORWARD}, allow_updates)),
-    ?assertEqual({error, not_found}, call_list(LogId, #{direction => ?BACKWARD}, allow_updates)),
-    ?assertEqual({error, not_found}, call_append(LogId, <<"log">>)),
-    ?assertEqual({error, not_found}, call_set_ttl(LogId, Threshold)).
+    % after the original threshold is reached, the sentinel should not be deleted
+    % because the threshold was overwritten with a higher one in the meantime
+    clock_freezer_mock:simulate_seconds_passing(5 * (Threshold div 4)),
+    ?assert(sentinel_exists(LogId)),
+
+    % finally, after the expiry threshold is reached, the sentinel should be deleted
+    clock_freezer_mock:simulate_seconds_passing(Threshold),
+    assert_all_log_data_deleted(LogId, MaxEntriesPerNode, 4 * MaxEntriesPerNode).
 
 
-list_inexistent_log(_, _) ->
-    InexistentLogId = str_utils:rand_hex(16),
-    ?assertEqual({error, not_found}, call_list(InexistentLogId, #{
+destroy_pruned_log(_, MaxEntriesPerNode) ->
+    EntryCount = 5 * MaxEntriesPerNode,
+    Interval = 1000,
+    AgePruningThreshold = EntryCount * Interval div 1000 * ?RAND_INT(2, 7) div 10,
+    ExpiryThreshold = EntryCount * Interval div 1000 * ?RAND_INT(2, 7) div 10,
+
+    LogId = create_log_for_test(#{
+        max_entries_per_node => MaxEntriesPerNode,
+        age_pruning_threshold => AgePruningThreshold,
+%%        size_pruning_threshold => EntryCount div 3 * 2,
+        expiry_threshold => ExpiryThreshold
+    }),
+    append(#{count => EntryCount, first_at => 0, interval => Interval}),
+
+    clock_freezer_mock:simulate_seconds_passing(?RAND_INT(ExpiryThreshold - 1)),
+    ?assertEqual(ok, call_destroy(LogId)),
+
+    assert_all_log_data_deleted(LogId, MaxEntriesPerNode, 4 * MaxEntriesPerNode).
+
+
+destroy_log_with_missing_nodes(_, MaxEntriesPerNode) ->
+    EntryCount = 5 * MaxEntriesPerNode,
+    LogId = create_log_for_test(#{
+        max_entries_per_node => MaxEntriesPerNode
+    }),
+    append(#{count => EntryCount}),
+
+    % simulate a situation when some nodes are missing - this is possible for
+    % example when the operation intertwines with documents' expiring
+    MaxNodeNumber = (EntryCount - 1) div MaxEntriesPerNode,
+    ArchivalNodeNumbers = lists:seq(0, MaxNodeNumber - 1),
+    MissingNodeNumbers = lists_utils:random_sublist(ArchivalNodeNumbers, 1, all),
+    lists:foreach(fun(NodeNumber) ->
+        ?assertEqual(ok, delete_node(LogId, NodeNumber))
+    end, MissingNodeNumbers),
+
+    ?assertEqual(ok, call_destroy(LogId)),
+    assert_all_log_data_deleted(LogId, MaxEntriesPerNode, 4 * MaxEntriesPerNode).
+
+
+list_nonexistent_log(_, _) ->
+    NonexistentLogId = str_utils:rand_hex(16),
+    ?assertEqual({error, not_found}, call_list(NonexistentLogId, #{
         direction => lists_utils:random_element([?FORWARD, ?BACKWARD]),
         start_from => lists_utils:random_element([undefined, {index, ?rand(1000)}, {timestamp, ?rand(1000)}]),
         offset => ?rand(1000) - 500,
@@ -679,7 +869,7 @@ list_log_with_missing_nodes(LogId, MaxEntriesPerNode) ->
 
     % simulate a situation when some nodes are missing - this is possible for
     % example when the listing intertwines with documents' expiring - in such
-    % case the code such not crash, but return an error
+    % case the code should not crash, but return an error
     MaxNodeNumber = (EntryCount - 1) div MaxEntriesPerNode,
     ArchivalNodeNumbers = lists:seq(0, MaxNodeNumber - 1),
     MissingNodeNumbers = lists_utils:random_sublist(ArchivalNodeNumbers, 1, all),
@@ -691,7 +881,7 @@ list_log_with_missing_nodes(LogId, MaxEntriesPerNode) ->
         limit => EntryCount
     }, allow_updates)),
 
-    % if the sentinel is gone, the whole log is considered to be inexistent
+    % if the sentinel is gone, the whole log is considered to be nonexistent
     ?assertEqual(ok, delete_sentinel(LogId)),
     ?assertEqual({error, not_found}, call_list(LogId, #{
         direction => lists_utils:random_element([?FORWARD, ?BACKWARD]),
@@ -763,9 +953,12 @@ create_log_for_test(LogOpts) ->
     LogId.
 
 
+% NOTE: interval is simulated *between* log appends, so for N logs,
+% time passing of (N - 1) * Interval will be simulated.
+-spec append(#{count := non_neg_integer(), first_at := time:millis(), interval := time:millis()}) -> ok.
 append(Spec) ->
     LogId = get_current_log_id(),
-    EntryCount = maps:get(count, Spec, 1),
+    TargetEntryCount = maps:get(count, Spec, 1),
     case maps:find(first_at, Spec) of
         {ok, StartingTimestamp} ->
             clock_freezer_mock:set_current_time_millis(StartingTimestamp);
@@ -773,18 +966,19 @@ append(Spec) ->
             ok
     end,
     Interval = maps:get(interval, Spec, random),
-    lists:foreach(fun(_) ->
+    lists:foreach(fun(Counter) ->
         Content = str_utils:rand_hex(?rand(500)),
-        EntryNumber = get_entry_count(LogId),
+        EntryIndex = get_entry_count(LogId),
         Timestamp = clock_freezer_mock:current_time_millis(),
-        store_entry(LogId, EntryNumber, {Timestamp, Content}),
+        store_entry(LogId, EntryIndex, {Timestamp, Content}),
         call_append(LogId, Content),
-        store_entry_count(LogId, EntryNumber + 1),
-        clock_freezer_mock:simulate_millis_passing(case Interval of
+        NewEntryCount = EntryIndex + 1,
+        store_entry_count(LogId, NewEntryCount),
+        Counter /= TargetEntryCount andalso clock_freezer_mock:simulate_millis_passing(case Interval of
             random -> ?rand(10000);
             _ -> Interval
         end)
-    end, ?range(1, EntryCount)).
+    end, ?range(1, TargetEntryCount)).
 
 
 % to be called within an ?assert() macro to pinpoint the failing line
@@ -904,6 +1098,18 @@ foreach_archival_node_number(EntryCount, MaxEntriesPerNode, Callback) ->
     lists:foreach(Callback, lists:seq(0, MaxNodeNumber - 1)).
 
 
+%% @private
+assert_all_log_data_deleted(LogId, MaxEntriesPerNode, EntryCount) ->
+    ?assertNot(sentinel_exists(LogId)),
+    foreach_archival_node_number(EntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
+        ?assertNot(node_exists(LogId, NodeNumber))
+    end),
+    ?assertEqual({error, not_found}, call_list(LogId, #{direction => ?FORWARD}, allow_updates)),
+    ?assertEqual({error, not_found}, call_list(LogId, #{direction => ?BACKWARD}, allow_updates)),
+    ?assertEqual({error, not_found}, call_append(LogId, <<"log">>)),
+    ?assertEqual({error, not_found}, call_adjust_expiry_threshold(LogId, 17)).
+
+
 signum(X) when X < 0 -> -1;
 signum(X) when X == 0 -> 0;
 signum(X) when X > 0 -> 1.
@@ -918,14 +1124,14 @@ mock_datastore_doc() ->
     ),
     meck:expect(datastore_doc, create,
         fun(Ctx, Id, Document, Batch) ->
-            Ttl = kv_utils:get([disc_driver_ctx, expiry], Ctx, infinity),
-            MockTtl = case is_integer(Ttl) andalso Ttl > 2592000 of
-                true -> Ttl - global_clock:timestamp_seconds();
-                false -> Ttl
+            Expiry = kv_utils:get([disc_driver_ctx, expiry], Ctx, infinity),
+            MockExpiry = case is_integer(Expiry) andalso Expiry > 2592000 of
+                true -> Expiry - global_clock:timestamp_seconds();
+                false -> Expiry
             end,
             case node_cache:get({?MODULE, Id}, default) of
                 default ->
-                    node_cache:put({?MODULE, Id}, {ok, Document}, MockTtl),
+                    node_cache:put({?MODULE, Id}, {ok, Document}, MockExpiry),
                     {{ok, Document}, Batch};
                 _ ->
                     {{error, already_exists}, Batch}
@@ -934,12 +1140,12 @@ mock_datastore_doc() ->
     ),
     meck:expect(datastore_doc, save,
         fun(Ctx, Id, Document, Batch) ->
-            Ttl = kv_utils:get([disc_driver_ctx, expiry], Ctx, infinity),
-            MockTtl = case is_integer(Ttl) andalso Ttl > 2592000 of
-                true -> Ttl - global_clock:timestamp_seconds();
-                false -> Ttl
+            Expiry = kv_utils:get([disc_driver_ctx, expiry], Ctx, infinity),
+            MockExpiry = case is_integer(Expiry) andalso Expiry > 2592000 of
+                true -> Expiry - global_clock:timestamp_seconds();
+                false -> Expiry
             end,
-            node_cache:put({?MODULE, Id}, {ok, Document}, MockTtl),
+            node_cache:put({?MODULE, Id}, {ok, Document}, MockExpiry),
             {{ok, Document}, Batch}
         end
     ),
@@ -971,8 +1177,8 @@ call_list(LogId, Opts, AccessMode) ->
     {Res, _} = infinite_log:list(?DATASTORE_CTX, LogId, Opts, AccessMode, ?DATASTORE_BATCH),
     Res.
 
-call_set_ttl(LogId, Ttl) ->
-    {Res, _} = infinite_log:set_ttl(?DATASTORE_CTX, LogId, Ttl, ?DATASTORE_BATCH),
+call_adjust_expiry_threshold(LogId, Threshold) ->
+    {Res, _} = infinite_log:adjust_expiry_threshold(?DATASTORE_CTX, LogId, Threshold, ?DATASTORE_BATCH),
     Res.
 
 delete_node(LogId, NodeNumber) ->
@@ -987,7 +1193,7 @@ acquire_sentinel(LogId, skip_pruning, readonly) ->
     {Res, _} = infinite_log_sentinel:acquire(?DATASTORE_CTX, LogId, skip_pruning, readonly, ?DATASTORE_BATCH),
     Res.
 
-get_node(LogId, NodeNumber) -> 
+get_node(LogId, NodeNumber) ->
     {Res, _} = infinite_log_node:get(?DATASTORE_CTX, LogId, NodeNumber, ?DATASTORE_BATCH),
     Res.
 

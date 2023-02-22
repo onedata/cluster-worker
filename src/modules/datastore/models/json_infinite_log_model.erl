@@ -32,7 +32,7 @@
 -type id() :: datastore_infinite_log:key().
 -type entry_index() :: binary().
 -type entry_content() :: json_utils:json_map().
--type entry() :: {entry_index(), {infinite_log:timestamp(), entry_content()}}.
+-type entry() :: {entry_index(), {infinite_log:timestamp_millis(), entry_content()}}.
 % log entry in a format suitable for external APIs (ready to be encoded to json)
 % #{
 %     <<"isLast">> => boolean(),
@@ -54,7 +54,7 @@
     start_from => undefined |
                   {index, entry_index()} |  % behaves as in infinite_log
                   {index_exclusive, entry_index()} |  % starts from a subsequent entry
-                  {timestamp, infinite_log:timestamp()},
+                  {timestamp, infinite_log:timestamp_millis()},
     offset => infinite_log_browser:offset(),
     limit => infinite_log_browser:limit()
 }.

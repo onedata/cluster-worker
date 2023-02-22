@@ -126,8 +126,8 @@ handle_call({update_plugin_state, Key, UpdateFun}, _From, State = #host_state{pl
     NewValue = UpdateFun(OldValue),
     {reply, state_put(Plugin, Key, NewValue), State};
 
-handle_call(_Request, _From, State) ->
-    ?log_bad_request(_Request),
+handle_call(Request, _From, State) ->
+    ?log_bad_request(Request),
     {reply, wrong_request, State}.
 
 %%--------------------------------------------------------------------
@@ -151,8 +151,8 @@ handle_cast({progress_report, Report}, State) ->
 handle_cast(stop, State) ->
     {stop, normal, State};
 
-handle_cast(_Request, State) ->
-    ?log_bad_request(_Request),
+handle_cast(Request, State) ->
+    ?log_bad_request(Request),
     {noreply, State}.
 
 
@@ -202,7 +202,9 @@ handle_info(Msg, State) ->
     | {shutdown, term()}
     | term().
 terminate(_Reason, #host_state{plugin = Plugin}) ->
+    ?info("Worker: ~s terminating...", [Plugin]),
     Plugin:cleanup(),
+    ?info("Worker: ~s terminated", [Plugin]),
     ok.
 
 %%--------------------------------------------------------------------

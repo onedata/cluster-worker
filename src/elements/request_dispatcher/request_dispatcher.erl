@@ -132,8 +132,8 @@ handle_call(healthcheck, _From, #state{last_update = LastUpdateMillis} = State) 
     end,
     {reply, Reply, State};
 
-handle_call(_Request, _From, State) ->
-    ?log_bad_request(_Request),
+handle_call(Request, _From, State) ->
+    ?log_bad_request(Request),
     {reply, wrong_request, State}.
 
 %%--------------------------------------------------------------------
@@ -158,8 +158,8 @@ handle_cast({update_lb_advice, LBAdvice}, State) ->
 handle_cast(stop, State) ->
     {stop, normal, State};
 
-handle_cast(_Request, State) ->
-    ?log_bad_request(_Request),
+handle_cast(Request, State) ->
+    ?log_bad_request(Request),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -178,8 +178,8 @@ handle_cast(_Request, State) ->
 handle_info({timer, Msg}, State) ->
     gen_server2:cast(?DISPATCHER_NAME, Msg),
     {noreply, State};
-handle_info(_Request, State) ->
-    ?log_bad_request(_Request),
+handle_info(Request, State) ->
+    ?log_bad_request(Request),
     {noreply, State}.
 
 %%--------------------------------------------------------------------

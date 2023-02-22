@@ -78,6 +78,10 @@
     ], [worker_first, {posthook, init_supervisors}]}
 ]).
 
+-define(LISTENER_MANAGER_WORKER_SPEC(),
+    {listener_manager_worker, [], [{terminate_timeout, infinity}]}
+).
+
 -define(HELPER_ETS, node_manager_helper_ets).
 
 %%%===================================================================
@@ -244,7 +248,7 @@ start_worker(Module, Args, Options) ->
     try
         {ok, LoadMemorySize} = application:get_env(?CLUSTER_WORKER_APP_NAME, worker_load_memory_size),
         WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
-        
+
         case lists:member(worker_first, Options) of
             true ->
                 case supervisor:start_child(
@@ -346,12 +350,12 @@ init([]) ->
         ?init_exometer_reporters(false),
         exometer_utils:init_exometer_counters(),
         catch ets:new(?HELPER_ETS, [named_table, public, set]),
-        
+
         ?info("Running 'before_init' procedures."),
         ok = ?CALL_PLUGIN(before_init, []),
-        
+
         ?info("node manager plugin initialized"),
-        
+
         ?info("Checking if all ports are free..."),
         lists:foreach(
             fun(Module) ->
@@ -365,9 +369,9 @@ init([]) ->
                         throw({port_in_use, Port})
                 end
             end, node_manager:listeners()),
-        
+
         ?info("Ports OK"),
-        
+
         next_task_check(),
         erlang:send_after(datastore_throttling:plan_next_throttling_check(), self(), {timer, configure_throttling}),
         {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
@@ -375,10 +379,10 @@ init([]) ->
         erlang:send_after(ExometerInterval, self(), {timer, check_exometer}),
         erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
         ?info("All checks performed"),
-        
+
         gen_server2:cast(self(), connect_to_cm),
         MonitoringState = monitoring:start(),
-        
+
         {ok, #state{
             cm_con_status = not_connected,
             monitoring_state = MonitoringState
@@ -482,8 +486,8 @@ handle_cast(configure_throttling, #state{throttling = true} = State) ->
     try
         ok = datastore_throttling:configure_throttling()
     catch
-        Error:Reason:Stacktrace ->
-            ?warning_stacktrace("configure_throttling failed due to ~p:~p", [Error, Reason], Stacktrace)
+        Class:Reason:Stacktrace ->
+            ?warning_exception("configure_throttling failed", Class, Reason, Stacktrace)
     end,
     {noreply, State};
 
@@ -584,7 +588,7 @@ handle_cast(?FORCE_STOP(ReasonMsg), State) ->
     ?critical("Received stop signal from cluster manager: ~s", [ReasonMsg]),
     ?critical("Force stopping application..."),
     init:stop(),
-    {stop, normal, State};
+    {noreply, State};
 
 handle_cast(?NODE_DOWN(Node), State) ->
     handle_node_status_change_async(Node, node_down, fun() ->
@@ -674,22 +678,10 @@ handle_info(Request, State) ->
     | shutdown
     | {shutdown, term()}
     | term().
-terminate(Reason, State) ->
+terminate(Reason, _State) ->
     % TODO VFS-6339 - Unregister node during normal stop not to start HA procedures
-    ?info("Shutting down ~p due to ~p", [?MODULE, Reason]),
-    
-    lists:foreach(fun(Module) ->
-        try
-            erlang:apply(Module, stop, [])
-        catch
-            E1:E2:Stacktrace ->
-                ?warning_stacktrace("Stop failed on module ~p: ~p:~p",
-                    [Module, E1, E2], Stacktrace)
-        end
-    end, node_manager:listeners()),
-    ?info("All listeners stopped"),
-    
-    ?CALL_PLUGIN(terminate, [Reason, State]).
+    ?info("Shutting down ~w due to ~p", [?MODULE, Reason]).
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -765,6 +757,7 @@ cluster_init_step(?PREPARE_FOR_UPGRADE) ->
     ?info("The cluster is ready for upgrade"),
     ok;
 cluster_init_step(?UPGRADE_CLUSTER) ->
+    % this step internally requires calls to node manager, hence it is processed asynchronously
     case node() == consistent_hashing:get_assigned_node(?UPGRADE_CLUSTER) of
         true ->
             spawn(fun() ->
@@ -789,28 +782,20 @@ cluster_init_step(?START_CUSTOM_WORKERS) ->
     init_workers(Workers),
     ?info("Custom workers started successfully"),
     ok;
-cluster_init_step(?DB_AND_WORKERS_READY) ->
+cluster_init_step(?START_LISTENERS) ->
     gen_server2:cast(?NODE_MANAGER_NAME, report_db_and_workers_ready),
-    ?info("Database and workers ready - executing 'on_db_and_workers_ready' procedures..."),
-    % the procedures require calls to node manager, hence they are processed asynchronously
+    % this step internally requires calls to node manager, hence it is processed asynchronously
     spawn(fun() ->
         Result = try
-            ok = ?CALL_PLUGIN(on_db_and_workers_ready, []),
-            ?info("Successfully executed 'on_db_and_workers_ready' procedures"),
+            init_workers([?LISTENER_MANAGER_WORKER_SPEC()]),
             success
-        catch Type:Reason:Stacktrace ->
-            ?error_stacktrace("Failed to execute 'on_db_and_workers_ready' procedures - ~p:~p", [
-                Type, Reason
-            ], Stacktrace),
+        catch Class:Reason:Stacktrace ->
+            ?error_exception("Failed to start the listener_manager_worker", Class, Reason, Stacktrace),
             failure
         end,
-        report_step_result(?DB_AND_WORKERS_READY, Result)
+        report_step_result(?START_LISTENERS, Result)
     end),
     async;
-cluster_init_step(?START_LISTENERS) ->
-    lists:foreach(fun(Module) ->
-        ok = erlang:apply(Module, start, [])
-    end, node_manager:listeners());
 cluster_init_step(?CLUSTER_READY) ->
     ?info("Cluster initialized successfully"),
     gen_server2:cast(?NODE_MANAGER_NAME, report_cluster_ready),
@@ -1051,23 +1036,23 @@ ensure_port_free(Port, AttemptsLeft) ->
 analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalysisPid}) ->
     {CPU, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
     MemInt = proplists:get_value(total, Mem, 0),
-    
+
     {ok, MinInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, min_analysis_interval_sek),
     {ok, MaxInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, max_analysis_interval_min),
     {ok, MemThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_analysis_treshold),
     {ok, ProcThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, procs_num_analysis_treshold),
     {ok, MemToStartCleaning} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
-    
+
     {ok, SchedulersMonitoring} = application:get_env(?CLUSTER_WORKER_APP_NAME, schedulers_monitoring),
     erlang:system_flag(scheduler_wall_time, SchedulersMonitoring),
-    
+
     MemUsage = monitoring:mem_usage(MonState),
-    
+
     ?update_counter(?EXOMETER_NAME(processes_num), PNum),
     ?update_counter(?EXOMETER_NAME(memory_erlang), MemInt),
     ?update_counter(?EXOMETER_NAME(memory_node), MemUsage),
     ?update_counter(?EXOMETER_NAME(cpu_node), CPU * 100),
-    
+
     TimeDiff = stopwatch:read_millis(LastAnalysisTimer),
     MaxTimeExceeded = TimeDiff >= timer:minutes(MaxInterval),
     MinTimeExceeded = TimeDiff >= timer:seconds(MinInterval),
@@ -1084,29 +1069,29 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                     lists:reverse(lists:sort(lists:map(fun(N) ->
                         {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
                 ]),
-                
+
                 % Gather processes info
                 {ProcNum, {Top5M, Top5B, CS_Map, CS_Bin_Map}} =
                     get_procs_stats(),
-                
+
                 % Merge processes with similar stacktrace and find groups
                 % that use a lot of memory
                 MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(CS_Map))), 5),
-                
+
                 MergedStacksMap2 = maps:map(fun(K, {M, N, K}) ->
                     {N, M, K} end, CS_Map),
                 MergedStacks2 = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap2))), 5),
-                
+
                 % Merge processes with similar stacktrace and find groups
                 % that use a lot of memory to store binaries
                 MergedStacksBin = lists:sublist(lists:reverse(lists:sort(maps:values(CS_Bin_Map))), 5),
-                
+
                 MergedStacksBinMap2 = maps:map(fun(K, {M, N, K}) ->
                     {N, M, K} end, CS_Bin_Map),
                 MergedStacksBin2 = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksBinMap2))), 5),
-                
+
                 All = erlang:registered(),
-                
+
                 TopProcesses = lists:map(
                     fun({M, {P, CS}}) ->
                         {M, CS, P, get_process_name(P, All),
@@ -1114,7 +1099,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                             erlang:process_info(P, initial_call),
                             erlang:process_info(P, message_queue_len)}
                     end, lists:reverse(Top5M)),
-                
+
                 AddBL = application:get_env(?CLUSTER_WORKER_APP_NAME,
                     include_binary_list_in_monitoring_reoport, false),
                 TopProcessesBin = case AddBL of
@@ -1135,7 +1120,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                                     erlang:process_info(P, message_queue_len)}
                             end, lists:reverse(Top5B))
                 end,
-                
+
                 log_monitoring_stats("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n"
                 "single proc memory cosumption (binary): ~p~n"
                 "aggregated memory consumption: ~p~n"
@@ -1145,7 +1130,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                     ProcNum, TopProcesses, TopProcessesBin, MergedStacks,
                     MergedStacks2, MergedStacksBin, MergedStacksBin2
                 ]),
-                
+
                 % Log schedulers info
                 log_monitoring_stats("Schedulers basic info: all: ~p, online: ~p",
                     [erlang:system_info(schedulers), erlang:system_info(schedulers_online)]),
@@ -1154,7 +1139,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                     true ->
                         NewSchedulerInfo = lists:sort(NewSchedulerInfo0),
                         gen_server2:cast(?NODE_MANAGER_NAME, {update_scheduler_info, NewSchedulerInfo}),
-                        
+
                         log_monitoring_stats("Schedulers advanced info: ~p", [NewSchedulerInfo]),
                         case is_list(SchedulerInfo) of
                             true ->
@@ -1190,7 +1175,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
 get_procs_stats() ->
     Procs = erlang:processes(),
     PNum = length(Procs),
-    
+
     {PNum, get_procs_stats(Procs, {[], [], #{}, #{}}, 0)}.
 
 %%--------------------------------------------------------------------
@@ -1210,26 +1195,26 @@ get_procs_stats([], Ans, _Count) ->
     Ans;
 get_procs_stats([P | Procs], {Top5Mem, Top5Bin, CS_Map, CS_Bin_Map}, Count) ->
     CS = erlang:process_info(P, current_stacktrace),
-    
+
     ProcMem = case erlang:process_info(P, memory) of
         {memory, M} ->
             M;
         _ ->
             0
     end,
-    
+
     {Bin, BinList} = case erlang:process_info(P, binary) of
         {binary, BL} ->
             {get_binary_size(BL), BL};
         _ ->
             {0, []}
     end,
-    
+
     Top5Mem2 = top_five(ProcMem, {P, CS}, Top5Mem),
     Top5Bin2 = top_five(Bin, {P, CS, BinList}, Top5Bin),
     CS_Map2 = merge_stacks(CS, ProcMem, CS_Map),
     CS_Bin_Map2 = merge_stacks(CS, Bin, CS_Bin_Map),
-    
+
     GC_Interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
         proc_stats_analysis_gc_interval, 25000),
     case Count rem GC_Interval of
@@ -1238,7 +1223,7 @@ get_procs_stats([P | Procs], {Top5Mem, Top5Bin, CS_Map, CS_Bin_Map}, Count) ->
         _ ->
             ok
     end,
-    
+
     get_procs_stats(Procs, {Top5Mem2, Top5Bin2, CS_Map2, CS_Bin_Map2},
         Count + 1).
 
@@ -1321,7 +1306,7 @@ get_binary_size(BinList) ->
 log_monitoring_stats(Format, Args) ->
     LogFile = application:get_env(?CLUSTER_WORKER_APP_NAME, monitoring_log_file,
         "/tmp/node_manager_monitoring.log"),
-    
+
     log_monitoring_stats(LogFile, Format, Args).
 
 

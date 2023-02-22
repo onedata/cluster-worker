@@ -76,8 +76,9 @@
     infinite_log_destroy_test/1,
     infinite_log_operations_test/1,
     infinite_log_operations_direct_access_test/1,
-    infinite_log_set_ttl_test/1,
+    infinite_log_adjust_expiry_threshold_test/1,
     infinite_log_age_pruning_test/1,
+    infinite_log_upgrade_test/1,
     infinite_log_append_performance_test/1,
     infinite_log_append_performance_test_base/1,
     infinite_log_list_performance_test/1,
@@ -145,8 +146,9 @@ all() ->
         infinite_log_destroy_test,
         infinite_log_operations_test,
         infinite_log_operations_direct_access_test,
-        infinite_log_set_ttl_test,
+        infinite_log_adjust_expiry_threshold_test,
         infinite_log_age_pruning_test,
+        infinite_log_upgrade_test,
         time_series_test,
         multinode_time_series_test,
         time_series_document_fetch_test,
@@ -1023,7 +1025,7 @@ infinite_log_operations_direct_access_test(Config) ->
     end, ?TEST_CACHED_MODELS).
 
 
-infinite_log_set_ttl_test(Config) ->
+infinite_log_adjust_expiry_threshold_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY),
@@ -1036,7 +1038,7 @@ infinite_log_set_ttl_test(Config) ->
             {0, {_, <<"some_binary1">>}},
             {1, {_, <<"some_binary2">>}}
         ]}}, rpc:call(Worker, Model, infinite_log_list, [?KEY, #{}])),
-        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_set_ttl, [?KEY, 2])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_adjust_expiry_threshold, [?KEY, 2])),
         clean_cache(Worker, Model, Ctx),
         timer:sleep(timer:seconds(3)),
 
@@ -1080,6 +1082,55 @@ infinite_log_age_pruning_test(Config) ->
 
         ok = rpc:call(Worker, Model, infinite_log_destroy, [?KEY])
     end, ?TEST_PERSISTENT_MODELS).
+
+
+infinite_log_upgrade_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        % Mock record version to save documents in prev structure
+        ok = test_utils:mock_expect(Worker, infinite_log_sentinel, get_record_version, fun() -> 1 end),
+
+        InitialKeys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)),
+
+        ExpiryThreshold = 5,
+        ExpirationTime = global_clock:timestamp_seconds() + ExpiryThreshold,
+
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY(1), #{}]),
+        % The expiry_threshold option will be used to initialize the old expiration_time field,
+        % since document version 1 is mocked. Upon upgrade
+        ok = rpc:call(Worker, Model, infinite_log_create, [?KEY(2), #{expiry_threshold => ExpirationTime}]),
+
+        Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
+        [assert_key_on_disc(Worker, Model, K, false) || K <- Keys],
+
+        % forces fetching directly from couchbase (disc driver)
+        delete_keys_from_memory(Worker, Model, Keys),
+
+        % Delete mocks forcing prev structure
+        ok = test_utils:mock_expect(Worker, infinite_log_sentinel, get_record_version, fun() ->
+            meck:passthrough([]) end),
+
+        % the logs should be readable after upgrade
+        ?assertMatch({ok, {done, []}}, rpc:call(Worker, Model, infinite_log_list, [?KEY(1), #{}])),
+        ?assertMatch({ok, {done, []}}, rpc:call(Worker, Model, infinite_log_list, [?KEY(2), #{}])),
+
+        % appending something should trigger saving the document in the new version
+        % and activating the expiry threshold
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY(1), <<"log">>])),
+        ?assertEqual(ok, rpc:call(Worker, Model, infinite_log_append, [?KEY(2), <<"log">>])),
+
+        % the second log that had an expiration_time should expire after adequate time
+        timer:sleep(timer:seconds(ExpiryThreshold)),
+        assert_on_disc(Worker, Model, ?KEY(1)),
+        assert_not_on_disc(Worker, Model, ?KEY(2)),
+        ?assertMatch({ok, {done, [_]}}, rpc:call(Worker, Model, infinite_log_list, [?KEY(1), #{}])),
+        lists:foreach(fun(Key) ->
+            MemCtx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
+            ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
+            assert_key_not_in_memory(Worker, Model, Key)
+        end, Keys),
+        ?assertMatch({error, not_found}, rpc:call(Worker, Model, infinite_log_list, [?KEY(2), #{}]))
+    end, ?TEST_CACHED_MODELS).
 
 
 time_series_test(Config) ->
@@ -1217,18 +1268,14 @@ time_series_document_fetch_test(Config) ->
         end, CollectionConfig),
 
         Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
+        [assert_key_on_disc(Worker, Model, K, false) || K <- Keys],
 
         % Test if documents deleted from memory are fetched when needed
         lists:foreach(fun(Key) ->
-            assert_key_on_disc(Worker, Model, Key, false),
-            MemCtx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
-
-            ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
-            assert_key_not_in_memory(Worker, Model, Key),
+            delete_key_from_memory(Worker, Model, Key),
             ?assertEqual(ExpCompleteSlice, get_complete_slice(Worker, Model, Id)),
 
-            ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
-            assert_key_not_in_memory(Worker, Model, Key),
+            delete_key_from_memory(Worker, Model, Key),
             verify_layout(Worker, Model, Id)
         end, Keys)
     end, ?TEST_CACHED_MODELS).
@@ -1280,8 +1327,8 @@ time_series_config_incorporation_test(Config) ->
         ExpCompleteSlice = #{
             <<"TS1">> => #{
                 <<"M1">> => lists:reverse(lists:map(fun(I) ->
-                        #window_info{timestamp = I, value = 2 * I}
-                    end, lists:seq(0, MeasurementsCount - 1))),
+                    #window_info{timestamp = I, value = 2 * I}
+                end, lists:seq(0, MeasurementsCount - 1))),
                 <<"M2">> => []
             },
             <<"TS2">> => #{
@@ -1310,7 +1357,8 @@ time_series_upgrade_test(Config) ->
         ok = test_utils:mock_expect(Worker, ts_windows, db_encode,
             fun(Windows) ->
                 json_utils:encode(lists:map(fun
-                    ({Timestamp, #window{aggregated_measurements = {ValuesCount, ValuesSum}}}) -> [Timestamp, ValuesCount, ValuesSum];
+                    ({Timestamp, #window{aggregated_measurements = {ValuesCount, ValuesSum}}}) ->
+                        [Timestamp, ValuesCount, ValuesSum];
                     ({Timestamp, #window{aggregated_measurements = Value}}) -> [Timestamp, Value]
                 end, ts_windows:to_list(Windows)))
             end),
@@ -1332,14 +1380,11 @@ time_series_upgrade_test(Config) ->
             <<"TS1">> => #{?ALL_METRICS => Measurements}
         }])),
 
-        % Delete documents from memory to force get directly from couchbase
         Keys = get_all_keys(Worker, ?MEM_DRV(Model), ?MEM_CTX(Model)) -- InitialKeys,
-        lists:foreach(fun(Key) ->
-            assert_key_on_disc(Worker, Model, Key, false),
-            MemCtx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
-            ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
-            assert_key_not_in_memory(Worker, Model, Key)
-        end, Keys),
+        [assert_key_on_disc(Worker, Model, K, false) || K <- Keys],
+
+        % forces fetching directly from couchbase (disc driver)
+        delete_keys_from_memory(Worker, Model, Keys),
 
         % Delete mocks forcing prev structure
         ok = test_utils:mock_expect(Worker, ts_windows, db_encode, fun(Windows) -> meck:passthrough([Windows]) end),
@@ -1366,7 +1411,6 @@ time_series_upgrade_test(Config) ->
         end, CollectionConfig),
         ?assertEqual(ExpFinalSlice, get_complete_slice(Worker, Model, Id))
     end, ?TEST_CACHED_MODELS).
-
 
 %%%===================================================================
 %%% Stress tests
@@ -2440,3 +2484,17 @@ gather_windows(Worker, Model, CollectionId, TimeSeriesName, MetricName, StartTim
         _ ->
             NewAcc
     end.
+
+
+%% @private
+delete_keys_from_memory(Worker, Model, Keys) ->
+    lists:foreach(fun(Key) ->
+        delete_key_from_memory(Worker, Model, Key)
+    end, Keys).
+
+
+%% @private
+delete_key_from_memory(Worker, Model, Key) ->
+    MemCtx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
+    ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
+    assert_key_not_in_memory(Worker, Model, Key).

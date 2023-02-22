@@ -25,9 +25,9 @@
 -export([before_cluster_upgrade/0]).
 -export([upgrade_cluster/1]).
 -export([custom_workers/0]).
--export([on_db_and_workers_ready/0]).
+-export([before_listeners_start/0, after_listeners_stop/0]).
 -export([listeners/0]).
--export([handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-export([handle_call/3, handle_cast/2, handle_info/2, code_change/3]).
 -export([clear_memory/1]).
 -export([modules_with_exometer/0, exometer_reporters/0]).
 -export([master_node_down/1, master_node_up/1, master_node_ready/1]).
@@ -145,11 +145,32 @@ custom_workers() -> [].
 %% This callback is executed when cluster internals (database and workers)
 %% have finished initialization, but before the listeners (servers) are started.
 %% Use to run custom code required for application initialization.
+%%
+%% NOTE: this callback blocks the application supervisor and must not be used to
+%% interact with the main supervision tree.
+%%
 %% This callback is executed on all cluster nodes.
 %% @end
 %%--------------------------------------------------------------------
--spec on_db_and_workers_ready() -> Result :: ok | {error, Reason :: term()}.
-on_db_and_workers_ready() ->
+-spec before_listeners_start() -> ok | {error, Reason :: term()}.
+before_listeners_start() ->
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% This callback is executed when the application is shutting down and
+%% the listeners have already stopped, but the cluster internals
+%% (database and workers) are still running.
+%% Use to run custom code required for application shutdown.
+%%
+%% NOTE: this callback blocks the application supervisor and must not be used to
+%% interact with the main supervision tree.
+%%
+%% This callback is executed on all cluster nodes.
+%% @end
+%%--------------------------------------------------------------------
+-spec after_listeners_stop() -> ok | {error, Reason :: term()}.
+after_listeners_stop() ->
     ok.
 
 %%--------------------------------------------------------------------
@@ -207,20 +228,6 @@ handle_cast(Request, State) ->
 handle_info(Info, State) ->
     ?log_bad_request(Info),
     {noreply, State}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_server terminates
-%% with Reason. The return value is ignored.
-%% @end
-%%--------------------------------------------------------------------
--spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: state()) -> term().
-terminate(_Reason, State) ->
-    State.
 
 %%--------------------------------------------------------------------
 %% @private
