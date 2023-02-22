@@ -347,10 +347,11 @@ fill(Ctx, Doc) ->
 fill(Ctx, Doc, _PrevDoc = #document{revs = Revs}) ->
     Doc2 = set_mutator(Ctx, Doc),
     Doc3 = set_scope(Ctx, Doc2),
-    Doc4 = set_version(Doc3),
+    Doc4 = set_ignore_in_changes(Ctx, Doc3),
+    Doc5 = set_version(Doc4),
     case Revs of
-        [] -> set_rev(Ctx, Doc4, undefined);
-        [PrevRev | _] -> set_rev(Ctx, Doc4, PrevRev)
+        [] -> set_rev(Ctx, Doc5, undefined);
+        [PrevRev | _] -> set_rev(Ctx, Doc5, PrevRev)
     end.
 
 %%--------------------------------------------------------------------
@@ -397,6 +398,14 @@ set_scope(#{scope := Scope}, Doc) ->
     Doc#document{scope = Scope};
 set_scope(_Ctx, Doc) ->
     Doc.
+
+
+-spec set_ignore_in_changes(ctx(), doc(value())) -> doc(value()).
+set_ignore_in_changes(#{ignore_in_changes := Ignore}, Doc) ->
+    Doc#document{ignore_in_changes = Ignore};
+set_ignore_in_changes(_Ctx, Doc) ->
+    Doc.
+
 
 %%--------------------------------------------------------------------
 %% @private
