@@ -469,9 +469,8 @@ handle_cast(?INIT_STEP_MSG(Step), State) ->
             {_, async} -> ok
         end
     catch
-        Error:Reason:Stacktrace ->
-            ?error_stacktrace("Error during cluster initialization in step ~p: ~p:~p",
-                [Step, Error, Reason], Stacktrace),
+        Class:Reason:Stacktrace ->
+            ?error_exception("Error during cluster initialization in step ~p", [Step], Class, Reason, Stacktrace),
             report_step_result(Step, failure)
     end,
     {noreply, State};
