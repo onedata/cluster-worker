@@ -59,7 +59,7 @@ encode(#document{value = Value, version = Version, ignore_in_changes = Ignore} =
     Model = element(1, Value),
     case lists:member(Model, datastore_config:get_models()) of
         true ->
-            case Ignore of
+            EncodedIgnore = case Ignore of
                 true -> [{<<"_ignore_in_changes">>, true}];
                 false -> [] % do not encode false to maintain compatibility
             end,
@@ -73,7 +73,7 @@ encode(#document{value = Value, version = Version, ignore_in_changes = Ignore} =
                 {<<"_timestamp">>, Doc#document.timestamp},
                 {<<"_deleted">>, Doc#document.deleted},
                 {<<"_version">>, Version} |
-                (Ignore ++ [Props])
+                (EncodedIgnore ++ Props)
             ]};
         false ->
             throw({invalid_doc, Doc})
