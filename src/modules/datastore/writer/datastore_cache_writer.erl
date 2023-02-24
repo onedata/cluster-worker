@@ -698,6 +698,12 @@ batch_request(#datastore_request{function = fetch_links_trees, ctx = Ctx, args =
     batch_apply(Batch, fun(Batch2) ->
         datastore_links:get_links_trees(set_mutator_pid(Ctx), Key, Batch2)
     end);
+batch_request(#datastore_request{function = unset_link_ignore_in_changes, ctx = Ctx, args = [Key, TreeId]}, Batch, _LinkTokens) ->
+    links_tree_apply(Ctx#{ignore_in_changes => false}, Key, TreeId, Batch, fun(Tree) ->
+        batch_link_apply(Tree, fun(Tree2) ->
+            datastore_links:force_all_nodes_update(Tree2)
+        end)
+    end);
 batch_request(#datastore_request{function = Function, ctx = Ctx, args = Args}, Batch, _LinkTokens) ->
     apply(datastore_doc_batch, Function, [Ctx | Args] ++ [Batch]).
 

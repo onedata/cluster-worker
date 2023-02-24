@@ -64,6 +64,7 @@
     expired_doc_should_not_exist/1,
     deleted_doc_should_expire/1,
     link_doc_should_expire/1,
+    unset_link_ignore_in_changes_should_succeed/1,
     link_del_should_delay_inactivate/1,
     fold_links_id_should_succeed/1,
     fold_links_inclusive_id_should_succeed/1,
@@ -136,6 +137,7 @@ all() ->
         expired_doc_should_not_exist,
         deleted_doc_should_expire,
         link_doc_should_expire,
+        unset_link_ignore_in_changes_should_succeed,
         link_del_should_delay_inactivate,
         fold_links_id_should_succeed,
         fold_links_inclusive_id_should_succeed,
@@ -916,6 +918,32 @@ link_doc_should_expire(Config) ->
     assert_key_on_disc(Worker, Model, DeletedNode, false),
     timer:sleep(8000),
     assert_key_not_on_disc(Worker, Model, DeletedNode).
+
+
+unset_link_ignore_in_changes_should_succeed(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        ?assertMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+            ?KEY, ?LINK_TREE_ID, {?LINK_NAME, ?LINK_TARGET}
+        ])),
+
+        LinkNodeIds = lists:usort(get_link_nodes()),
+        MemCtx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY), ?MEM_CTX(Model)),
+        lists:foreach(fun(LinkNodeId) ->
+            ?assertMatch({ok, #document{ignore_in_changes = true}},
+                rpc:call(Worker, ?MEM_DRV(Model), get, [MemCtx, LinkNodeId]))
+        end, LinkNodeIds),
+
+        ?assertMatch(ok, rpc:call(Worker, Model, unset_link_ignore_in_changes, [?KEY, ?LINK_TREE_ID])),
+
+        LinkNodeIds2 = get_link_nodes(),
+        ?assertEqual(LinkNodeIds, LinkNodeIds2),
+        lists:foreach(fun(LinkNodeId2) ->
+            ?assertMatch({ok, #document{ignore_in_changes = false}},
+                rpc:call(Worker, ?MEM_DRV(Model), get, [MemCtx, LinkNodeId2]))
+        end, LinkNodeIds2)
+    end, ?TEST_MODELS -- [disc_only_model]).
+
 
 link_del_should_delay_inactivate(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -1973,6 +2001,16 @@ init_per_testcase(link_doc_should_expire = Case, Config) ->
         end),
 
     [{expiry, Expiry} | init_per_testcase(?DEFAULT_CASE(Case), Config)];
+init_per_testcase(unset_link_ignore_in_changes_should_succeed = Case, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{ignore_in_changes => true}),
+    Master = self(),
+    test_utils:mock_expect(Workers, links_tree, update_node, fun(NodeID, Node, State) ->
+        Master ! {link_node_id, NodeID},
+        meck:passthrough([NodeID, Node, State])
+    end),
+
+    init_per_testcase(?DEFAULT_CASE(Case), Config);
 init_per_testcase(link_del_should_delay_inactivate = Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     Master = self(),
@@ -2032,6 +2070,10 @@ end_per_testcase(link_doc_should_expire, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     Expiry = ?config(expiry, Config),
     test_utils:set_env(Workers, cluster_worker, link_disk_expiry, Expiry),
+    test_utils:mock_unload(Workers, links_tree);
+end_per_testcase(unset_link_ignore_in_changes_should_succeed, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{}),
     test_utils:mock_unload(Workers, links_tree);
 end_per_testcase(link_del_should_delay_inactivate, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
