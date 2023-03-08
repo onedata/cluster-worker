@@ -34,6 +34,7 @@
 -export([create_cache_requests/1, apply_cache_requests/2]).
 -export([init_request/2, terminate_request/2]).
 -export([save/4, create/4, fetch/3]).
+-export([update_cache/2]).
 
 -record(batch, {
     cache = #{} :: #{key() => entry()},
@@ -226,6 +227,8 @@ fetch(Ctx, Key, Batch = #batch{cache = Cache}) ->
                         cache = maps:put(Key, Entry, Cache)
                     }};
                 {ok, remote, Doc} ->
+                    % Warning: documents get from remote driver are not protected with HA
+                    % they will be remotely get once more if needed
                     Entry = #entry{ctx = Ctx, doc = Doc, status = cached},
                     {{ok, Doc}, Batch#batch{
                         cache = maps:put(Key, Entry, Cache)
@@ -234,3 +237,8 @@ fetch(Ctx, Key, Batch = #batch{cache = Cache}) ->
                     {{error, Reason}, Batch}
             end
     end.
+
+
+-spec update_cache(batch(), batch()) -> batch().
+update_cache(Batch = #batch{cache = Cache}, #batch{cache = CacheUpdates}) ->
+    Batch#batch{cache = maps:merge(Cache, CacheUpdates)}.

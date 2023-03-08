@@ -131,13 +131,18 @@ terminate(#forest_it{batch = Batch}) ->
 %%--------------------------------------------------------------------
 -spec get(link_name(), forest_it()) ->
     {{ok, [link()]} | {error, term()}, forest_it()}.
-get(LinkName, ForestIt = #forest_it{tree_ids = TreeIds}) ->
+get(LinkName, ForestIt = #forest_it{tree_ids = TreeIds, batch = Batch}) ->
     MasterPid = datastore_cache_writer:get_master_pid(),
     Results = lists_utils:pmap(fun(TreeId) ->
         datastore_cache_writer:save_master_pid(MasterPid),
-        catch get_from_tree(LinkName, TreeId, ForestIt)
+        try
+            get_from_tree(LinkName, TreeId, ForestIt)
+        catch
+            _:Reason ->
+                {Reason, Batch}
+        end
     end, TreeIds),
-    Result = lists:foldl(fun
+    ResultMapper = fun
         (_, {error, Reason}) -> {error, Reason};
         ({error, not_found}, {ok, Acc}) -> {ok, Acc};
         % Next 2 errors can appear for bp_trees when document cannot be found in memory
@@ -147,11 +152,16 @@ get(LinkName, ForestIt = #forest_it{tree_ids = TreeIds}) ->
         ({error, Reason}, _) -> {error, Reason};
         ({{error, Reason}, _Stacktrace}, _) -> {error, Reason};
         ({ok, Link}, {ok, Acc}) -> {ok, [Link | Acc]}
-    end, {ok, []}, Results),
-    case Result of
-        {ok, []} -> {{error, not_found}, ForestIt};
-        {ok, Acc} -> {{ok, Acc}, ForestIt};
-        {error, Reason} -> {{error, Reason}, ForestIt}
+    end,
+    Ans = lists:foldl(fun({Result, UpdatedBatch}, {ResultAcc, #forest_it{batch = BatchAcc} = ForestItAcc}) ->
+        {
+            ResultMapper(Result, ResultAcc),
+            ForestItAcc#forest_it{batch = datastore_doc_batch:update_cache(BatchAcc, UpdatedBatch)}
+        }
+    end, {{ok, []}, ForestIt}, Results),
+    case Ans of
+        {{ok, []}, FinalForestIt} -> {{error, not_found}, FinalForestIt};
+        Other -> Other
     end.
 
 %%--------------------------------------------------------------------
@@ -276,7 +286,7 @@ init_tree_mask_cache(TreeId, Mask, ForestIt = #forest_it{
 %% @end
 %%--------------------------------------------------------------------
 -spec get_from_tree(link_name(), tree_id(), forest_it()) ->
-    {ok, link()} | {error, term()}.
+    {{ok, link()} | {error, term()}, batch()}.
 get_from_tree(LinkName, TreeId, #forest_it{
     ctx = Ctx, key = Key, masks_cache = MasksCache, batch = Batch
 }) ->
@@ -285,17 +295,17 @@ get_from_tree(LinkName, TreeId, #forest_it{
         {ok, Tree} ->
             case datastore_links_crud:get(LinkName, Tree) of
                 {{ok, Link}, Tree2} ->
-                    datastore_links:terminate_tree(Tree2),
-                    case is_deleted(Link, Cache) of
+                    UpdatedBatch = datastore_links:terminate_tree(Tree2),
+                    {case is_deleted(Link, Cache) of
                         true -> {error, not_found};
                         false -> {ok, Link}
-                    end;
+                    end, UpdatedBatch};
                 {{error, Reason}, Tree2} ->
-                    datastore_links:terminate_tree(Tree2),
-                    {error, Reason}
+                    UpdatedBatch = datastore_links:terminate_tree(Tree2),
+                    {{error, Reason}, UpdatedBatch}
             end;
         Error ->
-            Error
+            {Error, Batch}
     end.
 
 %%--------------------------------------------------------------------
