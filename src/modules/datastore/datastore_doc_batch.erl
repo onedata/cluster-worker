@@ -239,6 +239,8 @@ fetch(Ctx, Key, Batch = #batch{cache = Cache}) ->
     end.
 
 
--spec update_cache(batch(), batch()) -> batch().
+-spec update_cache(batch() | undefined, batch() | undefined) -> batch().
 update_cache(Batch = #batch{cache = Cache}, #batch{cache = CacheUpdates}) ->
-    Batch#batch{cache = maps:merge(Cache, CacheUpdates)}.
+    Batch#batch{cache = maps:merge(Cache, CacheUpdates)};
+update_cache(Batch, _) ->
+    Batch.
