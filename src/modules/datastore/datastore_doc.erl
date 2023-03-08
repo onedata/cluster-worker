@@ -246,14 +246,14 @@ delete(Ctx, Key, Pred, Batch) ->
 %%--------------------------------------------------------------------
 -spec get(node(), ctx(), key()) -> {ok, doc(value())} | {error, term()}.
 get(FetchNode, #{include_deleted := true} = Ctx, Key) ->
-    case datastore_cache:get(Ctx, Key) of
+    case datastore_cache:get(Ctx, Key, maps:get(direct_disc_fallback, Ctx, false)) of
         {ok, #document{value = undefined, deleted = true}} -> {error, not_found};
         {ok, Doc} -> {ok, Doc};
         {error, not_found} -> fetch_missing(FetchNode, Ctx, Key);
         {error, Reason2} -> {error, Reason2}
     end;
 get(FetchNode, Ctx, Key) ->
-    case datastore_cache:get(Ctx, Key) of
+    case datastore_cache:get(Ctx, Key, maps:get(direct_disc_fallback, Ctx, false)) of
         {ok, #document{deleted = true}} -> {error, not_found};
         {ok, Doc} -> {ok, Doc};
         {error, not_found} -> fetch_missing(FetchNode, Ctx, Key);
@@ -332,6 +332,8 @@ get_links_trees(FetchNode, Ctx, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec fetch_missing(node(), ctx(), key()) -> {ok, doc(value())} | {error, term()}.
+fetch_missing(_FetchNode, #{direct_disc_fallback := true}, _Key) ->
+    {error, not_found};
 fetch_missing(FetchNode, Ctx, Key) ->
     case (maps:get(disc_driver, Ctx, undefined) =/= undefined) orelse (node() =/= FetchNode) of
         true ->

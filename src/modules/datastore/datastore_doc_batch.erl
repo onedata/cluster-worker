@@ -225,6 +225,11 @@ fetch(Ctx, Key, Batch = #batch{cache = Cache}) ->
                     {{ok, Doc}, Batch#batch{
                         cache = maps:put(Key, Entry, Cache)
                     }};
+                {ok, remote, Doc} ->
+                    Entry = #entry{ctx = Ctx, doc = Doc, status = cached},
+                    {{ok, Doc}, Batch#batch{
+                        cache = maps:put(Key, Entry, Cache)
+                    }};
                 {error, Reason} ->
                     {{error, Reason}, Batch}
             end
