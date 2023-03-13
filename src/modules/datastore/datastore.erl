@@ -67,7 +67,10 @@
                         % then it is a Unix timestamp. For memory models
                         % it is always a relative offset from now.
                  throw_not_found => boolean(),
-                 direct_disc_fallback => boolean()
+                 direct_disc_fallback => boolean(),
+                 handle_interrupted_call => boolean(),
+                 writer_interrupted_call_retires => non_neg_integer(),
+                 links_tree_interrupted_call_retires => non_neg_integer()
 }.
 -type memory_driver() :: undefined | ets_driver | mnesia_driver.
 -type memory_driver_ctx() :: ets_driver:ctx() | mnesia_driver:ctx().
