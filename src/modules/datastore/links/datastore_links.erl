@@ -133,13 +133,27 @@ init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
     ]),
 
     case Ans of
+        {ok, _} = OkAns ->
+            OkAns;
+        {broken_root, Tree} when ReadOnly ->
+            % The tree is readonly so no data is lost permanently - this problem can appear
+            % if some documents are inaccessible because of network problems so do not log
+            {ok, Tree};
         {broken_root, Tree} ->
             % The tree has been broken by abnormal termination of application
             % Some data could be lost, proceeding with fixed root
             ?error("Broken bp_tree ~p for key ~p~nCtx: ~p", [TreeId, Key, Ctx]),
             {ok, Tree};
-        Other ->
-            Other
+        {{error, interrupted_call} = Error, Tree} ->
+            ?error("Interrupted call for tree ~p, key ~p~nCtx: ~p", [TreeId, Key, Ctx]),
+            case Ctx of
+                #{handle_interrupted_call := false} ->
+                    Error;
+                _ ->
+                    {ok, Tree}
+            end;
+        {Error, _Tree} ->
+            Error
     end.
 
 %%--------------------------------------------------------------------
