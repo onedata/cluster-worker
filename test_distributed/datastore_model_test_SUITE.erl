@@ -47,6 +47,9 @@
     add_links_should_succeed/1,
     check_and_add_links_test/1,
     get_links_should_succeed/1,
+    get_links_interrupted/1,
+    fold_link_interrupted/1,
+    fold_links_interrupted/1,
     get_links_after_expiration_time_should_succeed/1,
     disk_fetch_links_should_succeed/1,
     get_links_should_return_missing_error/1,
@@ -122,6 +125,9 @@ all() ->
         add_links_should_succeed,
         check_and_add_links_test,
         get_links_should_succeed,
+        get_links_interrupted,
+        fold_link_interrupted,
+        fold_links_interrupted,
         disk_fetch_links_should_succeed,
         get_links_should_return_missing_error,
         delete_links_should_succeed,
@@ -501,6 +507,40 @@ get_links_should_succeed(Config) ->
         end, lists:zip(Results, Links))
     end, ?TEST_MODELS).
 
+get_links_interrupted(Config) ->
+    Model = ets_cached_model,
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+
+    set_links_node_ids_gathering(Worker),
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        ?KEY, ?LINK_TREE_ID, [{?LINK_NAME, ?LINK_TARGET}]
+    ])),
+
+    [InterruptedNodeKey | _] = get_link_nodes(),
+    simulate_interrupted_call(Worker, InterruptedNodeKey),
+
+    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, interrupted_call_config, interrupt_call),
+    ?assertEqual([{error, not_found}], rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, [?LINK_NAME]
+    ])),
+    % Interrupt only second call to emulate problem in get function (instead of tree creation)
+    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, interrupted_call_config, interrupt_second_call),
+    ?assertEqual([{error, not_found}], rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, [?LINK_NAME]
+    ])),
+
+    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, test_ctx_base,
+        #{writer_interrupted_call_retries => 0, handle_interrupted_call => false}),
+    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, interrupted_call_config, interrupt_call),
+    ?assertEqual([{error, interrupted_call}], rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, [?LINK_NAME]
+    ])),
+    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, interrupted_call_config, interrupt_second_call),
+    ?assertEqual([{error, interrupted_call}], rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, [?LINK_NAME]
+    ])).
+
+
 % Test if documents' expiration does not result in links' trees/forests inconsistency.
 % If everything works properly, only deleted documents (parts of links' trees) should expire.
 % However, in case of a bug in expiration parameters setting, necessary documents may be deleted from
@@ -584,11 +624,7 @@ get_links_after_expiration_time_should_succeed(Config) ->
 disk_fetch_links_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
 
-    Master = self(),
-    test_utils:mock_expect(Worker, links_tree, update_node, fun(NodeID, Node, State) ->
-        Master ! {link_node_id, NodeID},
-        meck:passthrough([NodeID, Node, State])
-    end),
+    set_links_node_ids_gathering(Worker),
 
     lists:foreach(fun(Model) ->
         Links = [{?LINK_NAME, ?LINK_TARGET}],
@@ -706,6 +742,69 @@ fold_links_should_succeed(Config) ->
             ?assertEqual(Target, Link#link.target)
         end, lists:zip(ExpectedLinks2, lists:reverse(Links)))
     end, ?TEST_MODELS).
+
+fold_link_interrupted(Config) ->
+    LinkCreateFun = fun(Worker) ->
+        ?assertAllMatch({ok, #link{}}, rpc:call(Worker, ets_cached_model, add_links, [
+            ?KEY, ?LINK_TREE_ID, [{?LINK_NAME, ?LINK_TARGET}]
+        ]))
+    end,
+    fold_links_interrupted_base(Config, ?KEY, LinkCreateFun).
+
+fold_links_interrupted(Config) ->
+    LinksCreateFun = fun(Worker) ->
+        Links = lists:sort(lists:map(fun(N) ->
+            {?LINK_NAME(N), ?LINK_TARGET(N)}
+        end, lists:seq(1, 5000))),
+        ?assertAllMatch({ok, #link{}}, rpc:call(Worker, ets_cached_model, add_links, [
+            ?KEY, ?LINK_TREE_ID, Links
+        ]))
+    end,
+    fold_links_interrupted_base(Config, ?KEY, LinksCreateFun).
+
+fold_links_interrupted_base(Config, Key, LinksCreateFun) ->
+    Model = ets_cached_model,
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+
+    set_links_node_ids_gathering(Worker),
+    LinksCreateFun(Worker),
+
+    Ids = lists:usort(get_link_nodes()),
+    lists:foreach(fun(InterruptedNodeKey) ->
+        simulate_interrupted_call(Worker, InterruptedNodeKey),
+
+        test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, interrupted_call_config, interrupt_call),
+        test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, test_ctx_base, #{}),
+        ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
+            [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
+        )),
+
+        test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, test_ctx_base,
+            #{writer_interrupted_call_retries => 0, handle_interrupted_call => false}),
+        ?assertEqual({error, interrupted_call}, rpc:call(Worker, Model, fold_links,
+            [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
+        ))
+    end, Ids),
+
+    case Ids of
+        [_] ->
+            % Interrupt only second call to emulate problem on second call to forest root
+            test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, interrupted_call_config, interrupt_second_call),
+            test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, test_ctx_base, #{}),
+            ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
+                [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
+            )),
+
+            test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, test_ctx_base,
+                #{writer_interrupted_call_retries => 0, handle_interrupted_call => false}),
+            ?assertEqual({error, interrupted_call}, rpc:call(Worker, Model, fold_links,
+                [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
+            ));
+        _ ->
+            % There is more than one document so second call to document may not appear
+            % (if tree has single document it is fetched twice)
+            ok
+    end.
 
 fold_links_token_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -2014,6 +2113,11 @@ init_per_testcase(time_series_upgrade_test = Case, Config) ->
     test_utils:mock_new(Workers, [ts_windows, ts_hub, ts_metric_data_node]),
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, time_series_max_doc_size, 500),
     init_per_testcase(?DEFAULT_CASE(Case), Config);
+init_per_testcase(Case, Config) when Case =:= get_links_interrupted orelse
+    Case =:= fold_link_interrupted orelse Case =:= fold_links_interrupted ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_new(Workers, [links_tree, datastore_doc]),
+    init_per_testcase(?DEFAULT_CASE(Case), Config);
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     application:load(cluster_worker),
@@ -2054,6 +2158,11 @@ end_per_testcase(time_series_upgrade_test, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     test_utils:mock_unload(Worker, [ts_windows, ts_hub, ts_metric_data_node]),
     rpc:call(Worker, application, unset_env, [?CLUSTER_WORKER_APP_NAME, time_series_max_doc_size]);
+end_per_testcase(Case, Config) when Case =:= get_links_interrupted orelse
+    Case =:= fold_link_interrupted orelse Case =:= fold_links_interrupted ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_unload(Worker, [links_tree, datastore_doc]),
+    rpc:call(Worker, application, unset_env, [?CLUSTER_WORKER_APP_NAME, test_ctx_base]);
 end_per_testcase(_Case, _Config) ->
     ok.
 
@@ -2282,6 +2391,13 @@ fold_links_id_and_neg_offset(Key, Worker, Model, Opts, TmpAns) ->
             TmpAns
     end.
 
+set_links_node_ids_gathering(Worker) ->
+    Master = self(),
+    test_utils:mock_expect(Worker, links_tree, update_node, fun(NodeID, Node, State) ->
+        Master ! {link_node_id, NodeID},
+        meck:passthrough([NodeID, Node, State])
+    end).
+
 get_link_nodes() ->
     receive
         {link_node_id, NodeID} -> [NodeID | get_link_nodes()]
@@ -2498,3 +2614,26 @@ delete_key_from_memory(Worker, Model, Key) ->
     MemCtx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
     ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, Key])),
     assert_key_not_in_memory(Worker, Model, Key).
+
+
+simulate_interrupted_call(Worker, InterruptedNodeKey) ->
+    test_utils:mock_expect(Worker, datastore_doc, fetch, fun
+        % Calls outside tp process should not find doc to allow call interruption inside tp process
+        (#{throw_not_found := true}, _NodeId, _Batch, _Bool) ->
+            throw({fetch_error, not_found});
+        (_Ctx, _NodeId, undefined, _Bool) ->
+            {{error, not_found}, undefined};
+        (Ctx, NodeId, Batch, Bool) ->
+            case {
+                NodeId,
+                application:get_env(?CLUSTER_WORKER_APP_NAME, interrupted_call_config, undefined)
+            } of
+                {InterruptedNodeKey, interrupt_second_call} ->
+                    application:set_env(?CLUSTER_WORKER_APP_NAME, interrupted_call_config, interrupt_call),
+                    meck:passthrough([Ctx, NodeId, Batch, Bool]);
+                {InterruptedNodeKey, interrupt_call} ->
+                    {{error, interrupted_call}, Batch};
+                _ ->
+                    meck:passthrough([Ctx, NodeId, Batch, Bool])
+            end
+    end).

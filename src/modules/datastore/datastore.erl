@@ -66,7 +66,12 @@
                         % the value of thirty days in seconds,
                         % then it is a Unix timestamp. For memory models
                         % it is always a relative offset from now.
-                 throw_not_found => boolean()
+                 throw_not_found => boolean(),
+                 direct_disc_fallback => boolean(), % if true, datastore_cache executes disc fallback procedure inside
+                                                    % caller process (doc fetched from disc will not be cached in memory)
+                 handle_interrupted_call => boolean(),
+                 writer_interrupted_call_retries => non_neg_integer(),
+                 links_tree_interrupted_call_retries => non_neg_integer()
 }.
 -type memory_driver() :: undefined | ets_driver | mnesia_driver.
 -type memory_driver_ctx() :: ets_driver:ctx() | mnesia_driver:ctx().

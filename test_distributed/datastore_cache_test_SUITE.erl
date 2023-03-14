@@ -15,7 +15,7 @@
 -include("datastore_test_utils.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 
 %% tests
 -export([
@@ -154,7 +154,7 @@ fetch_should_return_value_from_remote(Config) ->
         remote_driver => RemoteDriver,
         remote_driver_ctx => #{}
     },
-    ?assertMatch({ok, memory, #document{}},
+    ?assertMatch({ok, remote, #document{}},
         rpc:call(Worker, datastore_cache, fetch, [Ctx, ?KEY])
     ).
 
@@ -470,6 +470,9 @@ mark_active_should_remove_inactive_entry(Config) ->
 
 init_per_suite(Config) ->
     datastore_test_utils:init_suite([?MODEL], Config).
+
+end_per_suite(_Config) ->
+    ok.
 
 init_per_testcase(Case = fetch_should_return_value_from_remote, Config) ->
     Config2 = init_per_testcase(?DEFAULT_CASE(Case), Config),

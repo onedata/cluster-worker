@@ -49,7 +49,7 @@
 
 %% API
 -export([get_forest_id/1, get_mask_root_id/1, get_tree_id/1]).
--export([init_tree/4, init_tree/5, terminate_tree/1]).
+-export([init_tree/4, init_tree/5, finalize_tree_operation/1]).
 -export([add/2, get/2, delete/2, mark_deleted/3]).
 -export([fold/4]).
 -export([get_links_trees/3]).
@@ -133,6 +133,8 @@ init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
     ]),
 
     case Ans of
+        {ok, _} = OkAns ->
+            OkAns;
         {broken_root, Tree} when ReadOnly ->
             % The tree is readonly so no data is lost permanently - this problem can appear
             % if some documents are inaccessible because of network problems so do not log
@@ -140,10 +142,18 @@ init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
         {broken_root, Tree} ->
             % The tree has been broken by abnormal termination of application
             % Some data could be lost, proceeding with fixed root
-            ?error("Broken bp_tree ~p for key ~p~nCtx: ~p", [TreeId, Key, Ctx]),
+            ?error("Broken bp_tree~s", [?autoformat([TreeId, Key, Ctx])]),
             {ok, Tree};
-        Other ->
-            Other
+        {{error, interrupted_call} = Error, Tree} ->
+            ?error("Interrupted call (tree init)~s", [?autoformat([TreeId, Key, Ctx])]),
+            case Ctx of
+                #{handle_interrupted_call := false} ->
+                    Error;
+                _ ->
+                    {ok, Tree}
+            end;
+        {Error, _Tree} ->
+            Error
     end.
 
 %%--------------------------------------------------------------------
@@ -151,8 +161,8 @@ init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
 %% Clean up links tree. Returns documents batch.
 %% @end
 %%--------------------------------------------------------------------
--spec terminate_tree(tree()) -> batch().
-terminate_tree(Tree) ->
+-spec finalize_tree_operation(tree()) -> batch().
+finalize_tree_operation(Tree) ->
     bp_tree:terminate(Tree).
 
 %%--------------------------------------------------------------------

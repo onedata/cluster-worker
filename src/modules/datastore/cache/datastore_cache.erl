@@ -385,7 +385,10 @@ cache_disc_or_remote_results(#{disc_driver := DD} = Ctx, Keys, Results) when DD 
         ({Key, {ok, disc, Doc}}) ->
             save_async(Ctx, Key, Doc, false, true);
         ({Key, {ok, remote, Doc}}) ->
-            save_async(Ctx, Key, Doc, true, true);
+            case save_async(Ctx, Key, Doc, true, false) of
+                ?FUTURE(memory, _, _) = Future -> Future#future{durability = remote};
+                Future -> Future
+            end;
         ({Key, {error, not_found}}) ->
             Doc = #document{key = Key, value = undefined, deleted = true},
             save_async(Ctx, Key, Doc, false, true),
