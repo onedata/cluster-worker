@@ -530,7 +530,7 @@ get_links_interrupted(Config) ->
     ])),
 
     test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, test_ctx_base,
-        #{writer_interrupted_call_retires => 0, handle_interrupted_call => false}),
+        #{writer_interrupted_call_retries => 0, handle_interrupted_call => false}),
     test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, interrupted_call_config, interrupt_call),
     ?assertEqual([{error, interrupted_call}], rpc:call(Worker, Model, get_links, [
         ?KEY, ?LINK_TREE_ID, [?LINK_NAME]
@@ -780,7 +780,7 @@ fold_links_interrupted_base(Config, Key, LinksCreateFun) ->
         )),
 
         test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, test_ctx_base,
-            #{writer_interrupted_call_retires => 0, handle_interrupted_call => false}),
+            #{writer_interrupted_call_retries => 0, handle_interrupted_call => false}),
         ?assertEqual({error, interrupted_call}, rpc:call(Worker, Model, fold_links,
             [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
         ))
@@ -796,7 +796,7 @@ fold_links_interrupted_base(Config, Key, LinksCreateFun) ->
             )),
 
             test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, test_ctx_base,
-                #{writer_interrupted_call_retires => 0, handle_interrupted_call => false}),
+                #{writer_interrupted_call_retries => 0, handle_interrupted_call => false}),
             ?assertEqual({error, interrupted_call}, rpc:call(Worker, Model, fold_links,
                 [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
             ));

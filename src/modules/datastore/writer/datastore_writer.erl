@@ -257,7 +257,7 @@ call(Ctx, Key, Function, Args) ->
 %%--------------------------------------------------------------------
 -spec call(ctx(), tp_key(), module() | undefined, atom(), list()) -> term().
 call(Ctx, Key, Module, Function, Args) ->
-    InterruptedCallsRetries = maps:get(writer_interrupted_call_retires, Ctx, ?INTERRUPTED_CALL_RETRIES),
+    InterruptedCallsRetries = maps:get(writer_interrupted_call_retries, Ctx, ?INTERRUPTED_CALL_RETRIES),
     call(Ctx, Key, Module, Function, Args, ?INTERRUPTED_CALL_INITIAL_SLEEP, InterruptedCallsRetries).
 
 %%--------------------------------------------------------------------

@@ -142,10 +142,10 @@ init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
         {broken_root, Tree} ->
             % The tree has been broken by abnormal termination of application
             % Some data could be lost, proceeding with fixed root
-            ?error("Broken bp_tree ~p for key ~p~nCtx: ~p", [TreeId, Key, Ctx]),
+            ?error("Broken bp_tree~s", [?autoformat([TreeId, Key, Ctx])]),
             {ok, Tree};
         {{error, interrupted_call} = Error, Tree} ->
-            ?error("Interrupted call for tree ~p, key ~p~nCtx: ~p", [TreeId, Key, Ctx]),
+            ?error("Interrupted call (tree init)~s", [?autoformat([TreeId, Key, Ctx])]),
             case Ctx of
                 #{handle_interrupted_call := false} ->
                     Error;

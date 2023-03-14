@@ -227,7 +227,7 @@ fetch(Ctx, Key, Batch = #batch{cache = Cache}) ->
                         cache = maps:put(Key, Entry, Cache)
                     }};
                 {ok, remote, Doc} ->
-                    % Warning: documents get from remote driver are not protected with HA
+                    % Warning: documents got from remote driver are not protected with HA
                     % they will be remotely get once more if needed
                     Entry = #entry{ctx = Ctx, doc = Doc, status = cached},
                     {{ok, Doc}, Batch#batch{
