@@ -103,7 +103,7 @@ apply(Ctx, Key, TreeId, Function, Args) ->
     {Result2, Batch5} = case datastore_links:init_tree(Ctx, Key, TreeId, Batch2) of
         {ok, Tree} ->
             {Result, Tree2} = erlang:apply(?MODULE, Function, Args ++ [Tree]),
-            Batch3 = datastore_links:terminate_tree(Tree2),
+            Batch3 = datastore_links:finalize_tree_operation(Tree2),
             case Result of
                 {error, Reason} ->
                     {{error, Reason}, Batch3};
