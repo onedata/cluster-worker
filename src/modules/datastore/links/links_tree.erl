@@ -346,7 +346,7 @@ set_remote_driver_ctx(Ctx, #state{key = Key, tree_id = TreeId}) ->
     }}.
 
 fetch_node(Ctx, NodeId, State) ->
-    InterruptedCallsRetries = maps:get(links_tree_interrupted_call_retires, Ctx, ?INTERRUPTED_CALL_RETRIES),
+    InterruptedCallsRetries = maps:get(links_tree_interrupted_call_retries, Ctx, ?INTERRUPTED_CALL_RETRIES),
     fetch_node(Ctx, NodeId, State, ?INTERRUPTED_CALL_INITIAL_SLEEP, InterruptedCallsRetries).
 
 fetch_node(Ctx, NodeId, State = #state{batch = Batch}, Sleep, InterruptedCallRetries) ->

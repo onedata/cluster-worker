@@ -299,7 +299,7 @@ get_from_tree(LinkName, TreeId, #forest_it{
                         false -> {ok, Link}
                     end, UpdatedBatch};
                 {{error, interrupted_call} = Error, Tree2} ->
-                    ?error("Interrupted call (link get) for tree ~p, key ~p~nCtx: ~p", [TreeId, Key, Ctx]),
+                    ?error("Interrupted call (link get)~s", [?autoformat([TreeId, Key, Ctx])]),
                     UpdatedBatch = datastore_links:terminate_tree(Tree2),
                     case Ctx of
                         #{handle_interrupted_call := false} ->
@@ -493,19 +493,16 @@ init_tree_fold(TreeId, ForestIt = #forest_it{
                             {{ok, #tree_it{}}, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)}}
                     end;
                 {{error, interrupted_call} = Error, Tree2} ->
-                    ?error("Interrupted call (fold init) for tree ~p, key ~p~nCtx: ~p", [TreeId, Key, Ctx]),
-                    case Ctx of
-                        #{handle_interrupted_call := false} ->
+                    ?error("Interrupted call (fold init)~s", [?autoformat([TreeId, Key, Ctx])]),
+                    case {Ctx, Opts} of
+                        {#{handle_interrupted_call := false}, _} ->
                             {Error, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)}};
+                        {_, #{node_id := _, retry_using_prev_key := true}} ->
+                            init_tree_fold(TreeId,
+                                ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)},
+                                maps:remove(node_id, Opts));
                         _ ->
-                            case Opts of
-                                #{node_id := _, retry_using_prev_key := true} ->
-                                    init_tree_fold(TreeId,
-                                        ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)},
-                                        maps:remove(node_id, Opts));
-                                _ ->
-                                    {{ok, #tree_it{}}, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)}}
-                            end
+                            {{ok, #tree_it{}}, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)}}
                     end;
                 {{error, Reason}, Tree2} ->
                     {{error, Reason}, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)}}
