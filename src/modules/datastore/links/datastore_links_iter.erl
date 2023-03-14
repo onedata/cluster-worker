@@ -156,7 +156,7 @@ get(LinkName, ForestIt = #forest_it{tree_ids = TreeIds, batch = Batch}) ->
     Ans = lists:foldl(fun({Result, UpdatedBatch}, {ResultAcc, #forest_it{batch = BatchAcc} = ForestItAcc}) ->
         {
             ResultMapper(Result, ResultAcc),
-            ForestItAcc#forest_it{batch = datastore_doc_batch:update_cache(BatchAcc, UpdatedBatch)}
+            ForestItAcc#forest_it{batch = datastore_doc_batch:merge_cache_batches(BatchAcc, UpdatedBatch)}
         }
     end, {{ok, []}, ForestIt}, Results),
     case Ans of
