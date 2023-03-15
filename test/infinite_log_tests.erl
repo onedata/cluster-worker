@@ -495,8 +495,8 @@ expiry_threshold_for_dynamic_log_base(MaxEntriesPerNode, Mode) ->
     clock_freezer_mock:simulate_seconds_passing(ExpiryThreshold - 1),
     ?assert(sentinel_exists(LogId)),
     foreach_archival_node_number(InitialEntryCount, MaxEntriesPerNode, fun(NodeNumber) ->
-        NewestTimestampInNode = (NodeNumber + 1) * (MaxEntriesPerNode - 1) * Interval div 1000,
-        ShouldNodeExist = clock_freezer_mock:current_time_seconds() - NewestTimestampInNode < ExpiryThreshold,
+        NewestTimestampInNode = (NodeNumber + 1) * (MaxEntriesPerNode - 1) * Interval,
+        ShouldNodeExist = clock_freezer_mock:current_time_millis() - NewestTimestampInNode < ExpiryThreshold * 1000,
         ?assertEqual(ShouldNodeExist, node_exists(LogId, NodeNumber))
     end),
 
@@ -649,10 +649,14 @@ age_based_pruning(LogId, MaxEntriesPerNode) ->
     }),
 
     append(#{count => MaxEntriesPerNode, first_at => 0, interval => 1000}),
+    % an extra interval needed after the last append to get MaxEntriesPerNode seconds
+    clock_freezer_mock:simulate_millis_passing(1000),
     ?testList([0], ?FORWARD, undefined, #{limit => 1}),
     ?testList([MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
 
     append(#{count => MaxEntriesPerNode, interval => 1000}),
+    % an extra interval needed after the last append to get MaxEntriesPerNode seconds
+    clock_freezer_mock:simulate_millis_passing(1000),
     ?testList([MaxEntriesPerNode], ?FORWARD, undefined, #{limit => 1, required_access => allow_updates}),
     ?testList([2 * MaxEntriesPerNode - 1], ?BACKWARD, undefined, #{limit => 1}),
 
@@ -949,6 +953,9 @@ create_log_for_test(LogOpts) ->
     LogId.
 
 
+% NOTE: interval is simulated *between* log appends, so for N logs,
+% time passing of (N - 1) * Interval will be simulated.
+-spec append(#{count := non_neg_integer(), first_at := time:millis(), interval := time:millis()}) -> ok.
 append(Spec) ->
     LogId = get_current_log_id(),
     TargetEntryCount = maps:get(count, Spec, 1),
@@ -959,7 +966,7 @@ append(Spec) ->
             ok
     end,
     Interval = maps:get(interval, Spec, random),
-    lists:foreach(fun(_) ->
+    lists:foreach(fun(Counter) ->
         Content = str_utils:rand_hex(?rand(500)),
         EntryIndex = get_entry_count(LogId),
         Timestamp = clock_freezer_mock:current_time_millis(),
@@ -967,7 +974,7 @@ append(Spec) ->
         call_append(LogId, Content),
         NewEntryCount = EntryIndex + 1,
         store_entry_count(LogId, NewEntryCount),
-        NewEntryCount /= TargetEntryCount andalso clock_freezer_mock:simulate_millis_passing(case Interval of
+        Counter /= TargetEntryCount andalso clock_freezer_mock:simulate_millis_passing(case Interval of
             random -> ?rand(10000);
             _ -> Interval
         end)

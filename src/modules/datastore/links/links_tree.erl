@@ -17,6 +17,7 @@
 
 -include("modules/datastore/datastore_models.hrl").
 -include("global_definitions.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([get_tree_id/1]).
@@ -49,6 +50,10 @@
 % Default time in seconds for document (saved to disk) to expire after delete
 % (one year)
 -define(DISK_EXPIRY, 31536000).
+
+% NOTE: Do not use environment variables as it affects performance too much
+-define(INTERRUPTED_CALL_INITIAL_SLEEP, 100).
+-define(INTERRUPTED_CALL_RETRIES, 5).
 
 %%%===================================================================
 %%% API
@@ -168,14 +173,14 @@ unset_root_id(State = #state{
 -spec get_root_id(state()) ->
     {{ok, node_id()} | {error, term()}, state()}.
 get_root_id(State = #state{
-    ctx = Ctx, forest_id = ForestId, tree_id = TreeId, batch = Batch
+    ctx = Ctx, forest_id = ForestId, tree_id = TreeId
 }) ->
     Ctx2 = set_remote_driver_ctx(Ctx, State),
-    case datastore_doc:fetch(Ctx2, ForestId, Batch, true) of
-        {{ok, #document{value = #links_forest{trees = Trees}}}, Batch2} ->
-            {get_root_id(TreeId, Trees), State#state{batch = Batch2}};
-        {{error, Reason}, Batch2} ->
-            {{error, Reason}, State#state{batch = Batch2}}
+    case fetch_node(Ctx2, ForestId, State) of
+        {{ok, #document{value = #links_forest{trees = Trees}}}, State2} ->
+            {get_root_id(TreeId, Trees), State2};
+        {{error, Reason}, State2} ->
+            {{error, Reason}, State2}
     end.
 
 %%--------------------------------------------------------------------
@@ -224,11 +229,11 @@ get_node(NodeId, State = #state{ctx = Ctx, batch = Batch, tree_id = TreeID}) ->
         _ ->
             Ctx2#{include_deleted => true}
     end,
-    case datastore_doc:fetch(Ctx3, NodeId, Batch, true) of
-        {{ok, #document{value = #links_node{node = Node}}}, Batch2} ->
-            {{ok, Node}, State#state{batch = Batch2}};
-        {{error, Reason}, Batch2} ->
-            {{error, Reason}, State#state{batch = Batch2}}
+    case fetch_node(Ctx3, NodeId, State) of
+        {{ok, #document{value = #links_node{node = Node}}}, State2} ->
+            {{ok, Node}, State2};
+        {{error, Reason}, State2} ->
+            {{error, Reason}, State2}
     end.
 
 %%--------------------------------------------------------------------
@@ -356,3 +361,19 @@ set_remote_driver_ctx(Ctx, #state{key = Key, tree_id = TreeId}) ->
         routing_key => maps:get(routing_key, Ctx, Key),
         source_ids => [TreeId]
     }}.
+
+fetch_node(Ctx, NodeId, State) ->
+    InterruptedCallsRetries = maps:get(links_tree_interrupted_call_retries, Ctx, ?INTERRUPTED_CALL_RETRIES),
+    fetch_node(Ctx, NodeId, State, ?INTERRUPTED_CALL_INITIAL_SLEEP, InterruptedCallsRetries).
+
+fetch_node(Ctx, NodeId, State = #state{batch = Batch}, Sleep, InterruptedCallRetries) ->
+    case datastore_doc:fetch(Ctx, NodeId, Batch, true) of
+        {{error, interrupted_call}, Batch2} when InterruptedCallRetries =< 0 ->
+            ?warning("Interrupted call fetching link node ~s", [NodeId]),
+            {{error, interrupted_call}, State#state{batch = Batch2}};
+        {{error, interrupted_call}, Batch2} ->
+            timer:sleep(Sleep),
+            fetch_node(Ctx, NodeId, State#state{batch = Batch2}, Sleep * 2, InterruptedCallRetries - 1);
+        {Ans, Batch2} ->
+            {Ans, State#state{batch = Batch2}}
+    end.

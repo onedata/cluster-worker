@@ -24,7 +24,7 @@ compile:
 	$(REBAR) compile
 
 upgrade:
-	$(REBAR) upgrade
+	$(REBAR) upgrade --all
 
 generate:
 	$(REBAR) release $(OVERLAY_VARS)

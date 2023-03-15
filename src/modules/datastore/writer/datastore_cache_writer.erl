@@ -830,7 +830,7 @@ links_tree_apply(Ctx, Key, TreeId, Batch, Fun) ->
     case datastore_links:init_tree(set_mutator_pid(Ctx), Key, TreeId, Batch) of
         {ok, Tree} ->
             {Result, Tree2} = Fun(Tree),
-            {Result, datastore_links:terminate_tree(Tree2)};
+            {Result, datastore_links:finalize_tree_operation(Tree2)};
         Error ->
             {Error, Batch}
     end.
