@@ -25,7 +25,7 @@
 %% API
 -export([
     init/1, init/5, stop/1,
-    run/3, run/4, cancel/2
+    run/3, run/4, run/5, cancel/2
 ]).
 
 %% traverse callbacks
@@ -42,6 +42,7 @@
 -type job() :: master_job() | slave_job().
 -type token() :: #view_traverse_token{}.
 -type view_processing_module() :: module().
+-type pool_selector() :: view_processing_module() | traverse:pool().
 -type query_opts() :: #{atom() => term()}.  % opts passed to couchbase_driver:query
 -type info() :: term(). % custom term passed to process_row callback
 -type row() :: proplists:proplist().
@@ -55,7 +56,10 @@
 }.
 % @formatter:on
 
--export_type([task_id/0, master_job/0, slave_job/0, token/0, view_processing_module/0, query_opts/0, info/0, row/0]).
+-export_type([
+    task_id/0, master_job/0, slave_job/0,
+    token/0, view_processing_module/0, pool_selector/0, query_opts/0, info/0, row/0
+]).
 
 %%%===================================================================
 %%% view_traverse mandatory callbacks definitions
@@ -90,21 +94,21 @@
 %%% API functions
 %%%===================================================================
 
--spec init(view_processing_module()) -> ok.
-init(ViewProcessingModule) ->
-    init(ViewProcessingModule, ?DEFAULT_MASTER_JOBS_LIMIT, ?DEFAULT_SLAVE_JOBS_LIMIT, ?DEFAULT_PARALLELISM_LIMIT, true).
+-spec init(pool_selector()) -> ok.
+init(PoolSelector) ->
+    init(PoolSelector, ?DEFAULT_MASTER_JOBS_LIMIT, ?DEFAULT_SLAVE_JOBS_LIMIT, ?DEFAULT_PARALLELISM_LIMIT, true).
 
--spec init(view_processing_module(), non_neg_integer(), non_neg_integer(), non_neg_integer(), boolean()) -> ok.
-init(ViewProcessingModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, ShouldRestart) ->
-    PoolName = view_processing_module_to_pool_name(ViewProcessingModule),
+-spec init(pool_selector(), non_neg_integer(), non_neg_integer(), non_neg_integer(), boolean()) -> ok.
+init(PoolSelector, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, ShouldRestart) ->
+    PoolName = resolve_pool_name(PoolSelector),
     traverse:init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, #{
         callback_modules => [?MODULE],
         restart => ShouldRestart
     }).
 
--spec stop(view_processing_module()) -> ok.
-stop(ViewProcessingModule) when is_atom(ViewProcessingModule) ->
-    traverse:stop_pool(view_processing_module_to_pool_name(ViewProcessingModule)).
+-spec stop(pool_selector()) -> ok.
+stop(PoolSelector) when is_atom(PoolSelector) ->
+    traverse:stop_pool(resolve_pool_name(PoolSelector)).
 
 -spec run(view_processing_module(), couchbase_driver:view(), opts()) ->
     {ok, task_id()} | {error, term()}.
@@ -114,6 +118,11 @@ run(ViewProcessingModule, ViewName, Opts) ->
 -spec run(view_processing_module(), couchbase_driver:view(), task_id() | undefined, opts()) ->
     {ok, task_id()} | {error, term()}.
 run(ViewProcessingModule, ViewName, TaskId, Opts) ->
+    run(ViewProcessingModule, ViewProcessingModule, ViewName, TaskId, Opts).
+
+-spec run(pool_selector(), view_processing_module(), couchbase_driver:view(), task_id() | undefined, opts()) ->
+    {ok, task_id()} | {error, term()}.
+run(PoolSelector, ViewProcessingModule, ViewName, TaskId, Opts) ->
     case view_exists(ViewName) of
         true ->
             DefinedTaskId = ensure_defined_task_id(TaskId),
@@ -126,16 +135,21 @@ run(ViewProcessingModule, ViewName, TaskId, Opts) ->
                 token = utils:ensure_defined(maps:get(token, Opts, DefaultToken), undefined, DefaultToken),
                 info = maps:get(info, Opts, undefined)
             },
-            PoolName = view_processing_module_to_pool_name(ViewProcessingModule),
-            traverse:run(PoolName, DefinedTaskId, MasterJob, #{callback_module => ?MODULE}),
+            PoolName = resolve_pool_name(PoolSelector),
+            traverse:run(PoolName, DefinedTaskId, MasterJob, #{
+                callback_module => ?MODULE,
+                additional_data => #{
+                    <<"view_processing_module">> => atom_to_binary(ViewProcessingModule, utf8)
+                }
+            }),
             {ok, DefinedTaskId};
         false ->
             {error, not_found}
     end.
 
--spec cancel(view_processing_module(), task_id()) -> ok.
-cancel(ViewProcessingModule, TaskId) ->
-    traverse:cancel(view_processing_module_to_pool_name(ViewProcessingModule), TaskId).
+-spec cancel(pool_selector(), task_id()) -> ok.
+cancel(PoolSelector, TaskId) ->
+    traverse:cancel(resolve_pool_name(PoolSelector), TaskId).
 
 %%%===================================================================
 %%% traverse_behaviour callbacks implementations
@@ -163,7 +177,8 @@ do_master_job(MasterJob = #view_traverse_master{
             {ReversedSlaveJobs, NewToken} = lists:foldl(
                 fun(Row, {SlaveJobsAcc, TokenAcc = #view_traverse_token{offset = RowOffset}}) ->
                     Key = maps:get(<<"key">>, Row),
-                    DocId = maps:get(<<"id">>, Row),
+                    % DocId is undefined in case of views with reduce functions
+                    DocId = maps:get(<<"id">>, Row, undefined),
                     {
                         [slave_job(MasterJob, Row, RowOffset) | SlaveJobsAcc],
                         TokenAcc#view_traverse_token{
@@ -230,7 +245,7 @@ get_job(Id) ->
 update_job_progress(Id, Job, Pool, TaskId, Status)
     when Status =:= waiting
     orelse Status =:= on_pool
-    ->
+->
     view_traverse_job:save_master_job(Id, Job, Pool, TaskId);
 update_job_progress(Id, _Job, _Pool, _TaskId, _Status) ->
     ok = view_traverse_job:delete_master_job(Id),
@@ -282,13 +297,12 @@ to_string(Job) ->
 %%% Internal functions
 %%%===================================================================
 
--spec view_processing_module_to_pool_name(view_processing_module()) -> traverse:pool().
-view_processing_module_to_pool_name(ViewProcessingModule) ->
-    atom_to_binary(ViewProcessingModule, utf8).
-
--spec pool_name_to_view_processing_module(traverse:pool()) -> view_processing_module().
-pool_name_to_view_processing_module(PoolName) ->
-    binary_to_atom(PoolName, utf8).
+%% @private
+-spec resolve_pool_name(view_processing_module() | traverse:pool()) -> traverse:pool().
+resolve_pool_name(ViewProcessingModule) when is_atom(ViewProcessingModule) ->
+    atom_to_binary(ViewProcessingModule, utf8);
+resolve_pool_name(PoolName) when is_binary(PoolName) ->
+    PoolName.
 
 -spec call_batch_prehook(view_processing_module(), non_neg_integer(), [json_utils:json_term()], token(), info()) -> ok.
 call_batch_prehook(ViewProcessingModule, BatchOffset, Rows, Token, Info) ->
@@ -313,7 +327,11 @@ call_on_batch_canceled_callback(ViewProcessingModule, BatchOffset, RowJobsCancel
 
 -spec task_callback(traverse:pool(), atom(), task_id()) -> ok.
 task_callback(PoolName, Function, TaskId) ->
-    ViewProcessingModule = pool_name_to_view_processing_module(PoolName),
+    {ok, TaskDoc} = traverse_task:get(PoolName, TaskId),
+    {ok, AdditionalData} = traverse_task:get_additional_data(TaskDoc),
+    ViewProcessingModuleBin = maps:get(<<"view_processing_module">>, AdditionalData),
+    ViewProcessingModule = binary_to_atom(ViewProcessingModuleBin, utf8),
+
     case erlang:function_exported(ViewProcessingModule, Function, 1) of
         true ->
             ViewProcessingModule:Function(TaskId),
