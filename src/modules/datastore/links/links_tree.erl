@@ -94,7 +94,8 @@ init([Ctx, Key, TreeId, Batch]) ->
         {_, undefined} ->
             {ok, State}; % operation outside tp process - ignore_in_changes parameter is ignored
         _ ->
-            case datastore_doc:fetch(Ctx, ForestId, Batch, true) of
+            Ctx2 = set_remote_driver_ctx(Ctx, State),
+            case datastore_doc:fetch(Ctx2, ForestId, Batch, true) of
                 {{ok, #document{ignore_in_changes = Ignore}}, Batch2} ->
                     % for new document use the same ignore_in_changes setting as for forest doc
                     {ok, State#state{ctx = Ctx#{ignore_in_changes => Ignore}, batch = Batch2}};
