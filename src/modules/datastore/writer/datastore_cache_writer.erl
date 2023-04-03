@@ -698,7 +698,7 @@ batch_request(#datastore_request{function = fetch_links_trees, ctx = Ctx, args =
     batch_apply(Batch, fun(Batch2) ->
         datastore_links:get_links_trees(set_mutator_pid(Ctx), Key, Batch2)
     end);
-batch_request(#datastore_request{function = unset_link_ignore_in_changes, ctx = Ctx0, args = [Key, TreeId]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = ensure_forest_in_changes, ctx = Ctx0, args = [Key, TreeId]}, Batch, _LinkTokens) ->
     Ctx = set_mutator_pid(Ctx0#{ignore_in_changes => false}),
     Ref = make_ref(),
     Batch2 = datastore_doc_batch:init_request(Ref, Batch),

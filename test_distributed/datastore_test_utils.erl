@@ -138,9 +138,9 @@ mock_model(Model) ->
             Ctx = get_ctx(Model),
             datastore_model:get_links_trees(Ctx, Key)
         end},
-        {unset_link_ignore_in_changes, fun(Key, TreeId) ->
+        {ensure_forest_in_changes, fun(Key, TreeId) ->
             Ctx = get_ctx(Model),
-            datastore_model:unset_link_ignore_in_changes(Ctx, Key, TreeId)
+            datastore_model:ensure_forest_in_changes(Ctx, Key, TreeId)
         end},
 
         {infinite_log_create, fun(Key, Opts) ->

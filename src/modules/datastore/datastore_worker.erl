@@ -32,7 +32,7 @@
 -define(EXOMETER_COUNTERS,
     [save, update, create, create_or_update, get, delete, exists, add_links, check_and_add_links,
 		set_links, create_link, delete_links, fetch_link, foreach_link,
-        mark_links_deleted, get_links, fold_links, get_links_trees, unset_link_ignore_in_changes
+        mark_links_deleted, get_links, fold_links, get_links_trees, ensure_forest_in_changes
     ]).
 
 -define(EXOMETER_NAME(Param), ?exometer_name(datastore, Param)).

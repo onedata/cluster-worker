@@ -19,7 +19,7 @@
 -export([get/2, exists/2]).
 -export([delete/3, delete_all/2]).
 -export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
--export([fold_links/6, get_links_trees/2, unset_link_ignore_in_changes/3]).
+-export([fold_links/6, get_links_trees/2, ensure_forest_in_changes/3]).
 -export([time_series_collection_operation/4, infinite_log_operation/4]).
 
 -type ctx() :: #{model := datastore_model:model(),
@@ -315,9 +315,9 @@ get_links_trees(Ctx, Key) ->
         (Function, Args) -> datastore_router:route(Function, Args)
     end).
 
--spec unset_link_ignore_in_changes(ctx(), key(), tree_id()) -> ok | {error, term()}.
-unset_link_ignore_in_changes(Ctx, Key, TreeId) ->
-    datastore_hooks:wrap(Ctx, Key, unset_link_ignore_in_changes, [TreeId], fun
+-spec ensure_forest_in_changes(ctx(), key(), tree_id()) -> ok | {error, term()}.
+ensure_forest_in_changes(Ctx, Key, TreeId) ->
+    datastore_hooks:wrap(Ctx, Key, ensure_forest_in_changes, [TreeId], fun
         (Function, Args) -> datastore_router:route(Function, Args)
     end).
 
