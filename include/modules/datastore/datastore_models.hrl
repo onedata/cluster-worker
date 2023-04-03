@@ -28,6 +28,7 @@
     seq = null :: datastore_doc:seq(),
     timestamp = null :: datastore_doc:timestamp(),
     deleted = false :: boolean(),
+    ignore_in_changes = false :: boolean(),
     version = 1 :: datastore_doc:version()
 }).
 

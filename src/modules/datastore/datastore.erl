@@ -19,7 +19,7 @@
 -export([get/2, exists/2]).
 -export([delete/3, delete_all/2]).
 -export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
--export([fold_links/6, get_links_trees/2]).
+-export([fold_links/6, get_links_trees/2, ensure_forest_in_changes/3]).
 -export([time_series_collection_operation/4, infinite_log_operation/4]).
 
 -type ctx() :: #{model := datastore_model:model(),
@@ -71,7 +71,8 @@
                                                     % caller process (doc fetched from disc will not be cached in memory)
                  handle_interrupted_call => boolean(),
                  writer_interrupted_call_retries => non_neg_integer(),
-                 links_tree_interrupted_call_retries => non_neg_integer()
+                 links_tree_interrupted_call_retries => non_neg_integer(),
+                 ignore_in_changes => boolean()
 }.
 -type memory_driver() :: undefined | ets_driver | mnesia_driver.
 -type memory_driver_ctx() :: ets_driver:ctx() | mnesia_driver:ctx().
@@ -311,6 +312,12 @@ fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
 -spec get_links_trees(ctx(), key()) -> {ok, [tree_id()]} | {error, term()}.
 get_links_trees(Ctx, Key) ->
     datastore_hooks:wrap(Ctx, Key, get_links_trees, [], fun
+        (Function, Args) -> datastore_router:route(Function, Args)
+    end).
+
+-spec ensure_forest_in_changes(ctx(), key(), tree_id()) -> ok | {error, term()}.
+ensure_forest_in_changes(Ctx, Key, TreeId) ->
+    datastore_hooks:wrap(Ctx, Key, ensure_forest_in_changes, [TreeId], fun
         (Function, Args) -> datastore_router:route(Function, Args)
     end).
 

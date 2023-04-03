@@ -57,6 +57,7 @@
 -module(traverse).
 -author("Michal Wrzeszcz").
 
+-include("global_definitions.hrl").
 -include("traverse/traverse.hrl").
 -include("modules/datastore/datastore.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -893,7 +894,10 @@ deregister_group_and_check(PoolName, Group, Executor) ->
 get_extended_ctx(CallbackModule, undefined) ->
     case erlang:function_exported(CallbackModule, get_sync_info, 1) of
         true ->
-            ?warning("Getting sync info for undefined job for callback module: ~p", [CallbackModule]);
+            case application:get_env(?CLUSTER_WORKER_APP_NAME, ignore_extended_ctx_get_errors, true) of
+                true -> ok;
+                false -> ?warning("Getting sync info for undefined job for callback module: ~p", [CallbackModule])
+            end;
         _ ->
             ok
     end,
@@ -958,6 +962,9 @@ repair_ongoing_task_and_add_to_map(Pool, Executor, Node, Id, TaskIdToCtxMap, Fix
             case CallbackModule:get_job(MainJobId) of
                 {ok, Job, _, _} ->
                     ExtendedCtx = get_extended_ctx(CallbackModule, Job),
+                    fix_task_description(Pool, Executor, Node, Id, TaskIdToCtxMap, FixLink, ExtendedCtx, Timestamp);
+                {error, not_found} ->
+                    ExtendedCtx = get_extended_ctx(CallbackModule, undefined),
                     fix_task_description(Pool, Executor, Node, Id, TaskIdToCtxMap, FixLink, ExtendedCtx, Timestamp);
                 JobError ->
                     ?warning("Error getting main job ~p for task id ~p (pool ~p, executor ~p, node ~p): ~p",
@@ -1051,7 +1058,9 @@ clean_tasks_and_jobs(TaskIdToCtxMap, JobsPerTask, TasksToCancel, JobsWitoutCtx, 
             ExtendedCtx -> traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, true, force)
         end,
 
-        clean_jobs(maps:get(TaskId, JobsPerTask, []), PoolName, CallbackModule, Node)
+        JobsToClean = maps:get(TaskId, JobsPerTask, []),
+        clean_jobs(JobsToClean, PoolName, CallbackModule, Node),
+        ?info("~p jobs of task ~p cleaned - restart impossible", [length(JobsToClean), TaskId])
     end, TasksToCancel),
 
     clean_jobs(JobsWitoutCtx, PoolName, CallbackModule, Node).
@@ -1084,7 +1093,9 @@ restart_jobs(TaskIdToCtxMap, JobsPerTask, PoolName, CallbackModule, Executor, No
             }),
             ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
                 CallbackModule, ExtendedCtx, Executor, TaskId, Job, JobId, MasterJobMode)
-        end, JobsToRestart)
+        end, JobsToRestart),
+
+        ?info("~p jobs of task ~p restarted", [length(JobsToRestart), TaskId])
     end, maps:to_list(JobsPerTask)).
 
 -spec schedule_waiting_tasks_if_possible(pool(), environment_id()) -> ok | no_return().

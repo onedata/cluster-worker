@@ -55,10 +55,14 @@ encode(#document{key = <<?TEST_DOC_KEY_PREFIX, _Node/binary>> = Key} = Doc) -> %
         {<<"_record">>, <<"test_doc">>},
         {<<"_value">>, Doc#document.value}
     ]};
-encode(#document{value = Value, version = Version} = Doc) ->
+encode(#document{value = Value, version = Version, ignore_in_changes = Ignore} = Doc) ->
     Model = element(1, Value),
     case lists:member(Model, datastore_config:get_models()) of
         true ->
+            EncodedIgnore = case Ignore of
+                true -> [{<<"_ignore_in_changes">>, true}];
+                false -> [] % do not encode false to maintain compatibility
+            end,
             {Props} = encode_term(Value, Model:get_record_struct(Version)),
             {[
                 {<<"_key">>, Doc#document.key},
@@ -69,7 +73,7 @@ encode(#document{value = Value, version = Version} = Doc) ->
                 {<<"_timestamp">>, Doc#document.timestamp},
                 {<<"_deleted">>, Doc#document.deleted},
                 {<<"_version">>, Version} |
-                Props
+                (EncodedIgnore ++ Props)
             ]};
         false ->
             throw({invalid_doc, Doc})
@@ -118,6 +122,11 @@ decode({Term} = EJson) when is_list(Term) ->
                         {{_, Value}, _} -> Value % Document has timestamp
                     end,
 
+                    Ignore = case lists:keyfind(<<"_ignore_in_changes">>, 1, Term) of
+                        {_, IgnoreValue} -> IgnoreValue;
+                        false -> false
+                    end,
+
                     #document{
                         key = Key,
                         value = Record2,
@@ -127,7 +136,8 @@ decode({Term} = EJson) when is_list(Term) ->
                         seq = Seq,
                         timestamp = Timestamp,
                         deleted = Deleted,
-                        version = Version2
+                        version = Version2,
+                        ignore_in_changes = Ignore
                     };
                 false ->
                     EJson

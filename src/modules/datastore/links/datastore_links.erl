@@ -53,6 +53,7 @@
 -export([add/2, get/2, delete/2, mark_deleted/3]).
 -export([fold/4]).
 -export([get_links_trees/3]).
+-export([force_all_nodes_update/1, force_forest_update/3]).
 
 -type ctx() :: datastore_cache:ctx().
 -type key() :: datastore:key().
@@ -229,6 +230,22 @@ get_links_trees(Ctx, Key, Batch) ->
     case datastore_doc:fetch(Ctx, ForestId, Batch) of
         {{ok, #document{value = #links_forest{trees = Trees}}}, Batch2} ->
             {{ok, maps:keys(Trees)}, Batch2};
+        {{error, Reason}, Batch2} ->
+            {{error, Reason}, Batch2}
+    end.
+
+
+-spec force_all_nodes_update(tree()) -> {ok | {error, term()}, tree()}.
+force_all_nodes_update(Tree) ->
+    bp_tree:force_all_nodes_update(Tree).
+
+
+-spec force_forest_update(ctx(), key(), batch()) -> {ok | {error, term()}, batch()}.
+force_forest_update(Ctx, Key, Batch) ->
+    ForestId = get_forest_id(Key),
+    case datastore_doc:update(Ctx, ForestId, fun(Record) -> {ok, Record} end, Batch) of
+        {{ok, _}, Batch2} ->
+            {ok, Batch2};
         {{error, Reason}, Batch2} ->
             {{error, Reason}, Batch2}
     end.

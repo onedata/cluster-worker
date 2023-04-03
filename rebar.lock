@@ -6,7 +6,7 @@
  {<<"bear">>,{pkg,<<"bear">>,<<"1.0.0">>},2},
  {<<"bp_tree">>,
   {git,"https://github.com/onedata/bp_tree.git",
-       {ref,"fa1adccd6150d3822addf93159e5fc39c25bf3b7"}},
+       {ref,"167fd57f5aa4e66a4f24645ca23fe2cb1b0f03b1"}},
   0},
  {<<"cberl">>,
   {git,"ssh://git@git.onedata.org:7999/vfs/cberl.git",

@@ -25,7 +25,7 @@
 %% API
 -export([create/3, save/3, update/3, update/4, create_backup/2, fetch/2, delete/3]).
 -export([add_links/4, check_and_add_links/5, fetch_links/4, delete_links/4, mark_links_deleted/4]).
--export([fold_links/6, fetch_links_trees/2]).
+-export([fold_links/6, fetch_links_trees/2, ensure_forest_in_changes/3]).
 -export([time_series_collection_operation/3, infinite_log_operation/3]).
 -export([generic_call/2, call_if_alive/2]).
 %% For ct tests
@@ -225,6 +225,15 @@ fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
 -spec fetch_links_trees(ctx(), key()) -> {ok, [tree_id()]} | {error, term()}.
 fetch_links_trees(Ctx, Key) ->
     call(Ctx, get_key(Ctx, Key, links), fetch_links_trees, [Key]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Synchronous and thread safe {@link datastore:ensure_forest_in_changes/3} implementation.
+%% @end
+%%--------------------------------------------------------------------
+-spec ensure_forest_in_changes(ctx(), key(), tree_id()) -> ok | {error, term()}.
+ensure_forest_in_changes(Ctx, Key, TreeId) ->
+    call(Ctx, get_key(Ctx, Key, links), ensure_forest_in_changes, [Key, TreeId]).
 
 
 -spec time_series_collection_operation(ctx(), atom(), list()) ->

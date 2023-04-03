@@ -27,6 +27,7 @@
 -export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6]).
 -export([get_links_trees/2]).
+-export([ensure_forest_in_changes/3]).
 -export([fold_memory_keys/2]).
 -export([set_expiry/2, ensure_expiry_set_on_delete/1]).
 %% for rpc
@@ -398,6 +399,10 @@ fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
 -spec get_links_trees(ctx(), key()) -> {ok, [tree_id()]} | {error, term()}.
 get_links_trees(Ctx, Key) ->
     datastore_apply(Ctx, Key, fun datastore:get_links_trees/2, []).
+
+-spec ensure_forest_in_changes(ctx(), key(), tree_id()) -> ok | {error, term()}.
+ensure_forest_in_changes(Ctx, Key, TreeId) ->
+    datastore_apply(Ctx, Key, fun datastore:ensure_forest_in_changes/3, [TreeId]).
 
 %%--------------------------------------------------------------------
 %% @doc

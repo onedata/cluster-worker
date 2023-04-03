@@ -79,13 +79,30 @@ get_tree_id(#state{tree_id = TreeId}) ->
 %%--------------------------------------------------------------------
 -spec init(bp_tree_store:args()) -> {ok, state()}.
 init([Ctx, Key, TreeId, Batch]) ->
-    {ok, #state{
+    ForestId = datastore_links:get_forest_id(Key),
+    State = #state{
         ctx = Ctx,
         key = Key,
-        forest_id = datastore_links:get_forest_id(Key),
+        forest_id = ForestId,
         tree_id = TreeId,
         batch = Batch
-    }}.
+    },
+
+    case {Ctx, Batch} of
+        {#{ignore_in_changes := _}, _} ->
+            {ok, State}; % do not override ignore_in_changes param set in config
+        {_, undefined} ->
+            {ok, State}; % operation outside tp process - ignore_in_changes parameter is ignored
+        _ ->
+            Ctx2 = set_remote_driver_ctx(Ctx, State),
+            case datastore_doc:fetch(Ctx2, ForestId, Batch, true) of
+                {{ok, #document{ignore_in_changes = Ignore}}, Batch2} ->
+                    % for new document use the same ignore_in_changes setting as for forest doc
+                    {ok, State#state{ctx = Ctx#{ignore_in_changes => Ignore}, batch = Batch2}};
+                {{error, not_found}, Batch2} ->
+                    {ok, State}
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -183,7 +200,8 @@ create_node(Node, State = #state{ctx = Ctx, key = Key, batch = Batch}) ->
             model = maps:get(model, Ctx),
             key = Key,
             node = Node
-        }
+        },
+        ignore_in_changes = maps:get(ignore_in_changes, Ctx, false)
     },
     case datastore_doc:save(Ctx2, NodeId, Doc, Batch) of
         {{ok, _}, Batch2} ->

@@ -108,8 +108,9 @@ save(Ctx, Key, Doc, Batch) ->
 -spec update(ctx(), key(), diff(value()), batch()) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
 update(Ctx, Key, Diff, Batch) ->
+    IncludeDeleted = maps:get(include_deleted, Ctx, false),
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
-        {{ok, #document{deleted = true}}, Batch2} ->
+        {{ok, #document{deleted = true}}, Batch2} when not IncludeDeleted ->
             {{error, not_found}, Batch2};
         {{ok, PrevDoc}, Batch2} ->
             case apply_diff(Diff, PrevDoc) of
@@ -131,8 +132,9 @@ update(Ctx, Key, Diff, Batch) ->
 -spec update(ctx(), key(), diff(value()), doc(value()), batch()) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
 update(Ctx, Key, Diff, Default, Batch) ->
+    IncludeDeleted = maps:get(include_deleted, Ctx, false),
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
-        {{ok, PrevDoc = #document{deleted = true}}, Batch2} ->
+        {{ok, PrevDoc = #document{deleted = true}}, Batch2} when not IncludeDeleted ->
             Doc = fill(Ctx, Default, PrevDoc),
             datastore_doc_batch:save(Ctx, Key, Doc, Batch2);
         {{ok, PrevDoc}, Batch2} ->
@@ -347,10 +349,11 @@ fill(Ctx, Doc) ->
 fill(Ctx, Doc, _PrevDoc = #document{revs = Revs}) ->
     Doc2 = set_mutator(Ctx, Doc),
     Doc3 = set_scope(Ctx, Doc2),
-    Doc4 = set_version(Doc3),
+    Doc4 = set_ignore_in_changes(Ctx, Doc3),
+    Doc5 = set_version(Doc4),
     case Revs of
-        [] -> set_rev(Ctx, Doc4, undefined);
-        [PrevRev | _] -> set_rev(Ctx, Doc4, PrevRev)
+        [] -> set_rev(Ctx, Doc5, undefined);
+        [PrevRev | _] -> set_rev(Ctx, Doc5, PrevRev)
     end.
 
 %%--------------------------------------------------------------------
@@ -397,6 +400,14 @@ set_scope(#{scope := Scope}, Doc) ->
     Doc#document{scope = Scope};
 set_scope(_Ctx, Doc) ->
     Doc.
+
+
+-spec set_ignore_in_changes(ctx(), doc(value())) -> doc(value()).
+set_ignore_in_changes(#{ignore_in_changes := Ignore}, Doc) ->
+    Doc#document{ignore_in_changes = Ignore};
+set_ignore_in_changes(_Ctx, Doc) ->
+    Doc.
+
 
 %%--------------------------------------------------------------------
 %% @private

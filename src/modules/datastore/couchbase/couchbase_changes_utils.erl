@@ -46,6 +46,8 @@ get_docs(Changes, Bucket, FilterMutator, MaxSeqNum) ->
     Ctx = #{bucket => Bucket},
     {Keys, RevisionsAnsSequences} = lists:unzip(KeyRevisionsAndSequences),
     lists:filtermap(fun
+        ({_Key, {ok, _, #document{ignore_in_changes = true}}, _Rev}) ->
+            false;
         ({_Key, {ok, _, #document{revs = [Rev | _], seq = Seq} = Doc}, {Rev, Seq}}) when Seq =< MaxSeqNum ->
             {true, Doc};
         ({_Key, {ok, _, #document{}}, _Rev}) ->
