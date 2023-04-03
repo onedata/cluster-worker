@@ -162,7 +162,7 @@ encode_term(Term, float) when is_integer(Term) orelse is_float(Term) ->
 encode_term(Term, integer) when is_integer(Term) ->
     Term;
 encode_term(Term, json) when is_binary(Term) ->
-    jiffy:decode(Term);
+    jiffy:decode(Term, [copy_strings]);
 encode_term(Term, string) when is_binary(Term) ->
     Term;
 encode_term(Term, string_or_integer) when is_binary(Term) ->

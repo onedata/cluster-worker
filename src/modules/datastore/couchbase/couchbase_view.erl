@@ -119,12 +119,12 @@ query(Connection, DesignName, ViewName, Opts) ->
     ok | {ok, datastore_json:ejson()} | {error, term()}.
 parse_design_doc_response(get, {ok, Code, Response})
     when 200 =< Code andalso Code < 300 ->
-    {ok, jiffy:decode(Response)};
+    {ok, jiffy:decode(Response, [copy_strings])};
 parse_design_doc_response(_Method, {ok, Code, _Response})
     when 200 =< Code andalso Code < 300 ->
     ok;
 parse_design_doc_response(_Method, {ok, _Code, Response}) ->
-    case jiffy:decode(Response) of
+    case jiffy:decode(Response, [copy_strings]) of
         {[{<<"error">>, Error}, {<<"reason">>, Reason}]} ->
             {error, {Error, Reason}};
         _ ->
