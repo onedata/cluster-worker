@@ -108,8 +108,9 @@ save(Ctx, Key, Doc, Batch) ->
 -spec update(ctx(), key(), diff(value()), batch()) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
 update(Ctx, Key, Diff, Batch) ->
+    IncludeDeleted = maps:get(include_deleted, Ctx, false),
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
-        {{ok, #document{deleted = true}}, Batch2} ->
+        {{ok, #document{deleted = true}}, Batch2} when not IncludeDeleted ->
             {{error, not_found}, Batch2};
         {{ok, PrevDoc}, Batch2} ->
             case apply_diff(Diff, PrevDoc) of
@@ -131,8 +132,9 @@ update(Ctx, Key, Diff, Batch) ->
 -spec update(ctx(), key(), diff(value()), doc(value()), batch()) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
 update(Ctx, Key, Diff, Default, Batch) ->
+    IncludeDeleted = maps:get(include_deleted, Ctx, false),
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
-        {{ok, PrevDoc = #document{deleted = true}}, Batch2} ->
+        {{ok, PrevDoc = #document{deleted = true}}, Batch2} when not IncludeDeleted ->
             Doc = fill(Ctx, Default, PrevDoc),
             datastore_doc_batch:save(Ctx, Key, Doc, Batch2);
         {{ok, PrevDoc}, Batch2} ->

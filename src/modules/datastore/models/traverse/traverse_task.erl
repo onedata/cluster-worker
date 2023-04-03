@@ -17,6 +17,7 @@
 
 -include("traverse/traverse.hrl").
 -include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% Lifecycle API
 -export([create/12, start/5, schedule_for_local_execution/3, finish/6, cancel/5, on_task_change/2,
@@ -442,6 +443,7 @@ fix_description(ExtendedCtx, Pool, TaskId, NodeToFix) ->
             SDone = maps:get(slave_jobs_done, Description, 0),
             SFailed = maps:get(slave_jobs_failed, Description, 0),
 
+            ?info("Fixing task description after restart: ~s", [?autoformat([Pool, TaskId, Task])]),
             FinalDescription = Description#{
                 master_jobs_delegated => MDone + MFailed,
                 slave_jobs_delegated => SDone + SFailed
