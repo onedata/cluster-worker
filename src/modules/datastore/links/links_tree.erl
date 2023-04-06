@@ -100,7 +100,7 @@ init([Ctx, Key, TreeId, Batch]) ->
                     % for new document use the same ignore_in_changes setting as for forest doc
                     {ok, State#state{ctx = Ctx#{ignore_in_changes => Ignore}, batch = Batch2}};
                 {{error, not_found}, Batch2} ->
-                    {ok, State}
+                    {ok, State#state{batch = Batch2}}
             end
     end.
 

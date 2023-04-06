@@ -23,6 +23,7 @@
 
 
 -include_lib("ctool/include/errors.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 
 
 %% Plug-in Init/Teardown API
