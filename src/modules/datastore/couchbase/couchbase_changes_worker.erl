@@ -394,7 +394,10 @@ ignore_change(Seq, Key, #state{bucket = Bucket}) ->
         {ok, _, #document{seq = Seq}} -> false;
         {ok, _, #document{seq = Seq2}} when Seq2 > Seq -> true;
         {ok, _, #document{seq = Seq2}} when Seq2 < Seq -> undefined;
-        {error, not_found} -> undefined
+        {error, not_found} -> undefined;
+        Error ->
+            ?error("Error during ignore change procedure ~p", [Error]),
+            false
     end.
 
 %%--------------------------------------------------------------------
