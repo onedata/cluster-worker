@@ -74,6 +74,9 @@
 -define(INTERRUPTED_CALL_INITIAL_SLEEP, 100).
 -define(INTERRUPTED_CALL_RETRIES, 5).
 
+% Log not more often than once every 5 min
+-define(THROTTLE_LOG(Key, Log), utils:throttle({?MODULE, ?FUNCTION_NAME, Key}, 300, fun() -> Log end)).
+
 % Macros used to set tp call and waiting parameters
 -define(TP_CALL_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     datastore_writer_request_queueing_timeout, timer:minutes(1))).
@@ -289,13 +292,10 @@ call(Ctx, Key, Module, Function, Args, Sleep, InterruptedCallRetries) ->
                         {false, _} ->
                             Other;
                         {true, 0} ->
-                            ?debug("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
-                            "no retries left", [Function, Args, Key, Ctx]),
+                            ?THROTTLE_LOG(Key, ?warning("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
+                                "no retries left", [Function, Args, Key, Ctx])),
                             Other;
                         _ ->
-                            ?debug("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
-                            "~p retries left, next retry in ~p ms",
-                                [Function, Args, Key, Ctx, InterruptedCallRetries, Sleep]),
                             timer:sleep(Sleep),
                             call(Ctx, Key, Module, Function, Args, Sleep * 2, InterruptedCallRetries - 1)
                     end

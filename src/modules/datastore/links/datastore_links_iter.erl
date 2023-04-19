@@ -65,6 +65,10 @@
 
 -export_type([forest_it/0, fold_fun/0, fold_acc/0, fold_opts/0, token/0]).
 
+
+% Log not more often than once every 5 min
+-define(THROTTLE_LOG(Key, TreeId, Log), utils:throttle({?MODULE, ?FUNCTION_NAME, Key, TreeId}, 300, fun() -> Log end)).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -301,7 +305,7 @@ get_from_tree(LinkName, TreeId, #forest_it{
                         false -> {ok, Link}
                     end, UpdatedBatch};
                 {{error, interrupted_call} = Error, Tree2} ->
-                    ?error("Interrupted call (link get)~s", [?autoformat([TreeId, Key, Ctx])]),
+                    ?THROTTLE_LOG(Key, TreeId, ?warning("Interrupted call (link get)~s", [?autoformat([TreeId, Key, Ctx])])),
                     UpdatedBatch = datastore_links:finalize_tree_operation(Tree2),
                     case Ctx of
                         #{handle_interrupted_call := false} ->
@@ -522,7 +526,7 @@ init_tree_fold(TreeId, ForestIt = #forest_it{
                             {{ok, #tree_it{}}, ForestIt#forest_it{batch = datastore_links:finalize_tree_operation(Tree2)}}
                     end;
                 {{error, interrupted_call} = Error, Tree2} ->
-                    ?error("Interrupted call (fold init)~s", [?autoformat([TreeId, Key, Ctx])]),
+                    ?THROTTLE_LOG(Key, TreeId, ?warning("Interrupted call (fold init)~s", [?autoformat([TreeId, Key, Ctx])])),
                     case {Ctx, Opts} of
                         {#{handle_interrupted_call := false}, _} ->
                             {Error, ForestIt#forest_it{batch = datastore_links:finalize_tree_operation(Tree2)}};

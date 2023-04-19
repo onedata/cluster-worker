@@ -77,6 +77,10 @@
 -export_type([link_name/0, link_target/0, link_rev/0, link/0, remove_pred/0]).
 -export_type([forest_it/0, fold_fun/0, fold_acc/0, fold_opts/0]).
 
+
+% Log not more often than once every 5 min
+-define(THROTTLE_LOG(Key, TreeId, Log), utils:throttle({?MODULE, ?FUNCTION_NAME, Key, TreeId}, 300, fun() -> Log end)).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -143,10 +147,10 @@ init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
         {broken_root, Tree} ->
             % The tree has been broken by abnormal termination of application
             % Some data could be lost, proceeding with fixed root
-            ?error("Broken bp_tree~s", [?autoformat([TreeId, Key, Ctx])]),
+            ?THROTTLE_LOG(Key, TreeId, ?error("Broken bp_tree~s", [?autoformat([TreeId, Key, Ctx])])),
             {ok, Tree};
         {{error, interrupted_call} = Error, Tree} ->
-            ?error("Interrupted call (tree init)~s", [?autoformat([TreeId, Key, Ctx])]),
+            ?THROTTLE_LOG(Key, TreeId, ?warning("Interrupted call (tree init)~s", [?autoformat([TreeId, Key, Ctx])])),
             case Ctx of
                 #{handle_interrupted_call := false} ->
                     Error;
