@@ -733,10 +733,9 @@ expired_doc_should_not_exist(Config) ->
         ?assertEqual({ok, Cas, Doc}, rpc:call(Worker, couchbase_driver, get,
             [?CTX, ?KEY]
         )),
-        timer:sleep(3000),
         ?assertEqual({error, not_found}, rpc:call(Worker, couchbase_driver, get,
             [?CTX, ?KEY]
-        ))
+        ), 5)
     end, [global_clock:timestamp_seconds()+1, 1]).
 
 %%%===================================================================
