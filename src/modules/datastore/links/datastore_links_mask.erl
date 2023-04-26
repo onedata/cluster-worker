@@ -58,7 +58,7 @@ init(Ctx, Key, TreeId, Batch) ->
         head = Head,
         tail = Tail
     },
-    case datastore_doc:fetch(Ctx, MaskRootId, Batch) of
+    case datastore_doc:fetch(Ctx#{remote_driver => undefined}, MaskRootId, Batch) of
         {{ok, #document{value = #links_mask_root{
             heads = Heads,
             tails = Tails
@@ -111,7 +111,7 @@ terminate(#mask{
         undefined -> Ctx;
         DriverCtx -> Ctx#{disc_driver_ctx => DriverCtx#{no_seq => true}}
     end,
-    Ctx3 = Ctx2#{sync_enabled => false, sync_change => false},
+    Ctx3 = Ctx2#{sync_enabled => false, sync_change => false, remote_driver => undefined},
     MaskPtrId = datastore_links:get_mask_root_id(Key),
     Diff = fun(MaskPtr = #links_mask_root{heads = Heads, tails = Tails}) ->
         {ok, MaskPtr#links_mask_root{
@@ -168,12 +168,12 @@ mark_deleted(LinkName, LinkRev, Mask = #mask{
             links = [{LinkName, LinkRev}]
         }
     },
-    case datastore_doc:update(Ctx, Tail, Diff, Default, Batch) of
+    case datastore_doc:update(Ctx#{remote_driver => undefined}, Tail, Diff, Default, Batch) of
         {{ok, #document{value = #links_mask{next = <<>>}}}, Batch2} ->
             {ok, Mask#mask{batch = Batch2}};
         {{ok, #document{value = #links_mask{next = Next}}}, Batch2} ->
             Default2 = Default#document{key = Next},
-            case datastore_doc:save(Ctx, Next, Default2, Batch2) of
+            case datastore_doc:save(Ctx#{remote_driver => undefined}, Next, Default2, Batch2) of
                 {{ok, #document{}}, Batch3} ->
                     {ok, Mask#mask{
                         tail = Next,
@@ -201,7 +201,7 @@ is_deleted(LinkName, LinkRev, Cache) ->
 
 -spec load(key(), cache(), mask()) -> {{ok, cache()} | {error, term()}, mask()}.
 load(Ptr, Cache, Mask = #mask{ctx = Ctx, batch = Batch}) ->
-    case datastore_doc:fetch_deleted(Ctx, Ptr, Batch) of
+    case datastore_doc:fetch_deleted(Ctx#{remote_driver => undefined}, Ptr, Batch) of
         {{ok, #document{deleted = true, value = #links_mask{
             next = <<>>
         }}}, Batch2} ->

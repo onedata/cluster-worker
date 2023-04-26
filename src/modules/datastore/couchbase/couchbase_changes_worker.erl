@@ -213,8 +213,9 @@ handle_info(Info, #state{} = State) ->
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
 terminate(Reason, #state{callback = Callback, seq_safe = SeqSafe} = State) ->
-    case Reason of
-        normal -> ok;
+    case {Reason, Callback} of
+        {normal, _} -> ok;
+        {_, undefined} -> ok;
         _ -> Callback({error, SeqSafe, Reason})
     end,
     ?log_terminate(Reason, State).
@@ -254,39 +255,46 @@ fetch_changes(#state{
     interval = Interval,
     gc = GCPid
 } = State) ->
-    SeqSafe2 = SeqSafe + 1,
+    try
+        SeqSafe2 = SeqSafe + 1,
 
-    Ctx = #{bucket => Bucket},
-    Design = couchbase_changes:design(),
-    View = couchbase_changes:view(),
-    QueryAns = couchbase_driver:query_view(Ctx, Design, View, [
-        {startkey, [Scope, SeqSafe2]},
-        {endkey, [Scope, Seq]},
-        {limit, BatchSize},
-        {inclusive_end, true}
-    ]),
+        Ctx = #{bucket => Bucket},
+        Design = couchbase_changes:design(),
+        View = couchbase_changes:view(),
+        QueryAns = couchbase_driver:query_view(Ctx, Design, View, [
+            {startkey, [Scope, SeqSafe2]},
+            {endkey, [Scope, Seq]},
+            {limit, BatchSize},
+            {inclusive_end, true}
+        ]),
 
-    case QueryAns of
-        {ok, #{<<"rows">> := Changes}} ->
-            UpperSeqNum = couchbase_changes_utils:get_upper_seq_num(Changes, BatchSize, Seq),
-            State2 = #state{
-                seq_safe = SeqSafe3
-            } = process_changes(SeqSafe2, UpperSeqNum + 1, Changes, State, []),
+        case QueryAns of
+            {ok, #{<<"rows">> := Changes}} ->
+                UpperSeqNum = couchbase_changes_utils:get_upper_seq_num(Changes, BatchSize, Seq),
+                State2 = #state{
+                    seq_safe = SeqSafe3
+                } = process_changes(SeqSafe2, UpperSeqNum + 1, Changes, State, []),
 
-            ets:insert(?CHANGES_COUNTERS, {Scope, SeqSafe3}),
-            gen_server:cast(GCPid, {batch_ready, SeqSafe3}),
-            stream_docs(Changes, Bucket, SeqSafe3, State),
+                ets:insert(?CHANGES_COUNTERS, {Scope, SeqSafe3}),
+                gen_server:cast(GCPid, {batch_ready, SeqSafe3}),
+                stream_docs(Changes, Bucket, SeqSafe3, State),
 
-            case SeqSafe3 of
-                UpperSeqNum -> erlang:send_after(0, self(), update);
-                _ -> erlang:send_after(Interval, self(), update)
-            end,
-            State2;
-        Error ->
-            ?warning("Cannot fetch changes, error: ~p, scope: ~p, start: ~p, stop: ~p", [
-                Error, Scope, SeqSafe2, Seq
-            ]),
+                case SeqSafe3 of
+                    UpperSeqNum -> erlang:send_after(0, self(), update);
+                    _ -> erlang:send_after(Interval, self(), update)
+                end,
+                State2;
+            Error ->
+                ?warning("Cannot fetch changes, error: ~p, scope: ~p, start: ~p, stop: ~p", [
+                    Error, Scope, SeqSafe2, Seq
+                ]),
 
+                erlang:send_after(Interval, self(), update),
+                State
+        end
+    catch
+        Class:Reason:Stacktrace ->
+            ?error_exception(?autoformat([Scope, SeqSafe, Seq]), Class, Reason, Stacktrace),
             erlang:send_after(Interval, self(), update),
             State
     end.

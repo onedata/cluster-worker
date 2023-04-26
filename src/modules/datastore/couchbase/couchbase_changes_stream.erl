@@ -160,13 +160,19 @@ handle_cast(Request, #state{} = State) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
 handle_info(update, #state{since = Since, until = Until,
-    bucket = Bucket, except_mutator = Mutator} = State) ->
-    {Changes, State2} = get_changes(Since, Until, State),
-    Docs = couchbase_changes_utils:get_docs(Changes, Bucket, Mutator, Until),
-    stream_docs(Docs, State2),
-    case State2#state.since >= Until of
-        true -> {stop, normal, State2};
-        false -> {noreply, State2}
+    bucket = Bucket, except_mutator = Mutator, scope = Scope} = State) ->
+    try
+        {Changes, State2} = get_changes(Since, Until, State),
+        Docs = couchbase_changes_utils:get_docs(Changes, Bucket, Mutator, Until),
+        stream_docs(Docs, State2),
+        case State2#state.since >= Until of
+            true -> {stop, normal, State2};
+            false -> {noreply, State2}
+        end
+    catch
+        Class:Reason:Stacktrace ->
+            ?error_exception(?autoformat([Scope, Since, Until]), Class, Reason, Stacktrace),
+            {noreply, State}
     end;
 handle_info({'EXIT', From, Reason} = Info, 
     #state{linked_processes = LinkedProcesses} = State) ->

@@ -229,6 +229,8 @@ fetch(Ctx, Key, Batch = #batch{cache = Cache}) ->
                 {ok, remote, Doc} ->
                     % Warning: documents got from remote driver are not protected with HA
                     % they will be remotely get once more if needed
+                    Model = element(1, Doc#document.value),
+                    datastore_model_default:on_remote_doc_created(Model, Ctx, Doc),
                     Entry = #entry{ctx = Ctx, doc = Doc, status = cached},
                     {{ok, Doc}, Batch#batch{
                         cache = maps:put(Key, Entry, Cache)
