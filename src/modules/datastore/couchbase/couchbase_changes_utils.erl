@@ -50,6 +50,9 @@ get_docs(Changes, Bucket, FilterMutator, MaxSeqNum) ->
             false;
         ({_Key, {ok, _, #document{revs = [Rev | _], seq = Seq} = Doc}, {Rev, Seq}}) when Seq =< MaxSeqNum ->
             {true, Doc};
+        ({_Key, {ok, _, #document{seq = DocSeq} = Doc}, {_Rev, Seq}}) when Seq =< MaxSeqNum andalso Seq < DocSeq ->
+            % Use newer doc with old revision - otherwise constant modifications can prevent returning of doc
+            {true, Doc#document{seq = Seq}};
         ({_Key, {ok, _, #document{}}, _Rev}) ->
             false;
         ({Key, {error, not_found}, Rev}) ->
