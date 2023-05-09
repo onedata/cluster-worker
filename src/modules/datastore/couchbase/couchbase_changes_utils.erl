@@ -19,6 +19,8 @@
 %% API
 -export([get_docs/4, get_upper_seq_num/3]).
 
+-define(INCLUDE_OVERRIDDEN, cluster_worker:get_env(include_overridden_in_changes, true)).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -44,13 +46,14 @@ get_docs(Changes, Bucket, FilterMutator, MaxSeqNum) ->
         end
     end, Changes),
     Ctx = #{bucket => Bucket},
+    IncludeOverridden = ?INCLUDE_OVERRIDDEN,
     {Keys, RevisionsAnsSequences} = lists:unzip(KeyRevisionsAndSequences),
     lists:filtermap(fun
         ({_Key, {ok, _, #document{ignore_in_changes = true}}, _Rev}) ->
             false;
         ({_Key, {ok, _, #document{revs = [Rev | _], seq = Seq} = Doc}, {Rev, Seq}}) when Seq =< MaxSeqNum ->
             {true, Doc};
-        ({_Key, {ok, _, #document{seq = DocSeq} = Doc}, {_Rev, Seq}}) when Seq =< MaxSeqNum andalso Seq < DocSeq ->
+        ({_Key, {ok, _, #document{seq = DocSeq} = Doc}, {_Rev, Seq}}) when Seq =< MaxSeqNum andalso Seq < DocSeq andalso IncludeOverridden ->
             % Use newer doc with old revision - otherwise constant modifications can prevent returning of doc
             {true, Doc#document{seq = Seq}};
         ({_Key, {ok, _, #document{}}, _Rev}) ->

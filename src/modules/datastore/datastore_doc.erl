@@ -271,6 +271,7 @@ fetch_deleted(#{throw_not_found := true} = Ctx, Key, Batch, _) ->
     end;
 fetch_deleted(Ctx, Key, Batch = undefined, false) ->
     {datastore_cache:get(Ctx, Key, true), Batch};
+% TODO VFS-10851 - next clause is probably fully covered by first clause
 fetch_deleted(Ctx, Key, Batch = undefined, true) ->
     case datastore_cache:get(Ctx, Key, true) of
         {error, not_found} -> {datastore_cache:get_remote(Ctx, Key), Batch};
