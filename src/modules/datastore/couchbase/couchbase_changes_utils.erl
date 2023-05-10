@@ -19,7 +19,10 @@
 %% API
 -export([get_docs/4, get_upper_seq_num/3]).
 
--define(INCLUDE_OVERRIDDEN, cluster_worker:get_env(include_overridden_in_changes, true)).
+% If INCLUDE_OVERRIDDEN is true, document is sent every time when sequence connected with document appear in stream.
+% If false, document is ignored if sequence is not newest sequence connected with doc.
+% Thus, true value may result in sending same version of document multiple times but documents will appear faster.
+-define(INCLUDE_OVERRIDDEN, cluster_worker:get_env(include_overridden_seqs_in_changes, true)).
 
 %%%===================================================================
 %%% API
