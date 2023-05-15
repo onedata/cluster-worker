@@ -54,6 +54,7 @@ handle(Request) ->
     Result :: ok | {error, Error},
     Error :: timeout | term().
 cleanup() ->
+    journal_logger:log("Initiating graceful stop procedures"),
     ?info("Stopping listeners..."),
     Success = lists:all(fun(Module) ->
         try erlang:apply(Module, stop, []) of

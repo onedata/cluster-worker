@@ -347,6 +347,9 @@ schedule_service_healthcheck(NodeOrPid, Strategy, Generation, ServiceName, Maste
 init([]) ->
     process_flag(trap_exit, true),
     try
+        journal_logger:add_delimiter(),
+        journal_logger:log("Application starting"),
+
         ?init_exometer_reporters(false),
         exometer_utils:init_exometer_counters(),
         catch ets:new(?HELPER_ETS, [named_table, public, set]),
@@ -679,7 +682,8 @@ handle_info(Request, State) ->
     | term().
 terminate(Reason, _State) ->
     % TODO VFS-6339 - Unregister node during normal stop not to start HA procedures
-    ?info("Shutting down ~w due to ~p", [?MODULE, Reason]).
+    journal_logger:log("Application gracefully stopped"),
+    ?info("Application gracefully stopped. Shutting down ~w due to ~p", [?MODULE, Reason]).
 
 
 %%--------------------------------------------------------------------
