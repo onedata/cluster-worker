@@ -24,6 +24,7 @@
     reset_request_queue_size/3, update_request_queue_size/4]).
 -export([init_counters/0, init_report/0]).
 -export([get_workers/1, get_workers/2]).
+-export([get_request_size/1]).
 
 -type mode() :: changes | read | write.
 -type ctx() :: couchbase_driver:ctx().
@@ -33,7 +34,7 @@
 -type view() :: couchbase_driver:view().
 -type view_opt() :: couchbase_driver:view_opt().
 -type request() :: {save, ctx(), key(), value()} |
-                   {get, key()} |
+                   {get, key() | [key()]} |
                    {delete, ctx(), key()} |
                    {get_counter, key(), cberl:arithmetic_default()} |
                    {update_counter, key(), cberl:arithmetic_delta(),
@@ -42,7 +43,7 @@
                    {get_design_doc, design()} |
                    {delete_design_doc, design()} |
                    {query_view, design(), view(), [view_opt()]}.
--type response() :: ok | {ok, term()} | {ok, term(), term()} | {error, term()}.
+-type response() :: ok | {ok, term()} | {ok, term(), term()} | {error, term()} | [{ok, term(), term()} | {error, term()}].
 -type future() :: {reference(), pid()}.
 
 -export_type([mode/0, request/0, response/0, future/0]).
@@ -105,7 +106,7 @@ post_async(Bucket, Mode, Request) ->
 post_async(Bucket, Mode, Request, ResponseTo) ->
     Ref = make_ref(),
     {Id, Worker} = get_worker(Bucket, Mode),
-    update_request_queue_size(Bucket, Mode, Id, 1),
+    update_request_queue_size(Bucket, Mode, Id, get_request_size(Request)),
     Worker ! {post, {Ref, ResponseTo, Request}},
     {Ref, Worker}.
 
@@ -277,6 +278,12 @@ get_workers(Bucket, Mode) ->
     lists:map(fun(Id) ->
         couchbase_pool_sup:get_worker(Bucket, Mode, Id)
     end, lists:seq(1, Size)).
+
+-spec get_request_size(request()) -> non_neg_integer().
+get_request_size({get, Keys}) when is_list(Keys) ->
+    length(Keys);
+get_request_size(_) ->
+    1.
 
 %%%===================================================================
 %%% Internal functions

@@ -35,7 +35,8 @@
 -type request() :: {reference(), pid(), couchbase_pool:request()}.
 -type batch_requests() :: #{save := [couchbase_crud:save_request()],
                             get := [couchbase_crud:get_request()],
-                            delete := [couchbase_crud:delete_request()]}.
+                            delete := [couchbase_crud:delete_request()],
+                            delta := non_neg_integer()}.
 -type batch_responses() :: #{save := [couchbase_crud:save_response()],
                              get := [couchbase_crud:get_response()],
                              delete := [couchbase_crud:delete_response()]}.
@@ -66,6 +67,7 @@
     {ok, pid()} | {error, term()}.
 start_link(Bucket, Mode, Id, DbHosts, Client) ->
     gen_server:start_link(?MODULE, [Bucket, Mode, Id, DbHosts, Client], []).
+
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -277,10 +279,9 @@ handle_requests(Requests, #state{} = State) ->
         connection = Connection
     } = State,
 
-    Delta = -length(Requests),
+    RequestsBatch = #{delta := Delta} = batch_requests(Requests),
     couchbase_pool:update_request_queue_size(Bucket, Mode, Id, Delta),
 
-    RequestsBatch = batch_requests(Requests),
     ResponsesBatch = handle_requests_batch(Connection, RequestsBatch),
     lists:foreach(fun({Ref, From, Request}) ->
         Response = try
@@ -301,12 +302,13 @@ handle_requests(Requests, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec batch_requests([request()]) -> batch_requests().
 batch_requests(Requests) ->
-    RequestsBatch2 = lists:foldl(fun({_Ref, _From, Request}, RequestsBatch) ->
-        batch_request(Request, RequestsBatch)
+    RequestsBatch2 = lists:foldl(fun({_Ref, _From, Request}, #{delta := Delta} = RequestsBatch) ->
+        batch_request(Request, RequestsBatch#{delta => Delta + couchbase_pool:get_request_size(Request)})
     end, #{
         save => [],
         get => gb_sets:new(),
-        delete => []
+        delete => [],
+        delta => 0
     }, Requests),
     RequestsBatch2#{get => gb_sets:to_list(maps:get(get, RequestsBatch2))}.
 
@@ -322,6 +324,8 @@ batch_request({save, Ctx, Key, Value}, RequestsBatch) ->
     #{save := SaveRequests} = RequestsBatch,
     SaveRequests2 = lists:keystore(Key, 2, SaveRequests, {Ctx, Key, Value}),
     RequestsBatch#{save => SaveRequests2};
+batch_request({get, Keys}, RequestsBatch) when is_list(Keys) ->
+    lists:foldl(fun(Key, RequestsBatchAcc) -> batch_request({get, Key}, RequestsBatchAcc) end, RequestsBatch, Keys);
 batch_request({get, Key}, #{get := GetRequests} = RequestsBatch) ->
     RequestsBatch#{get => gb_sets:add(Key, GetRequests)};
 batch_request({delete, Ctx, Key}, #{delete := RemoveRequests} = RequestsBatch) ->
@@ -465,6 +469,9 @@ wait(WaitFun, Num, FunName) ->
 handle_request(_Connection, {save, _Ctx, Key, _Value}, ResponsesBatch) ->
     SaveResponses = maps:get(save, ResponsesBatch),
     get_response(Key, SaveResponses);
+handle_request(_Connection, {get, Keys}, ResponsesBatch) when is_list(Keys) ->
+    GetResponses = maps:get(get, ResponsesBatch),
+    lists:map(fun(Key) -> get_response(Key, GetResponses) end, Keys);
 handle_request(_Connection, {get, Key}, ResponsesBatch) ->
     GetResponses = maps:get(get, ResponsesBatch),
     get_response(Key, GetResponses);

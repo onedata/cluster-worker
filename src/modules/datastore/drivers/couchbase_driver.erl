@@ -89,10 +89,10 @@ save_async(#{bucket := Bucket} = Ctx, Key, Value) ->
 %% Asynchronously retrieves value from CouchBase.
 %% @end
 %%--------------------------------------------------------------------
--spec get_async(ctx(), key()) -> couchbase_pool:future().
-get_async(#{bucket := Bucket} = Ctx, Key) ->
+-spec get_async(ctx(), key() | [key()]) -> couchbase_pool:future().
+get_async(#{bucket := Bucket} = Ctx, KeyOrKeys) ->
     Mode = maps:get(pool_mode, Ctx, read),
-    couchbase_pool:post_async(Bucket, Mode, {get, Key}).
+    couchbase_pool:post_async(Bucket, Mode, {get, KeyOrKeys}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -110,16 +110,12 @@ delete_async(#{bucket := Bucket} = Ctx, Key) ->
 %% Fails with a timeout error if awaited operation takes too long.
 %% @end
 %%--------------------------------------------------------------------
--spec wait(couchbase_pool:future()) -> couchbase_pool:response();
+-spec wait(couchbase_pool:future()) -> couchbase_pool:response() | [couchbase_pool:response()];
     ([couchbase_pool:future()]) -> [couchbase_pool:response()].
 wait(Futures) when is_list(Futures) ->
     [wait(Future) || Future <- Futures];
 wait(Future) ->
-    case couchbase_pool:wait(Future, true) of
-        {error, key_enoent} -> {error, not_found};
-        {error, key_eexists} -> {error, already_exists};
-        Other -> Other
-    end.
+    map_errors(couchbase_pool:wait(Future, true)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -147,10 +143,8 @@ save(Ctx, Key, Value) ->
 %%--------------------------------------------------------------------
 -spec get(ctx(), key()) -> {ok, cberl:cas(), value()} | {error, term()};
     (ctx(), [key()]) -> [{ok, cberl:cas(), value()} | {error, term()}].
-get(Ctx, Keys) when is_list(Keys) ->
-    wait([get_async(Ctx, Key) || Key <- Keys]);
-get(Ctx, Key) ->
-    hd(get(Ctx, [Key])).
+get(Ctx, KeyOrKeys) ->
+    wait(get_async(Ctx, KeyOrKeys)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -355,3 +349,15 @@ view_definition(ViewName, MapFunction, ReduceFunction) ->
         {<<"map">>, MapFunction},
         {<<"reduce">>, ReduceFunction}
     ]}}.
+
+%% @private
+-spec map_errors(couchbase_pool:response() | [couchbase_pool:response()]) ->
+    couchbase_pool:response() | [couchbase_pool:response()].
+map_errors({error, key_enoent}) ->
+    {error, not_found};
+map_errors({error, key_eexists}) ->
+    {error, already_exists};
+map_errors(Responses) when is_list(Responses) ->
+    lists:map(fun(Response) -> map_errors(Response) end, Responses);
+map_errors(Response) ->
+    Response.
