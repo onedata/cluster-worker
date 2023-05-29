@@ -303,7 +303,7 @@ handle_requests(Requests, #state{} = State) ->
 -spec batch_requests([request()]) -> batch_requests().
 batch_requests(Requests) ->
     RequestsBatch2 = lists:foldl(fun({_Ref, _From, Request}, #{delta := Delta} = RequestsBatch) ->
-        batch_request(Request, RequestsBatch#{delta => Delta + couchbase_pool:get_request_size(Request)})
+        batch_request(Request, RequestsBatch#{delta => Delta - couchbase_pool:get_request_size(Request)})
     end, #{
         save => [],
         get => gb_sets:new(),
