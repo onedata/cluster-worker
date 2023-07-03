@@ -25,6 +25,8 @@
 
 %% CRUD API
 -export([normalize_severity/1]).
+-export([severity_to_int/1, severity_from_int/1]).
+-export([should_log/2]).
 -export([append/3, browse/2]).
 -export([delete/1]).
 %% Iterator API
@@ -35,6 +37,7 @@
 
 -type entry_source() :: binary().    %% ?SYSTEM_AUDIT_LOG_ENTRY_SOURCE | ?USER_AUDIT_LOG_ENTRY_SOURCE
 -type entry_severity() :: binary().  %% see ?AUDIT_LOG_SEVERITY_LEVELS
+-type entry_severity_int() :: 0..7.  %% see ?AUDIT_LOG_SEVERITY_LEVELS
 
 %% entry() typespec (impossible to define in pure erlang due to binary keys):
 %% #{
@@ -58,7 +61,7 @@
 -opaque iterator() :: audit_log_browse_opts:index().
 
 -export_type([id/0]).
--export_type([entry_source/0, entry_severity/0, entry/0]).
+-export_type([entry_source/0, entry_severity/0, entry_severity_int/0, entry/0]).
 -export_type([append_request/0, browse_result/0]).
 -export_type([iterator/0]).
 
@@ -90,6 +93,33 @@ normalize_severity(ProvidedSeverity) ->
         true -> ProvidedSeverity;
         false -> ?INFO_AUDIT_LOG_SEVERITY
     end.
+
+
+-spec severity_to_int(entry_severity()) -> entry_severity_int().
+severity_to_int(?DEBUG_AUDIT_LOG_SEVERITY) -> ?DEBUG_AUDIT_LOG_SEVERITY_INT;
+severity_to_int(?INFO_AUDIT_LOG_SEVERITY) -> ?INFO_AUDIT_LOG_SEVERITY_INT;
+severity_to_int(?NOTICE_AUDIT_LOG_SEVERITY) -> ?NOTICE_AUDIT_LOG_SEVERITY_INT;
+severity_to_int(?WARNING_AUDIT_LOG_SEVERITY) -> ?WARNING_AUDIT_LOG_SEVERITY_INT;
+severity_to_int(?ERROR_AUDIT_LOG_SEVERITY) -> ?ERROR_AUDIT_LOG_SEVERITY_INT;
+severity_to_int(?CRITICAL_AUDIT_LOG_SEVERITY) -> ?CRITICAL_AUDIT_LOG_SEVERITY_INT;
+severity_to_int(?ALERT_AUDIT_LOG_SEVERITY) -> ?ALERT_AUDIT_LOG_SEVERITY_INT;
+severity_to_int(?EMERGENCY_AUDIT_LOG_SEVERITY) -> ?EMERGENCY_AUDIT_LOG_SEVERITY_INT.
+
+
+-spec severity_from_int(entry_severity_int()) -> entry_severity().
+severity_from_int(?DEBUG_AUDIT_LOG_SEVERITY_INT) -> ?DEBUG_AUDIT_LOG_SEVERITY;
+severity_from_int(?INFO_AUDIT_LOG_SEVERITY_INT) -> ?INFO_AUDIT_LOG_SEVERITY;
+severity_from_int(?NOTICE_AUDIT_LOG_SEVERITY_INT) -> ?NOTICE_AUDIT_LOG_SEVERITY;
+severity_from_int(?WARNING_AUDIT_LOG_SEVERITY_INT) -> ?WARNING_AUDIT_LOG_SEVERITY;
+severity_from_int(?ERROR_AUDIT_LOG_SEVERITY_INT) -> ?ERROR_AUDIT_LOG_SEVERITY;
+severity_from_int(?CRITICAL_AUDIT_LOG_SEVERITY_INT) -> ?CRITICAL_AUDIT_LOG_SEVERITY;
+severity_from_int(?ALERT_AUDIT_LOG_SEVERITY_INT) -> ?ALERT_AUDIT_LOG_SEVERITY;
+severity_from_int(?EMERGENCY_AUDIT_LOG_SEVERITY_INT) -> ?EMERGENCY_AUDIT_LOG_SEVERITY.
+
+
+-spec should_log(entry_severity_int(), entry_severity_int()) -> boolean().
+should_log(LogLevel, LogSeverityInt) ->
+    LogSeverityInt =< LogLevel.
 
 
 -spec append(id(), infinite_log:log_opts(), append_request()) -> ok | {error, term()}.
