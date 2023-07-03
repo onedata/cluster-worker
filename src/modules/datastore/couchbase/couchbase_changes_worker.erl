@@ -123,7 +123,8 @@ init([Bucket, Scope, Callback, PropagationSince]) ->
             Seq
     end,
 
-    ?info("~p init with seq: ~p, seq_safe ~p, propagation since ~p", [?MODULE, Seq3, SeqSafe, PropagationSince]),
+    ?info("~p for scope ~p init with seq: ~p, seq_safe ~p, propagation since ~p",
+        [?MODULE, Scope, Seq3, SeqSafe, PropagationSince]),
 
     {ok, #state{
         bucket = Bucket,

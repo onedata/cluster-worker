@@ -324,8 +324,8 @@ batch_request({save, Ctx, Key, Value}, RequestsBatch) ->
     #{save := SaveRequests} = RequestsBatch,
     SaveRequests2 = lists:keystore(Key, 2, SaveRequests, {Ctx, Key, Value}),
     RequestsBatch#{save => SaveRequests2};
-batch_request({get, Keys}, RequestsBatch) when is_list(Keys) ->
-    lists:foldl(fun(Key, RequestsBatchAcc) -> batch_request({get, Key}, RequestsBatchAcc) end, RequestsBatch, Keys);
+batch_request({get, Keys}, #{get := GetRequests} = RequestsBatch) when is_list(Keys) ->
+    RequestsBatch#{get => gb_sets:union(GetRequests, gb_sets:from_list(Keys))};
 batch_request({get, Key}, #{get := GetRequests} = RequestsBatch) ->
     RequestsBatch#{get => gb_sets:add(Key, GetRequests)};
 batch_request({delete, Ctx, Key}, #{delete := RemoveRequests} = RequestsBatch) ->
