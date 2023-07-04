@@ -31,6 +31,7 @@
     save_should_return_already_exists_error/1,
     get_should_return_doc/1,
     get_should_return_missing_error/1,
+    get_should_return_docs_and_error/1,
     update_should_change_doc/1,
     delete_should_remove_doc/1,
     delete_should_return_missing_error/1,
@@ -78,6 +79,7 @@ all() ->
         save_should_return_already_exists_error,
         get_should_return_doc,
         get_should_return_missing_error,
+        get_should_return_docs_and_error,
         update_should_change_doc,
         delete_should_remove_doc,
         delete_should_return_missing_error,
@@ -400,6 +402,14 @@ get_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertEqual({error, not_found}, rpc:call(Worker, couchbase_driver, get,
         [?CTX, ?KEY]
+    )).
+
+get_should_return_docs_and_error(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    {ok, Cas, Doc} = rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(1), ?DOC(1)]),
+    {ok, Cas2, Doc2} = rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(2), ?DOC(2)]),
+    ?assertEqual([{ok, Cas, Doc}, {error, not_found}, {ok, Cas2, Doc2}], rpc:call(Worker, couchbase_driver, get,
+        [?CTX, [?KEY(1), ?KEY(3), ?KEY(2)]]
     )).
 
 update_should_change_doc(Config) ->

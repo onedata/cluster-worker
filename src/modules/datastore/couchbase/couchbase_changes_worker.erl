@@ -123,7 +123,8 @@ init([Bucket, Scope, Callback, PropagationSince]) ->
             Seq
     end,
 
-    ?info("~p init with seq: ~p, seq_safe ~p, propagation since ~p", [?MODULE, Seq3, SeqSafe, PropagationSince]),
+    ?info("~p for scope ~p init with seq: ~p, seq_safe ~p, propagation since ~p",
+        [?MODULE, Scope, Seq3, SeqSafe, PropagationSince]),
 
     {ok, #state{
         bucket = Bucket,
@@ -464,7 +465,7 @@ stream_docs(Changes, Bucket, SeqSafe, #state{callback = Callback}) ->
 propagate_changes(Since, #state{seq_safe = SeqSafe, interval = Interval,
     bucket = Bucket, scope = Scope} = State) ->
     BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_changes_stream_batch_size, 1000),
+        couchbase_changes_stream_batch_size, 5000),
 
     QueryAns = couchbase_driver:query_view(#{bucket => Bucket},
         couchbase_changes:design(), couchbase_changes:view(), [
