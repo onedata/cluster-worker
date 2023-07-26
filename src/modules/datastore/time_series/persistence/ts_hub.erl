@@ -133,7 +133,7 @@ get_record_struct(2) ->
     {record, [DataRecordStruct]} = ts_metric_data_node:get_record_struct(1),
     {record, [
         {time_series_collection_heads, #{string => #{string => {record, [
-            {config, {custom, string, {persistent_record, encode, decode, metric_config}}}, % changed field
+            {config, {custom, string, {persistent_record, to_string, from_string, metric_config}}}, % changed field
             {splitting_strategy, {record, [
                 {max_docs_count, integer},
                 {max_windows_in_head_doc, integer},
@@ -146,7 +146,7 @@ get_record_struct(3) ->
     {record, [{value, DataRecordStruct}]} = ts_metric_data_node:get_record_struct(2), % use version 2 to improve encoding/decoding
     {record, [
         {time_series_collection_heads, #{string => #{string => {record, [
-            {config, {custom, string, {persistent_record, encode, decode, metric_config}}},
+            {config, {custom, string, {persistent_record, to_string, from_string, metric_config}}},
             {splitting_strategy, {record, [
                 {max_docs_count, integer},
                 {max_windows_in_head_doc, integer},
