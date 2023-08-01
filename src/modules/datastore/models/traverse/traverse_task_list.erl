@@ -54,7 +54,7 @@
 % Definitions used to list tasks' jobs (used for fair load balancing between tasks)
 -define(JOB_TREE(TaskID), <<"JOB_TREE_", TaskID/binary>>).
 % Other definitions
--define(LINK_NAME_ID_PART_LENGTH, 6).
+-define(OBSOLETE_LINK_NAME_ID_PART_LENGTH, 6).
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
 
 -type forest_key() :: datastore:key().
@@ -331,21 +331,25 @@ get_and_delete_first_task_job_link(Pool, CallbackModule, Node, TaskId) ->
 -spec add_link_with_timestamp(traverse_task:ctx(), forest_key(), tree(),
     traverse:id(), traverse:timestamp()) -> ok.
 add_link_with_timestamp(Ctx, Key, Tree, Id, Timestamp) ->
-    [{ok, _}] = datastore_model:add_links(Ctx,
-        Key, Tree, [{link_key(Id, Timestamp), Id}]),
+    [{ok, _}] = datastore_model:add_links(Ctx, Key, Tree, [{link_key(Id, Timestamp), Id}]),
     ok.
 
 -spec delete_link_with_timestamp(traverse_task:ctx(), forest_key(), tree(),
     traverse:id(), traverse:timestamp()) -> ok.
 delete_link_with_timestamp(Ctx, Key, Tree, Id, Timestamp) ->
-    [ok] = datastore_model:delete_links(Ctx,
-        Key, Tree, [link_key(Id, Timestamp)]),
+    [ok, ok] = datastore_model:delete_links(Ctx,
+        Key, Tree, [link_key(Id, Timestamp), obsolete_link_key(Id, Timestamp)]),
     ok.
 
 -spec link_key(traverse:id(), traverse:timestamp()) -> link_key().
 link_key(Id, Timestamp) ->
     TimestampPart = (integer_to_binary(?EPOCH_INFINITY - Timestamp)),
-    Length = min(byte_size(Id), ?LINK_NAME_ID_PART_LENGTH),
+    <<TimestampPart/binary, Id/binary>>.
+
+-spec obsolete_link_key(traverse:id(), traverse:timestamp()) -> link_key().
+obsolete_link_key(Id, Timestamp) ->
+    TimestampPart = (integer_to_binary(?EPOCH_INFINITY - Timestamp)),
+    Length = min(byte_size(Id), ?OBSOLETE_LINK_NAME_ID_PART_LENGTH),
     IdPart = binary:part(Id, 0, Length),
     <<TimestampPart/binary, IdPart/binary>>.
 
