@@ -60,6 +60,7 @@ from_json(Data = #{<<"mode">> := <<"slice">>}) ->
         },
         optional => #{
             <<"startTimestamp">> => {integer, {not_lower_than, 0}},
+            <<"stopTimestamp">> => {integer, {not_lower_than, 0}},
             <<"windowLimit">> => {integer, {between, 1, ?MAX_WINDOW_LIMIT}},
             <<"extendedInfo">> => {boolean, any}
         }
@@ -69,6 +70,7 @@ from_json(Data = #{<<"mode">> := <<"slice">>}) ->
     #time_series_slice_get_request{
         layout = maps:get(<<"layout">>, SanitizedData),
         start_timestamp = maps:get(<<"startTimestamp">>, SanitizedData, undefined),
+        stop_timestamp = maps:get(<<"stopTimestamp">>, SanitizedData, undefined),
         window_limit = maps:get(<<"windowLimit">>, SanitizedData, ?DEFAULT_WINDOW_LIMIT),
         extended_info = maps:get(<<"extendedInfo">>, SanitizedData, false)
     };

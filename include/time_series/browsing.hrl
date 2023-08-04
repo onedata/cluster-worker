@@ -18,6 +18,7 @@
 -record(time_series_slice_get_request, {
     layout :: time_series_collection:layout(),
     start_timestamp :: undefined | ts_browse_request:timestamp(),
+    stop_timestamp :: undefined | ts_browse_request:timestamp(),
     window_limit :: undefined | ts_browse_request:window_limit(),
     extended_info = false :: boolean()
 }).

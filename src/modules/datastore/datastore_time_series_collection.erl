@@ -102,12 +102,16 @@ browse(Ctx, Id, #time_series_layout_get_request{}) ->
 browse(Ctx, Id, #time_series_slice_get_request{} = SliceReq) ->
     #time_series_slice_get_request{
         layout = SliceLayout, 
-        start_timestamp = StartTimestamp, 
+        start_timestamp = StartTimestamp,
+        stop_timestamp = StopTimestamp,
         window_limit = WindowLimit,
         extended_info = ExtendedInfo
     } = SliceReq,
     Opts = maps_utils:remove_undefined(#{
-        start_timestamp => StartTimestamp, window_limit => WindowLimit, extended_info => ExtendedInfo
+        start_timestamp => StartTimestamp,
+        stop_timestamp => StopTimestamp,
+        window_limit => WindowLimit,
+        extended_info => ExtendedInfo
     }),
     case get_slice(Ctx, Id, SliceLayout, Opts) of
         {ok, Slice} -> {ok, #time_series_slice_get_result{slice = Slice}};
