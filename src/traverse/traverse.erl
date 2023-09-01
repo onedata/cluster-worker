@@ -548,12 +548,12 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
         catch
             E2:R2:Stacktrace2 ->
                 JobDetails = to_string(CallbackModule, Job),
-                ?error_exception(?autoformat([JobDetails, TaskId, CallbackModule]), E2, R2, Stacktrace2)
+                ?error_exception(?autoformat([TaskId, CallbackModule, JobDetails]), E2, R2, Stacktrace2)
         end
     catch
         E1:R1:Stacktrace1 ->
             MasterJobDetails = to_string(CallbackModule, Job),
-            ?error_exception(?autoformat([MasterJobDetails, TaskId, CallbackModule]), E1, R1, Stacktrace1),
+            ?error_exception(?autoformat([TaskId, CallbackModule, MasterJobDetails]), E1, R1, Stacktrace1),
             ErrorDescription = #{
                 master_jobs_failed => 1
             },
@@ -567,7 +567,7 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                 maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskId, Executor, ErrorDescription2, Canceled3)
             catch
                 E3:R3:Stacktrace3 ->
-                    ?error_exception(?autoformat([MasterJobDetails, TaskId, CallbackModule]), E3, R3, Stacktrace3)
+                    ?error_exception(?autoformat([TaskId, CallbackModule, MasterJobDetails]), E3, R3, Stacktrace3)
             end
     end,
     ok.
@@ -599,7 +599,7 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskId, Job) ->
     catch
         E:R:Stacktrace ->
             SlaveJobDetails = to_string(CallbackModule, Job),
-            ?error_exception(?autoformat([SlaveJobDetails, TaskId, CallbackModule]), E, R, Stacktrace),
+            ?error_exception(?autoformat([TaskId, CallbackModule, SlaveJobDetails]), E, R, Stacktrace),
             error
     end.
 
