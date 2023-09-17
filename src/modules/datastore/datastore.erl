@@ -34,7 +34,6 @@
                                                    % operations that triggered link's adding/deletion
                                                    % TOOD VFS-5971 - does not support save and update with default
                  local_fold => boolean(), % Fold links are added using local routing
-                 local_fold_node => node(), % Node used to generate key for local fold
                  sync_enabled => boolean(),
                  sync_change => boolean(), % should set to 'true' for save
                                            % of remote change

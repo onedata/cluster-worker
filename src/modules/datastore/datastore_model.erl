@@ -305,7 +305,7 @@ fold_keys(_Ctx, _Fun, _Acc) ->
 local_fold_all_nodes(Ctx = #{local_fold := true}, Fun, InitialAcc) ->
     Nodes = consistent_hashing:get_all_nodes(),
     lists:foldl(fun
-        (Node, {ok, Acc}) -> datastore_model:fold(Ctx#{local_fold_node => Node}, Fun, Acc);
+        (Node, {ok, Acc}) -> rpc:call(Node, datastore_model, fold, [Ctx, Fun, Acc]);
         (_Node, Error) -> Error
     end, {ok, InitialAcc}, Nodes);
 local_fold_all_nodes(_Ctx, _Fun, _Acc) ->
@@ -444,8 +444,7 @@ fold_memory_keys(Fun, Acc0) ->
 get_fold_ctx_and_key(#{model := Model} = Ctx) ->
     case Ctx of
         #{local_fold := true} ->
-            Node = maps:get(local_fold_node, Ctx, node()),
-            NodeModelKey = <<(atom_to_binary(Model, utf8))/binary, "###", (atom_to_binary(Node, utf8))/binary>>,
+            NodeModelKey = <<(atom_to_binary(Model, utf8))/binary, "###", (atom_to_binary(node(), utf8))/binary>>,
             {Ctx#{routing => local}, NodeModelKey};
         _ ->
             {Ctx, atom_to_binary(Model, utf8)}
