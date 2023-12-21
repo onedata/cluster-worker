@@ -754,10 +754,11 @@ cluster_init_step(?START_DEFAULT_WORKERS) ->
     init_workers(cluster_worker_modules()),
     ?info("Default workers started successfully"),
     ok;
-cluster_init_step(?PREPARE_FOR_UPGRADE) ->
-    ?info("Preparing cluster for upgrade..."),
-    ?CALL_PLUGIN(before_cluster_upgrade, []),
-    ?info("The cluster is ready for upgrade"),
+cluster_init_step(?START_CUSTOM_WORKERS) ->
+    ?info("Starting custom workers..."),
+    Workers = ?CALL_PLUGIN(custom_workers, []),
+    init_workers(Workers),
+    ?info("Custom workers started successfully"),
     ok;
 cluster_init_step(?UPGRADE_CLUSTER) ->
     % this step internally requires calls to node manager, hence it is processed asynchronously
@@ -779,12 +780,6 @@ cluster_init_step(?UPGRADE_CLUSTER) ->
         false ->
             ok
     end;
-cluster_init_step(?START_CUSTOM_WORKERS) ->
-    ?info("Starting custom workers..."),
-    Workers = ?CALL_PLUGIN(custom_workers, []),
-    init_workers(Workers),
-    ?info("Custom workers started successfully"),
-    ok;
 cluster_init_step(?START_LISTENERS) ->
     gen_server2:cast(?NODE_MANAGER_NAME, report_db_and_workers_ready),
     % this step internally requires calls to node manager, hence it is processed asynchronously
@@ -1418,7 +1413,6 @@ initialize_recovery() ->
 -spec finalize_recovery() -> ok.
 finalize_recovery() ->
     ?info("Starting phase 2/2 of node recovery"),
-    cluster_init_step(?PREPARE_FOR_UPGRADE),
     cluster_init_step(?START_CUSTOM_WORKERS),
     cluster_init_step(?START_LISTENERS),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_FINALIZED(node())),
