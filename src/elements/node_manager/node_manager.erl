@@ -754,6 +754,11 @@ cluster_init_step(?START_DEFAULT_WORKERS) ->
     init_workers(cluster_worker_modules()),
     ?info("Default workers started successfully"),
     ok;
+cluster_init_step(?PREPARE_FOR_UPGRADE) ->
+    ?info("Preparing cluster for upgrade..."),
+    ?CALL_PLUGIN(before_cluster_upgrade, []),
+    ?info("The cluster is ready for upgrade"),
+    ok;
 cluster_init_step(?START_CUSTOM_WORKERS) ->
     ?info("Starting custom workers..."),
     Workers = ?CALL_PLUGIN(custom_workers, []),
@@ -1413,6 +1418,7 @@ initialize_recovery() ->
 -spec finalize_recovery() -> ok.
 finalize_recovery() ->
     ?info("Starting phase 2/2 of node recovery"),
+    cluster_init_step(?PREPARE_FOR_UPGRADE),
     cluster_init_step(?START_CUSTOM_WORKERS),
     cluster_init_step(?START_LISTENERS),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_FINALIZED(node())),
