@@ -663,6 +663,10 @@ handle_info({nodedown, Node}, State) ->
             {stop, normal, State}
     end;
 
+handle_info({bounded_cache_timer, Msg}, State) ->
+    bounded_cache:check_cache_size(Msg),
+    {noreply, State};
+
 handle_info(Request, State) ->
     ?CALL_PLUGIN(handle_info, [Request, State]).
 
