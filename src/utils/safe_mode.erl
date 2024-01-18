@@ -8,8 +8,9 @@
 %%% @doc
 %%% This module provides functions to manipulate safe mode in the cluster.
 %%% There are 3 possible states of safe mode:
-%%%     * awaiting_cluster_init - implicit state before cluster is ready and fully operational
-%%%       (it is possible to whitelist PIDs that are excluded from safe mode limitations);
+%%%     * awaiting_cluster_init - implicit state (safe mode is implicitly enabled),
+%%%         before the cluster is ready and fully operational
+%%%         (it is possible to whitelist PIDs that are excluded from safe mode limitations);
 %%%     * disabled - safe mode is disabled;
 %%%     * enabled_manually - manually activated by cluster admin.
 %%% @end
@@ -22,7 +23,7 @@
 -export([should_enforce/0, should_enforce_for_pid/1, whitelist_pid/1]).
 
 % RPC API
--export([enable_manually_on_single_node/0, disable_manually_on_single_node/0]).
+-export([enable_manually_on_current_node/0, disable_manually_on_current_node/0]).
 
 -define(SAFE_MODE_ENV, safe_mode).
 -define(SAFE_MODE_WHITELIST_CACHE, safe_mode_whitelist_cache).
@@ -39,19 +40,19 @@
 
 -spec enable_manually() -> ok | error.
 enable_manually() ->
-    rpc_all_nodes(enable_manually_on_single_node).
+    rpc_all_nodes(enable_manually_on_current_node).
 
 
 -spec disable_manually() -> ok.
 disable_manually() ->
-    rpc_all_nodes(disable_manually_on_single_node).
+    rpc_all_nodes(disable_manually_on_current_node).
 
 
 -spec report_node_initialized() -> ok.
 report_node_initialized() ->
     case get_state() of
         ?AWAITING_CLUSTER_INIT_STATE ->
-            disable_manually_on_single_node();
+            disable_on_current_node();
         _ ->
             ok
     end.
@@ -84,20 +85,19 @@ whitelist_pid(Pid) ->
 %%% RPC API
 %%%===================================================================
 
--spec enable_manually_on_single_node() -> ok | error.
-enable_manually_on_single_node() ->
+-spec enable_manually_on_current_node() -> ok.
+enable_manually_on_current_node() ->
+    cluster_worker:set_env(?SAFE_MODE_ENV, ?MANUALLY_ENABLED_STATE).
+
+
+-spec disable_manually_on_current_node() -> ok | error.
+disable_manually_on_current_node() ->
     case get_state() of
         ?AWAITING_CLUSTER_INIT_STATE ->
             error;
         _ ->
-            cluster_worker:set_env(?SAFE_MODE_ENV, ?MANUALLY_ENABLED_STATE)
+            disable_on_current_node()
     end.
-
-
--spec disable_manually_on_single_node() -> ok.
-disable_manually_on_single_node() ->
-    node_cache:clear(?SAFE_MODE_WHITELIST_CACHE),
-    cluster_worker:set_env(?SAFE_MODE_ENV, ?DISABLED_STATE).
 
 
 %%%===================================================================
@@ -116,3 +116,10 @@ rpc_all_nodes(Function) ->
     lists:foreach(fun(Node) ->
         ok = rpc:call(Node, ?MODULE, Function, [])
     end, consistent_hashing:get_all_nodes()).
+
+
+%% @private
+-spec disable_on_current_node() -> ok.
+disable_on_current_node() ->
+    node_cache:clear(?SAFE_MODE_WHITELIST_CACHE),
+    cluster_worker:set_env(?SAFE_MODE_ENV, ?DISABLED_STATE).

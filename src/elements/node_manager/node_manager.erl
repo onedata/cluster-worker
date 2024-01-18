@@ -663,6 +663,8 @@ handle_info({nodedown, Node}, State) ->
             {stop, normal, State}
     end;
 
+% as node manager is holding bounded cache etses it is also responsible for periodical check
+% of their sizes and cleanup if necessary.
 handle_info({bounded_cache_timer, Msg}, State) ->
     bounded_cache:check_cache_size(Msg),
     {noreply, State};
@@ -790,6 +792,7 @@ cluster_init_step(?UPGRADE_CLUSTER) ->
             ok
     end;
 cluster_init_step(?START_LISTENERS) ->
+    safe_mode:report_node_initialized(),
     gen_server2:cast(?NODE_MANAGER_NAME, report_db_and_workers_ready),
     % this step internally requires calls to node manager, hence it is processed asynchronously
     spawn(fun() ->
