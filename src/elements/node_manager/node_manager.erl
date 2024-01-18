@@ -760,16 +760,21 @@ cluster_init_step(?START_DEFAULT_WORKERS) ->
     init_workers(cluster_worker_modules()),
     ?info("Default workers started successfully"),
     ok;
-cluster_init_step(?PREPARE_FOR_UPGRADE) ->
-    ?info("Preparing cluster for upgrade..."),
-    ?CALL_PLUGIN(before_cluster_upgrade, []),
-    ?info("The cluster is ready for upgrade"),
+cluster_init_step(?PREPARE_FOR_CUSTOM_WORKERS) ->
+    ?info("Preparing cluster for custom workers start..."),
+    ?CALL_PLUGIN(before_custom_workers_start, []),
+    ?info("The custom workers are ready for start"),
     ok;
 cluster_init_step(?START_CUSTOM_WORKERS) ->
     ?info("Starting custom workers..."),
     Workers = ?CALL_PLUGIN(custom_workers, []),
     init_workers(Workers),
     ?info("Custom workers started successfully"),
+    ok;
+cluster_init_step(?PREPARE_FOR_UPGRADE) ->
+    ?info("Preparing cluster for upgrade..."),
+    ?CALL_PLUGIN(before_cluster_upgrade, []),
+    ?info("The cluster is ready for upgrade"),
     ok;
 cluster_init_step(?UPGRADE_CLUSTER) ->
     % this step internally requires calls to node manager, hence it is processed asynchronously

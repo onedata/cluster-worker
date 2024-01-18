@@ -22,9 +22,10 @@
 -export([app_name/0, cm_nodes/0, db_nodes/0]).
 -export([renamed_models/0]).
 -export([before_init/0]).
+-export([before_custom_workers_start/0]).
+-export([custom_workers/0]).
 -export([before_cluster_upgrade/0]).
 -export([upgrade_cluster/1]).
--export([custom_workers/0]).
 -export([before_listeners_start/0, after_listeners_stop/0]).
 -export([listeners/0]).
 -export([handle_call/3, handle_cast/2, handle_info/2, code_change/3]).
@@ -113,6 +114,24 @@ before_init() ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Callback executed before custom workers start so that any required preparation
+%% can be done.
+%% @end
+%%--------------------------------------------------------------------
+-spec before_custom_workers_start() -> ok.
+before_custom_workers_start() -> ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% List of workers modules with configs to be loaded by node_manager.
+%% @end
+%%--------------------------------------------------------------------
+-spec custom_workers() -> [{module(), list()}
+| {module(), list(), [atom()]} | {singleton, module(), list()}].
+custom_workers() -> [].
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Callback executed before cluster upgrade so that any required preparation
 %% can be done.
 %% @end
@@ -130,15 +149,6 @@ before_cluster_upgrade() -> ok.
     {ok, node_manager:cluster_generation()}.
 upgrade_cluster(CurrentGeneration) ->
     {ok, CurrentGeneration + 1}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% List of workers modules with configs to be loaded by node_manager.
-%% @end
-%%--------------------------------------------------------------------
--spec custom_workers() -> [{module(), list()}
-| {module(), list(), [atom()]} | {singleton, module(), list()}].
-custom_workers() -> [].
 
 %%--------------------------------------------------------------------
 %% @doc
