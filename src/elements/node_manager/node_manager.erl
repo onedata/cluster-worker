@@ -763,7 +763,7 @@ cluster_init_step(?START_DEFAULT_WORKERS) ->
 cluster_init_step(?PREPARE_FOR_CUSTOM_WORKERS) ->
     ?info("Preparing cluster for custom workers start..."),
     ?CALL_PLUGIN(before_custom_workers_start, []),
-    ?info("The custom workers are ready for start"),
+    ?info("The cluster is ready for starting custom workers"),
     ok;
 cluster_init_step(?START_CUSTOM_WORKERS) ->
     ?info("Starting custom workers..."),

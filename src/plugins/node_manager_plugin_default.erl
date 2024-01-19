@@ -116,6 +116,7 @@ before_init() ->
 %% @doc
 %% Callback executed before custom workers start so that any required preparation
 %% can be done.
+%% This callback is executed on all cluster nodes.
 %% @end
 %%--------------------------------------------------------------------
 -spec before_custom_workers_start() -> ok.
@@ -134,6 +135,7 @@ custom_workers() -> [].
 %% @doc
 %% Callback executed before cluster upgrade so that any required preparation
 %% can be done.
+%% This callback is executed on all cluster nodes.
 %% @end
 %%--------------------------------------------------------------------
 -spec before_cluster_upgrade() -> ok.
