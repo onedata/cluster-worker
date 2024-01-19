@@ -663,6 +663,12 @@ handle_info({nodedown, Node}, State) ->
             {stop, normal, State}
     end;
 
+% as node manager is holding bounded cache etses it is also responsible for periodical check
+% of their sizes and cleanup if necessary.
+handle_info({bounded_cache_timer, Msg}, State) ->
+    bounded_cache:check_cache_size(Msg),
+    {noreply, State};
+
 handle_info(Request, State) ->
     ?CALL_PLUGIN(handle_info, [Request, State]).
 
@@ -754,6 +760,17 @@ cluster_init_step(?START_DEFAULT_WORKERS) ->
     init_workers(cluster_worker_modules()),
     ?info("Default workers started successfully"),
     ok;
+cluster_init_step(?PREPARE_FOR_CUSTOM_WORKERS) ->
+    ?info("Preparing cluster for custom workers start..."),
+    ?CALL_PLUGIN(before_custom_workers_start, []),
+    ?info("The cluster is ready for starting custom workers"),
+    ok;
+cluster_init_step(?START_CUSTOM_WORKERS) ->
+    ?info("Starting custom workers..."),
+    Workers = ?CALL_PLUGIN(custom_workers, []),
+    init_workers(Workers),
+    ?info("Custom workers started successfully"),
+    ok;
 cluster_init_step(?PREPARE_FOR_UPGRADE) ->
     ?info("Preparing cluster for upgrade..."),
     ?CALL_PLUGIN(before_cluster_upgrade, []),
@@ -779,13 +796,8 @@ cluster_init_step(?UPGRADE_CLUSTER) ->
         false ->
             ok
     end;
-cluster_init_step(?START_CUSTOM_WORKERS) ->
-    ?info("Starting custom workers..."),
-    Workers = ?CALL_PLUGIN(custom_workers, []),
-    init_workers(Workers),
-    ?info("Custom workers started successfully"),
-    ok;
 cluster_init_step(?START_LISTENERS) ->
+    safe_mode:report_node_initialized(),
     gen_server2:cast(?NODE_MANAGER_NAME, report_db_and_workers_ready),
     % this step internally requires calls to node manager, hence it is processed asynchronously
     spawn(fun() ->
