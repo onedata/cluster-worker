@@ -19,7 +19,7 @@
 
 -export([cluster_generations/0]).
 -export([oldest_upgradable_cluster_generation/0]).
--export([app_name/0, cm_nodes/0, db_nodes/0]).
+-export([app_name_and_version/0, cm_nodes/0, db_nodes/0]).
 -export([renamed_models/0]).
 -export([before_init/0]).
 -export([before_custom_workers_start/0]).
@@ -66,12 +66,12 @@ oldest_upgradable_cluster_generation() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the name of the application that bases on cluster worker.
+%% Returns a human-readable name and version of the application that bases on cluster worker.
 %% @end
 %%--------------------------------------------------------------------
--spec app_name() -> {ok, Name :: atom()}.
-app_name() ->
-    {ok, cluster_worker}.
+-spec app_name_and_version() -> string().
+app_name_and_version() ->
+    "cluster-worker implementation, unknown version".
 
 %%--------------------------------------------------------------------
 %% @doc
