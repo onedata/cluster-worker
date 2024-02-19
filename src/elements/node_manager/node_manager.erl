@@ -348,8 +348,8 @@ init([]) ->
     process_flag(trap_exit, true),
     try
         journal_logger:add_delimiter(),
-        journal_logger:log("Application starting: " ++ ?CALL_PLUGIN(before_init, [app_name_and_version])),
-        ?notice("Application starting: " ++ ?CALL_PLUGIN(before_init, [app_name_and_version])),
+        journal_logger:log("Application starting: " ++ ?CALL_PLUGIN(app_name_and_version, [])),
+        ?notice("Application starting: " ++ ?CALL_PLUGIN(app_name_and_version, [])),
 
         ?init_exometer_reporters(false),
         exometer_utils:init_exometer_counters(),
