@@ -348,8 +348,8 @@ init([]) ->
     process_flag(trap_exit, true),
     try
         journal_logger:add_delimiter(),
-        journal_logger:log("Application starting: " ++ ?CALL_PLUGIN(app_name_and_version, [])),
-        ?notice("Application starting: " ++ ?CALL_PLUGIN(app_name_and_version, [])),
+        journal_logger:log("Application starting: " ++ human_readable_app_description()),
+        ?notice("Application starting: " ++ human_readable_app_description()),
 
         ?init_exometer_reporters(false),
         exometer_utils:init_exometer_counters(),
@@ -1415,6 +1415,16 @@ get_current_cluster_generation() ->
 report_step_result(Step, Result) ->
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {cluster_init_step_report, node(), Step, Result}).
 
+
+%% @private
+-spec human_readable_app_description() -> string().
+human_readable_app_description() ->
+    str_utils:format("~s v. ~s (build ~s)", [
+        ?CALL_PLUGIN(app_name, []),
+        ?CALL_PLUGIN(release_version, []),
+        ?CALL_PLUGIN(build_version, [])
+    ]).
+
 %%%===================================================================
 %%% Node recovery handling
 %%%===================================================================
@@ -1461,3 +1471,5 @@ is_cluster_healthy() ->
         ok -> true;
         _ -> false
     end.
+
+
