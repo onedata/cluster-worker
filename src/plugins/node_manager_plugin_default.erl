@@ -19,7 +19,8 @@
 
 -export([cluster_generations/0]).
 -export([oldest_upgradable_cluster_generation/0]).
--export([app_name/0, cm_nodes/0, db_nodes/0]).
+-export([app_name/0, release_version/0, build_version/0]).
+-export([cm_nodes/0, db_nodes/0]).
 -export([renamed_models/0]).
 -export([before_init/0]).
 -export([before_custom_workers_start/0]).
@@ -66,12 +67,30 @@ oldest_upgradable_cluster_generation() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the name of the application that bases on cluster worker.
+%% Overrides {@link node_manager_plugin_default:app_name/0}.
 %% @end
 %%--------------------------------------------------------------------
--spec app_name() -> {ok, Name :: atom()}.
+-spec app_name() -> atom().
 app_name() ->
-    {ok, cluster_worker}.
+    cluster_worker.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Overrides {@link node_manager_plugin_default:release_version/0}.
+%% @end
+%%--------------------------------------------------------------------
+-spec release_version() -> string() | binary().
+release_version() ->
+    "unknown".
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Overrides {@link node_manager_plugin_default:app_name/0}.
+%% @end
+%%--------------------------------------------------------------------
+-spec build_version() -> string() | binary().
+build_version() ->
+    "unknown".
 
 %%--------------------------------------------------------------------
 %% @doc
