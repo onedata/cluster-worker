@@ -1471,5 +1471,3 @@ is_cluster_healthy() ->
         ok -> true;
         _ -> false
     end.
-
-
