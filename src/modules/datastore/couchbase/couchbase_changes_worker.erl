@@ -448,7 +448,7 @@ check_reconnect_retry() ->
 stream_docs(_Changes, _Bucket, _SeqSafe, #state{callback = undefined}) ->
     ok;
 stream_docs(Changes, Bucket, SeqSafe, #state{callback = Callback}) ->
-    case couchbase_changes_utils:get_docs(Changes, Bucket, <<>>, SeqSafe) of
+    case couchbase_changes_utils:get_docs(Changes, Bucket, <<>>, SeqSafe, false) of
         [] -> ok;
         Docs ->
             Callback({ok, Docs}),
