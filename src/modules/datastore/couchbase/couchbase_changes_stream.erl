@@ -37,7 +37,7 @@
     except_mutator :: datastore_doc:mutator(),
     batch_size :: non_neg_integer(),
     interval :: non_neg_integer(),
-    ignored_policy = skip_ignored :: boolean(),
+    ignored_policy = skip_ignored :: couchbase_changes:ignored_policy(),
     linked_processes :: [pid()]
 }).
 
