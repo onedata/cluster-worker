@@ -19,7 +19,7 @@
 -export([design/0, view/0]).
 -export([get_seq_key/1, get_seq_safe_key/1, get_change_key/2]).
 
--type callback() :: fun(({ok, [datastore:doc() | {ignored, datastore:doc()}] | end_of_stream}
+-type callback() :: fun(({ok, [{change | ignored, datastore:doc()}] | end_of_stream}
                     | {error, since(), Reason :: term()}) -> any()).
 -type seq() :: non_neg_integer() | null.
 -type timestamp() :: time:seconds() | null.
@@ -29,8 +29,9 @@
 -type option() :: {since, non_neg_integer()} |
                   {until, non_neg_integer() | infinity} |
                   {except_mutator, datastore_doc:mutator()}.
+-type ignored_policy() :: include_ignored | skip_ignored.
 
--export_type([callback/0, seq/0, timestamp/0, since/0, until/0, change/0, option/0]).
+-export_type([callback/0, seq/0, timestamp/0, since/0, until/0, change/0, option/0, ignored_policy/0]).
 
 %%%===================================================================
 %%% API

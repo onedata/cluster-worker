@@ -36,8 +36,8 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec get_docs([couchbase_changes:change()], couchbase_config:bucket(), datastore_doc:mutator(),
-    couchbase_changes:seq(), boolean()) -> [datastore:doc() | {ignored, datastore:doc()}].
-get_docs(Changes, Bucket, FilterMutator, MaxSeqNum, IncludeIgnored) ->
+    couchbase_changes:seq(), couchbase_changes:ignored_policy()) -> [{change | ignored, datastore:doc()}].
+get_docs(Changes, Bucket, FilterMutator, MaxSeqNum, IgnoredPolicy) ->
     KeyRevisionsAndSequences = lists:filtermap(fun(Change) ->
         Key = maps:get(<<"id">>, Change),
         Value = maps:get(<<"value">>, Change),
@@ -52,15 +52,15 @@ get_docs(Changes, Bucket, FilterMutator, MaxSeqNum, IncludeIgnored) ->
     IncludeOverridden = ?INCLUDE_OVERRIDDEN,
     {Keys, RevisionsAnsSequences} = lists:unzip(KeyRevisionsAndSequences),
     lists:filtermap(fun
-        ({_Key, {ok, _, #document{ignore_in_changes = true}}, _Rev}) when not IncludeIgnored ->
+        ({_Key, {ok, _, #document{ignore_in_changes = true}}, _Rev}) when IgnoredPolicy =:= skip_ignored ->
             false;
         ({_Key, {ok, _, #document{ignore_in_changes = true} = Doc}, _Rev}) ->
             {true, {ignored, Doc}};
         ({_Key, {ok, _, #document{revs = [Rev | _], seq = Seq} = Doc}, {Rev, Seq}}) when Seq =< MaxSeqNum ->
-            {true, Doc};
+            {true, {change, Doc}};
         ({_Key, {ok, _, #document{seq = DocSeq} = Doc}, {_Rev, Seq}}) when Seq =< MaxSeqNum andalso Seq < DocSeq andalso IncludeOverridden ->
             % Use newer doc with old revision - otherwise constant modifications can prevent returning of doc
-            {true, Doc#document{seq = Seq}};
+            {true, {change, Doc#document{seq = Seq}}};
         ({_Key, {ok, _, #document{}}, _Rev}) ->
             false;
         ({Key, {error, not_found}, Rev}) ->

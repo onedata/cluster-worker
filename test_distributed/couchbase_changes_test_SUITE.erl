@@ -190,7 +190,7 @@ stream_should_return_all_changes(Config) ->
     end, lists:seq(1, DocNum))),
     assert_all(fun(SeqList) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, SeqList2) ->
+        lists:foldl(fun({change, Doc}, SeqList2) ->
             ?assert(lists:member(Doc#document.seq, SeqList2)),
             lists:delete(Doc#document.seq, SeqList2)
         end, SeqList, Docs)
@@ -215,7 +215,7 @@ stream_should_return_last_changes_base(Config) ->
     Callback = fun
         ({ok, Docs}) ->
             lists:foreach(fun
-                (Doc = #document{value = Any}) when Any =:= Value -> Self ! Doc;
+                ({_, Doc = #document{value = Any}}) when Any =:= Value -> Self ! Doc;
                 (_) -> ok
             end, Docs);
         (_Any) -> ok
@@ -256,7 +256,7 @@ stream_should_return_all_changes_except_mutator(Config) ->
     end, lists:seq(1, DocNum)),
     assert_all(fun(Keys) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, Keys2) ->
+        lists:foldl(fun({change, Doc}, Keys2) ->
             ?assert(lists:member(Doc#document.key, Keys2)),
             lists:delete(Doc#document.key, Keys2)
         end, Keys, Docs)
@@ -277,7 +277,7 @@ stream_should_return_changes_from_finite_range(Config) ->
     end, lists:seq(1, DocNum))),
     assert_all(fun(SeqList) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, SeqList2) ->
+        lists:foldl(fun({change, Doc}, SeqList2) ->
             ?assert(lists:member(Doc#document.seq, SeqList2)),
             lists:delete(Doc#document.seq, SeqList2)
         end, SeqList, Docs)
@@ -298,7 +298,7 @@ stream_should_return_changes_from_infinite_range(Config) ->
     end, lists:seq(1, DocNum))),
     assert_all(fun(SeqList) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, SeqList2) ->
+        lists:foldl(fun({change, Doc}, SeqList2) ->
             ?assert(lists:member(Doc#document.seq, SeqList2)),
             lists:delete(Doc#document.seq, SeqList2)
         end, SeqList, Docs)
@@ -347,7 +347,7 @@ stream_should_ignore_changes(Config) ->
     )),
     assert_all(fun(SeqList) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, SeqList2) ->
+        lists:foldl(fun({change, Doc}, SeqList2) ->
             ?assert(lists:member(Doc#document.seq, SeqList2)),
             lists:delete(Doc#document.seq, SeqList2)
         end, SeqList, Docs)
@@ -408,7 +408,7 @@ stream_should_ignore_changes2(Config) ->
     )),
     assert_all(fun(SeqList) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, SeqList2) ->
+        lists:foldl(fun({change, Doc}, SeqList2) ->
             ?assert(lists:member(Doc#document.seq, SeqList2)),
             lists:delete(Doc#document.seq, SeqList2)
         end, SeqList, Docs)
@@ -470,7 +470,7 @@ stream_should_ignore_changes3(Config) ->
     )),
     assert_all(fun(SeqList) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, SeqList2) ->
+        lists:foldl(fun({change, Doc}, SeqList2) ->
             ?assert(lists:member(Doc#document.seq, SeqList2)),
             lists:delete(Doc#document.seq, SeqList2)
         end, SeqList, Docs)
@@ -577,7 +577,7 @@ stream_should_ignore_changes4(Config) ->
     )),
     assert_all(fun(SeqList) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, SeqList2) ->
+        lists:foldl(fun({change, Doc}, SeqList2) ->
             ?assert(lists:member(Doc#document.seq, SeqList2)),
             lists:delete(Doc#document.seq, SeqList2)
         end, SeqList, Docs)
@@ -598,7 +598,7 @@ stream_should_ignore_changes4(Config) ->
     )),
     assert_all(fun(SeqList) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, SeqList2) ->
+        lists:foldl(fun({change, Doc}, SeqList2) ->
             ?assert(lists:member(Doc#document.seq, SeqList2)),
             lists:delete(Doc#document.seq, SeqList2)
         end, SeqList, Docs)
@@ -619,7 +619,7 @@ stream_should_return_all_changes_one_by_one(Config) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(1, DocNum))),
     lists:foreach(fun(SeqNum) ->
-        {ok, [Doc]} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        {ok, [{change, Doc}]} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
         ?assertEqual(Doc#document.seq, SeqNum)
     end, lists:seq(1, DocNum)).
 
@@ -642,7 +642,7 @@ worker_should_return_all_changes_one_by_one_base(Config, DocsBatchesSaved) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(ExistingDocsNum + 1, ExistingDocsNum + DocNum))),
     lists:foreach(fun(SeqNum) ->
-        {ok, [Doc]} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        {ok, [{change, Doc}]} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
         ?assertEqual(Doc#document.seq, SeqNum)
     end, lists:seq(1, ExistingDocsNum + DocNum)),
 
