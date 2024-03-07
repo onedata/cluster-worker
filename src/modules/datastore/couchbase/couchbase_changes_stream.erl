@@ -113,7 +113,7 @@ init([Bucket, Scope, Callback, Opts, LinkedProcesses]) ->
             couchbase_changes_stream_batch_size, 5000),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_stream_update_interval, 1000),
-        ignored_policy = proplists:get_value(include_ignored, Opts, skip_ignored),
+        ignored_policy = proplists:get_value(ignored_policy, Opts, skip_ignored),
         linked_processes = LinkedProcesses
     }}.
 
