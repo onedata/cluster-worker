@@ -37,6 +37,7 @@
     except_mutator :: datastore_doc:mutator(),
     batch_size :: non_neg_integer(),
     interval :: non_neg_integer(),
+    ignored_policy = skip_ignored :: couchbase_changes:ignored_policy(),
     linked_processes :: [pid()]
 }).
 
@@ -112,6 +113,7 @@ init([Bucket, Scope, Callback, Opts, LinkedProcesses]) ->
             couchbase_changes_stream_batch_size, 5000),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_stream_update_interval, 1000),
+        ignored_policy = proplists:get_value(ignored_policy, Opts, skip_ignored),
         linked_processes = LinkedProcesses
     }}.
 
@@ -159,11 +161,11 @@ handle_cast(Request, #state{} = State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_info(update, #state{since = Since, until = Until,
+handle_info(update, #state{since = Since, until = Until, ignored_policy = IgnoredPolicy,
     bucket = Bucket, except_mutator = Mutator, scope = Scope} = State) ->
     try
         {Changes, State2} = get_changes(Since, Until, State),
-        Docs = couchbase_changes_utils:get_docs(Changes, Bucket, Mutator, Until),
+        Docs = couchbase_changes_utils:get_docs(Changes, Bucket, Mutator, Until, IgnoredPolicy),
         stream_docs(Docs, State2),
         case State2#state.since >= Until of
             true -> {stop, normal, State2};
@@ -282,7 +284,7 @@ calculate_endkey(Until, Scope, Ctx) ->
 %% Streams documents and schedules next update.
 %% @end
 %%--------------------------------------------------------------------
--spec stream_docs([datastore:doc()], state()) -> reference().
+-spec stream_docs([{change | ignored, datastore:doc()}], state()) -> reference().
 stream_docs([], #state{interval = Interval}) ->
     erlang:send_after(Interval, self(), update);
 stream_docs(Docs, #state{callback = Callback}) ->
