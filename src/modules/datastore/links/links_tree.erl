@@ -373,7 +373,7 @@ fetch_node(Ctx, NodeId, State) ->
 fetch_node(Ctx, NodeId, State = #state{batch = Batch}, Sleep, InterruptedCallRetries) ->
     case datastore_doc:fetch(Ctx, NodeId, Batch, true) of
         {{error, interrupted_call}, Batch2} when InterruptedCallRetries =< 0 ->
-            ?THROTTLE_LOG(NodeId, ?warning("Interrupted call fetching link node ~s", [NodeId])),
+            ?THROTTLE_LOG(NodeId, ?warning("Interrupted call fetching link node ~ts", [NodeId])),
             {{error, interrupted_call}, State#state{batch = Batch2}};
         {{error, interrupted_call}, Batch2} ->
             timer:sleep(Sleep),

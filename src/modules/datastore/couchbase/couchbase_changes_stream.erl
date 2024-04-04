@@ -180,8 +180,8 @@ handle_info({'EXIT', From, Reason} = Info,
     #state{linked_processes = LinkedProcesses} = State) ->
     case lists:member(From, LinkedProcesses) of
         true ->
-            ?info("Stopping stream ~p because linked process ~p "
-            "terrminated with ~p", [self(), From, Reason]),
+            ?info("Stopping stream ~tp because linked process ~tp "
+            "terrminated with ~tp", [self(), From, Reason]),
             {stop, Reason, State};
         _ ->
             ?log_bad_request(Info),
@@ -264,7 +264,7 @@ get_changes(Since, Until, #state{} = State) ->
                     UpperSeqNum = couchbase_changes_utils:get_upper_seq_num(Changes, BatchSize, Endkey - 1),
                     {Changes, State#state{since = UpperSeqNum + 1}};
                 Error ->
-                    ?error("Cannot get changes, error: ~p", [Error]),
+                    ?error("Cannot get changes, error: ~tp", [Error]),
                     {[], State}
             end
     end.

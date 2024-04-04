@@ -73,8 +73,8 @@ upgrade_record(Version, Version, _Name, Record) ->
     {Version, Record};
 upgrade_record(TargetVersion, CurrentVersion, Name, _Record)
     when CurrentVersion > TargetVersion ->
-    ?emergency("Upgrade requested for model '~p' with future version ~p "
-    "(known versions up to: ~p)", [Name, CurrentVersion, TargetVersion]),
+    ?emergency("Upgrade requested for model '~tp' with future version ~tp "
+    "(known versions up to: ~tp)", [Name, CurrentVersion, TargetVersion]),
     error({future_version, Name, CurrentVersion, TargetVersion});
 upgrade_record(TargetVersion, CurrentVersion, Name, Record) ->
     {CurrentVersion2, Record2} = Name:upgrade_record(CurrentVersion, Record),

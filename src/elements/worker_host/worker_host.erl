@@ -99,7 +99,7 @@ init([Plugin, PluginArgs, LoadMemorySize]) ->
     ets:new(state_table_name(Plugin), [named_table, public, set, {read_concurrency, true}]),
     {ok, InitAns} = Plugin:init(PluginArgs),
     [ets:insert(state_table_name(Plugin), Entry) || Entry <- maps:to_list(InitAns)],
-    ?debug("Plugin ~p initialized with args ~p and result ~p", [Plugin, PluginArgs, InitAns]),
+    ?debug("Plugin ~tp initialized with args ~tp and result ~tp", [Plugin, PluginArgs, InitAns]),
     {ok, #host_state{plugin = Plugin, load_info = {[], [], 0, LoadMemorySize}}}.
 
 %%--------------------------------------------------------------------
@@ -202,9 +202,9 @@ handle_info(Msg, State) ->
     | {shutdown, term()}
     | term().
 terminate(_Reason, #host_state{plugin = Plugin}) ->
-    ?info("Worker: ~s terminating...", [Plugin]),
+    ?info("Worker: ~ts terminating...", [Plugin]),
     Plugin:cleanup(),
-    ?info("Worker: ~s terminated", [Plugin]),
+    ?info("Worker: ~ts terminated", [Plugin]),
     ok.
 
 %%--------------------------------------------------------------------
@@ -299,11 +299,11 @@ proc_request(Plugin, Request = #worker_request{req = Msg}) ->
             LogRequest = application:get_env(?CLUSTER_WORKER_APP_NAME, log_requests_on_error, false),
             {MsgFormat, FormatArgs} = case LogRequest of
                 true ->
-                    MF = "Worker plug-in ~p error: ~p:~p, on request: ~p",
+                    MF = "Worker plug-in ~tp error: ~tp:~tp, on request: ~tp",
                     FA = [Plugin, Type, Error, Request],
                     {MF, FA};
                 _ ->
-                    MF = "Worker plug-in ~p error: ~p:~p",
+                    MF = "Worker plug-in ~tp error: ~tp:~tp",
                     FA = [Plugin, Type, Error],
                     {MF, FA}
             end,

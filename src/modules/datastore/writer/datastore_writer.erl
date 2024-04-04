@@ -292,7 +292,7 @@ call(Ctx, Key, Module, Function, Args, Sleep, InterruptedCallRetries) ->
                         {false, _} ->
                             Other;
                         {true, 0} ->
-                            ?THROTTLE_LOG(Key, ?warning("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
+                            ?THROTTLE_LOG(Key, ?warning("Interrupted call (fun: ~tp, args ~tp, key ~tp, ctx ~tp)~n"
                                 "no retries left", [Function, Args, Key, Ctx])),
                             Other;
                         _ ->

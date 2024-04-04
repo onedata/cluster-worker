@@ -109,7 +109,7 @@ call_optional_callback(Plugin, FunName, FunArgs, FallbackFun, ErrorHandlingMode)
                 apply(Plugin, FunName, FunArgs)
             catch
                 Error:Reason:Stacktrace ->
-                    ?error_stacktrace("PES optional callback ~p error ~p:~p for plug-in ~p",
+                    ?error_stacktrace("PES optional callback ~tp error ~tp:~tp for plug-in ~tp",
                         [FunName, Error, Reason, Plugin], Stacktrace),
                     case ErrorHandlingMode of
                         execute_fallback_on_error -> apply(FallbackFun, FunArgs);

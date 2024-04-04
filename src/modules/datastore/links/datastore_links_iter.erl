@@ -217,7 +217,7 @@ fold(Ctx, Key, TreeId, Fun, Acc, #{token := Token} = Opts, InitBatch)
                 restart_token = ForestIt2#forest_it{batch = undefined},
                 is_last = IsLast}}, ForestIt2};
         Error ->
-            ?warning("Cannot fold links for args ~p by token: ~p",
+            ?warning("Cannot fold links for args ~tp by token: ~tp",
                 [{Ctx, Key, TreeId, Opts}, Error]),
             fold(Ctx, Key, TreeId, Fun, Acc, Opts#{token := #link_token{}}, InitBatch)
     end;
@@ -305,7 +305,7 @@ get_from_tree(LinkName, TreeId, #forest_it{
                         false -> {ok, Link}
                     end, UpdatedBatch};
                 {{error, interrupted_call} = Error, Tree2} ->
-                    ?THROTTLE_LOG(Key, TreeId, ?warning("Interrupted call (link get)~s", [?autoformat([TreeId, Key, Ctx])])),
+                    ?THROTTLE_LOG(Key, TreeId, ?warning("Interrupted call (link get)~ts", [?autoformat([TreeId, Key, Ctx])])),
                     UpdatedBatch = datastore_links:finalize_tree_operation(Tree2),
                     case Ctx of
                         #{handle_interrupted_call := false} ->
@@ -526,7 +526,7 @@ init_tree_fold(TreeId, ForestIt = #forest_it{
                             {{ok, #tree_it{}}, ForestIt#forest_it{batch = datastore_links:finalize_tree_operation(Tree2)}}
                     end;
                 {{error, interrupted_call} = Error, Tree2} ->
-                    ?THROTTLE_LOG(Key, TreeId, ?warning("Interrupted call (fold init)~s", [?autoformat([TreeId, Key, Ctx])])),
+                    ?THROTTLE_LOG(Key, TreeId, ?warning("Interrupted call (fold init)~ts", [?autoformat([TreeId, Key, Ctx])])),
                     case {Ctx, Opts} of
                         {#{handle_interrupted_call := false}, _} ->
                             {Error, ForestIt#forest_it{batch = datastore_links:finalize_tree_operation(Tree2)}};

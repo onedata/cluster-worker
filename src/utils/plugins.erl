@@ -37,7 +37,7 @@ apply(Plugin, Function, Args) ->
         {Function, Arity} ->
             erlang:apply(Module, Function, Args);
         _ ->
-            ?debug("Using default implementation for plugin call ~p:~p/~p.",
+            ?debug("Using default implementation for plugin call ~tp:~tp/~tp.",
                 [Plugin, Function, length(Args)]),
             erlang:apply(DefaultModule, Function, Args)
     end.
@@ -58,7 +58,7 @@ get_plugin_module(Plugin) ->
         {ok, Module} ->
             {Module, DefaultModule};
         undefined ->
-            ?debug("Module not found for a plugin: ~p. Defaulting to ~p.",
+            ?debug("Module not found for a plugin: ~tp. Defaulting to ~tp.",
                 [Plugin, DefaultModule]),
             {DefaultModule, DefaultModule}
     end.

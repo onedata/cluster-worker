@@ -194,7 +194,7 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
     catch
         E1:E2:Stacktrace ->
             ?error_stacktrace("Error during reconfiguration of couchbase "
-            "batch size: ~p:~p", [E1, E2], Stacktrace),
+            "batch size: ~tp:~tp", [E1, E2], Stacktrace),
             ok
     end.
 
@@ -216,12 +216,12 @@ decrease_batch_size(BatchSize) ->
         set_batch_size(MinBatchSize),
         exometer_utils:reset(?EXOMETER_NAME(times)),
         exometer_utils:reset(?EXOMETER_NAME(sizes)),
-        ?info("Timeout for batch with ~p elements, reset counters,"
-        " decrease batch size to: ~p", [BatchSize, MinBatchSize])
+        ?info("Timeout for batch with ~tp elements, reset counters,"
+        " decrease batch size to: ~tp", [BatchSize, MinBatchSize])
     catch
         E1:E2:Stacktrace ->
             ?error_stacktrace("Error during decrease of couchbase"
-            "batch size: ~p:~p", [E1, E2], Stacktrace)
+            "batch size: ~tp:~tp", [E1, E2], Stacktrace)
     end.
 
 %%--------------------------------------------------------------------

@@ -63,7 +63,7 @@ format_reply(AppStatus, NodeStatuses) ->
                 {error, Desc} -> "error: " ++ atom_to_list(Desc);
                 A when is_atom(A) -> atom_to_list(A);
                 _ ->
-                    ?debug("Wrong nagios status: {~p, ~p} at node ~p", [Component, Status, Node]),
+                    ?debug("Wrong nagios status: {~tp, ~tp} at node ~tp", [Component, Status, Node]),
                     "error: wrong_status"
             end,
             {Component, [{status, StatusList}], []}
@@ -79,4 +79,4 @@ format_reply(AppStatus, NodeStatuses) ->
     HealthData = {healthdata, [{date, DateString},
         {status, atom_to_list(AppStatus)}], MappedClusterState},
     Export = xmerl:export_simple([HealthData], xmerl_xml),
-    io_lib:format("~s", [Export]).
+    io_lib:format("~ts", [Export]).

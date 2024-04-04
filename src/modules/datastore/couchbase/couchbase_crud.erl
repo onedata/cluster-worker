@@ -159,7 +159,7 @@ get(Connection, Requests) ->
                         {Key, {ok, Cas, datastore_json:decode(Value)}}
                     catch
                         _:Reason:Stacktrace ->
-                            ?error_stacktrace("Cannot decode couchbase value for key ~p~nValue: ~p~nReason: ~p", [
+                            ?error_stacktrace("Cannot decode couchbase value for key ~tp~nValue: ~tp~nReason: ~tp", [
                                 Key, Value, Reason
                             ], Stacktrace),
                             {Key, {error, {Reason, Stacktrace}}}
@@ -378,7 +378,7 @@ prepare_store(Requests) ->
                 }
             catch
                 Class:Reason:Stacktrace ->
-                    ?warning_exception("Cannot encode document: ~p", [Value], Class, Reason, Stacktrace),
+                    ?warning_exception("Cannot encode document: ~tp", [Value], Class, Reason, Stacktrace),
                     Reason2 = {Reason, Stacktrace},
                     {
                         StoreRequests,

@@ -722,7 +722,7 @@ run_from_queue(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Exe
                     ok = run_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                         Executor, TaskId, Job, JobId, MasterJobMode);
                 {error, not_found} ->
-                    ?warning("Job ~p not found for pool ~p, callback module ~p, task ~p",
+                    ?warning("Job ~tp not found for pool ~tp, callback module ~tp, task ~tp",
                         [JobId, PoolName, CallbackModule, TaskId])
 
             end;
@@ -896,7 +896,7 @@ get_extended_ctx(CallbackModule, undefined) ->
         true ->
             case application:get_env(?CLUSTER_WORKER_APP_NAME, ignore_extended_ctx_get_errors, true) of
                 true -> ok;
-                false -> ?warning("Getting sync info for undefined job for callback module: ~p", [CallbackModule])
+                false -> ?warning("Getting sync info for undefined job for callback module: ~tp", [CallbackModule])
             end;
         _ ->
             ok
@@ -935,7 +935,7 @@ to_string(CallbackModule, Job) ->
         true ->
             CallbackModule:to_string(Job);
         _ -> 
-            str_utils:format_bin("~p", [Job])
+            str_utils:format_bin("~tp", [Job])
     end.
 
 -spec repair_ongoing_tasks(pool(), environment_id(), node()) -> tasks_ctxs().
@@ -967,14 +967,14 @@ repair_ongoing_task_and_add_to_map(Pool, Executor, Node, Id, TaskIdToCtxMap, Fix
                     ExtendedCtx = get_extended_ctx(CallbackModule, undefined),
                     fix_task_description(Pool, Executor, Node, Id, TaskIdToCtxMap, FixLink, ExtendedCtx, Timestamp);
                 JobError ->
-                    ?warning("Error getting main job ~p for task id ~p (pool ~p, executor ~p, node ~p): ~p",
+                    ?warning("Error getting main job ~tp for task id ~tp (pool ~tp, executor ~tp, node ~tp): ~tp",
                         [MainJobId, Id, Pool, Executor, Node, JobError]),
                     {not_found, TaskIdToCtxMap#{Id => ctx_not_found}}
             end;
         {ok, #task_execution_info{}} ->
             {other_node, TaskIdToCtxMap};
         InfoError ->
-            ?warning("Error getting execution info for task id ~p (pool ~p, executor ~p, node ~p): ~p",
+            ?warning("Error getting execution info for task id ~tp (pool ~tp, executor ~tp, node ~tp): ~tp",
                 [Id, Pool, Executor, Node, InfoError]),
             {not_found, TaskIdToCtxMap}
     end.
@@ -1003,8 +1003,8 @@ get_tasks_jobs(PoolName, CallbackModule, Node, Executor, InitialTaskIdToCtxMap) 
             {ok, Job, _, TaskId} ->
                 case maps:get(TaskId, TaskIdToCtxMap, ctx_not_found) of
                     ctx_not_found ->
-                        ?warning("Found job ~s assigned to task ~s (callback module ~p, pool name ~p, node ~p) "
-                        "which does not exist (anymore?). Job data:~n~p~nTrying to find task without link", [
+                        ?warning("Found job ~ts assigned to task ~ts (callback module ~tp, pool name ~tp, node ~tp) "
+                        "which does not exist (anymore?). Job data:~n~tp~nTrying to find task without link", [
                             JobId, TaskId, CallbackModule, PoolName, Node, Job
                         ]),
                         % Task has not been found using task links so it has not been repaired
@@ -1020,7 +1020,7 @@ get_tasks_jobs(PoolName, CallbackModule, Node, Executor, InitialTaskIdToCtxMap) 
                         {JobsPerTask#{TaskId => [{JobId, Job} | TaskJobs]}, JobsWitoutCtx, TaskIdToCtxMap}
                 end;
             Error ->
-                ?warning("Error getting job ~p (callback module ~p, pool name ~p, node ~p): ~p",
+                ?warning("Error getting job ~tp (callback module ~tp, pool name ~tp, node ~tp): ~tp",
                     [JobId, CallbackModule, PoolName, Node, Error]),
                 {JobsPerTask, [JobId | JobsWitoutCtx], TaskIdToCtxMap}
         end
@@ -1060,7 +1060,7 @@ clean_tasks_and_jobs(TaskIdToCtxMap, JobsPerTask, TasksToCancel, JobsWitoutCtx, 
 
         JobsToClean = maps:get(TaskId, JobsPerTask, []),
         clean_jobs(JobsToClean, PoolName, CallbackModule, Node),
-        ?info("~p jobs of task ~p cleaned - restart impossible", [length(JobsToClean), TaskId])
+        ?info("~tp jobs of task ~tp cleaned - restart impossible", [length(JobsToClean), TaskId])
     end, TasksToCancel),
 
     clean_jobs(JobsWitoutCtx, PoolName, CallbackModule, Node).
@@ -1095,7 +1095,7 @@ restart_jobs(TaskIdToCtxMap, JobsPerTask, PoolName, CallbackModule, Executor, No
                 CallbackModule, ExtendedCtx, Executor, TaskId, Job, JobId, MasterJobMode)
         end, JobsToRestart),
 
-        ?info("~p jobs of task ~p restarted", [length(JobsToRestart), TaskId])
+        ?info("~tp jobs of task ~tp restarted", [length(JobsToRestart), TaskId])
     end, maps:to_list(JobsPerTask)).
 
 -spec schedule_waiting_tasks_if_possible(pool(), environment_id()) -> ok | no_return().
@@ -1117,11 +1117,11 @@ schedule_waiting_tasks_if_possible(PoolName, Executor) ->
 deregister_group_and_schedule_waiting_tasks_if_possible(PoolName, Executor, GroupId) ->
     case deregister_group_and_check(PoolName, GroupId, Executor) of
         ok ->
-            ?info("Group ~p deregistered on restart of node for pool ~p and executor ~p",
+            ?info("Group ~tp deregistered on restart of node for pool ~tp and executor ~tp",
                 [GroupId, PoolName, Executor]),
             schedule_waiting_tasks_if_possible(PoolName, Executor);
         {abort, _TaskId} ->
-            ?info("Group ~p deregistration on restart of node aborted for pool ~p and executor ~p",
+            ?info("Group ~tp deregistration on restart of node aborted for pool ~tp and executor ~tp",
                 [GroupId, PoolName, Executor]),
             schedule_waiting_tasks_if_possible(PoolName, Executor)
     end.
@@ -1132,11 +1132,11 @@ schedule_task_and_check_other_waiting(PoolName, GroupId, Executor, TaskId) ->
         {ok, Node} ->
             case rpc:call(Node, ?MODULE, run_task, [PoolName, TaskId, Executor]) of
                 ok ->
-                    ?info("Task ~p started on restart of node for pool ~p and executor ~p",
+                    ?info("Task ~tp started on restart of node for pool ~tp and executor ~tp",
                         [TaskId, PoolName, Executor]),
                     schedule_waiting_tasks_if_possible(PoolName, Executor);
                 start_interrupted ->
-                    ?info("Task ~p start interrupted on restart of node for pool ~p and executor ~p",
+                    ?info("Task ~tp start interrupted on restart of node for pool ~tp and executor ~tp",
                         [TaskId, PoolName, Executor]),
                     traverse_task_list:delete_first_scheduled_link(PoolName, GroupId, Executor, TaskId),
                     % TODO VFS-6297 - what if node crashes before next line

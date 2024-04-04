@@ -64,10 +64,10 @@ get_docs(Changes, Bucket, FilterMutator, MaxSeqNum, IgnoredPolicy) ->
         ({_Key, {ok, _, #document{}}, _Rev}) ->
             false;
         ({Key, {error, not_found}, Rev}) ->
-            ?debug("Document ~p not found in changes stream in revision ~p", [Key, Rev]),
+            ?debug("Document ~tp not found in changes stream in revision ~tp", [Key, Rev]),
             false;
         ({Key, Error, Rev}) ->
-            ?error("Document ~p (revision ~p) get error ~p", [Key, Rev, Error]),
+            ?error("Document ~tp (revision ~tp) get error ~tp", [Key, Rev, Error]),
             throw({get_error, Key})
     end, lists:zip3(Keys, couchbase_driver:get(Ctx, Keys), RevisionsAnsSequences)).
 

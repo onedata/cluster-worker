@@ -49,7 +49,7 @@ stress_performance_test_base(Config) ->
     end, lists:seq(1, ProcNum)),
 
     Ans = run_stress_procs(Repeats, ManyKeys, MemoryOnly, CheckNextWorker, KeyAnsWorkersList),
-    ct:print("Test: repeats ~p, procs ~p, many keys ~p, HA ~p, HA mode ~p, result ~p",
+    ct:print("Test: repeats ~tp, procs ~tp, many keys ~tp, HA ~tp, HA mode ~tp, result ~tp",
         [Repeats, ProcNum, ManyKeys, HA, HaMode, lists:sum(Ans) / Repeats / ProcNum]),
     ok.
 

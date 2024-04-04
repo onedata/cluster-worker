@@ -153,7 +153,7 @@ websocket_handle({text, Data}, _, #state{protocol_version = ProtoVer} = State) -
         handle_message(DecodedRecord, State)
     catch
         Type:Message:Stacktrace ->
-            ?error_stacktrace("Unexpected error in GS client - ~p:~p", [
+            ?error_stacktrace("Unexpected error in GS client - ~tp:~tp", [
                 Type, Message
             ], Stacktrace),
             {ok, State}
@@ -166,7 +166,7 @@ websocket_handle({pong, <<"">>}, _, State) ->
     {ok, State};
 
 websocket_handle(Msg, _, State) ->
-    ?warning("Unexpected frame in GS client: ~p", [Msg]),
+    ?warning("Unexpected frame in GS client: ~tp", [Msg]),
     {ok, State}.
 
 
@@ -206,7 +206,7 @@ websocket_info({queue_request, #gs_req{id = Id} = Request, Pid}, _, State) ->
             },
             {reply, {text, json_utils:encode(JSONMap)}, NewState};
         {error, _} = Error ->
-            ?error("Discarding GS request as it cannot be encoded: ~p", [Error]),
+            ?error("Discarding GS request as it cannot be encoded: ~tp", [Error]),
             Pid ! {response, Id, Error},
             {ok, State}
     end;
@@ -215,7 +215,7 @@ websocket_info(terminate, _, State) ->
     {close, <<"">>, State};
 
 websocket_info(Msg, _, State) ->
-    ?warning("Unexpected message in GS client: ~p", [Msg]),
+    ?warning("Unexpected message in GS client: ~tp", [Msg]),
     {ok, State}.
 
 
@@ -228,7 +228,7 @@ websocket_info(Msg, _, State) ->
     websocket_req:req(), state()) -> ok when
     Reason :: normal | error | remote.
 websocket_terminate(Reason, _ConnState, _State) ->
-    ?debug("GS client terminating - ~p", [Reason]),
+    ?debug("GS client terminating - ~tp", [Reason]),
     ok.
 
 %%%===================================================================

@@ -79,7 +79,7 @@ init([Plugin, MasterPid]) ->
         }}
     catch
         Error:Reason:Stacktrace ->
-            ?error_stacktrace("PES server slave init error ~p:~p for plug-in ~p",
+            ?error_stacktrace("PES server slave init error ~tp:~tp for plug-in ~tp",
                 [Error, Reason, Plugin], Stacktrace),
             {stop, Reason}
     end.
@@ -176,7 +176,7 @@ process_slave_task(#pes_slave_task{request = Request, callback = handle_call, fr
         UpdatedExecutorState
     catch
         Error:Reason:Stacktrace ->
-            ?error_stacktrace("PES server slave handle_call error ~p:~p for plug-in ~p and request ~p",
+            ?error_stacktrace("PES server slave handle_call error ~tp:~tp for plug-in ~tp and request ~tp",
                 [Error, Reason, Plugin, Request], Stacktrace),
             send_submit_result(From, ?ERROR_INTERNAL_SERVER_ERROR),
             ExecutorState
@@ -193,7 +193,7 @@ process_cast_request(Plugin, Request, ExecutorState) ->
         pes_plugin:handle_cast(Plugin, Request, ExecutorState)
     catch
         Error:Reason:Stacktrace ->
-            ?error_stacktrace("PES server slave handle_cast error ~p:~p for plug-in ~p and request ~p",
+            ?error_stacktrace("PES server slave handle_cast error ~tp:~tp for plug-in ~tp and request ~tp",
                 [Error, Reason, Plugin, Request], Stacktrace),
             ExecutorState
     end.

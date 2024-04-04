@@ -205,7 +205,7 @@ do_master_job(MasterJob = #view_traverse_master{
                 cancel_callback => CancelCallback
             }};
         {error, Reason} ->
-            ?error("view_traverse mechanism received error ~p when querying view ~p", [Reason, ViewName]),
+            ?error("view_traverse mechanism received error ~tp when querying view ~tp", [Reason, ViewName]),
             {ok, #{}}
     end.
 
@@ -290,7 +290,7 @@ to_string(Job) ->
         true ->
             ViewProcessingModule:to_string(Job);
         false ->
-            str_utils:format_bin("~p", [Job])
+            str_utils:format_bin("~tp", [Job])
     end.
 
 %%%===================================================================

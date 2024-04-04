@@ -95,14 +95,14 @@ start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
                                 ok;
                             {task_failed, batch} ->
                                 {ok, _} = apply(?MODULE, save_pid, [Task, self(), Level]),
-                                ?error("~p fails of a task ~p", [TaskRepeats, Task]);
+                                ?error("~tp fails of a task ~tp", [TaskRepeats, Task]);
                             _ ->
-                                ?error("~p fails of a task ~p", [TaskRepeats, Task])
+                                ?error("~tp fails of a task ~tp", [TaskRepeats, Task])
                         end
                 end
         after
             ?TASK_SAVE_TIMEOUT ->
-                ?error("Timeout for task ~p", [Task]),
+                ?error("Timeout for task ~tp", [Task]),
                 timeout
         end
     end),
@@ -148,7 +148,7 @@ is_task_alive(Task) ->
                 {badrpc, nodedown} ->
                     false;
                 {badrpc, R} ->
-                    ?error("Badrpc: ~p checking task ~p", [R, Task]),
+                    ?error("Badrpc: ~tp checking task ~tp", [R, Task]),
                     false;
                 CallAns ->
                     CallAns
@@ -231,7 +231,7 @@ update_pid(Task, Pid, Level) ->
 delete_task(Uuid, Task, Level) ->
     case task_pool:delete(Level, Uuid) of
         ok -> ok;
-        E -> ?error("Error ~p while deleting task ~p", [E, Task])
+        E -> ?error("Error ~tp while deleting task ~tp", [E, Task])
     end.
 
 %%--------------------------------------------------------------------
@@ -254,7 +254,7 @@ do_task({M, F, Args}) ->
     apply(M, F, Args);
 
 do_task(Task) ->
-    ?error("Not a task ~p", [Task]),
+    ?error("Not a task ~tp", [Task]),
     ok.
 
 %%--------------------------------------------------------------------
@@ -283,7 +283,7 @@ do_task(Task, 1, _MaxNum) ->
         ok = do_task(Task)
     catch
         E1:E2:Stacktrace ->
-            ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2], Stacktrace),
+            ?error_stacktrace("Task ~tp error: ~tp:~tp", [Task, E1, E2], Stacktrace),
             task_failed
     end;
 do_task(Task, CurrentNum, MaxNum) ->
@@ -291,7 +291,7 @@ do_task(Task, CurrentNum, MaxNum) ->
         ok = do_task(Task)
     catch
         E1:E2:Stacktrace ->
-            ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2], Stacktrace),
+            ?error_stacktrace("Task ~tp error: ~tp:~tp", [Task, E1, E2], Stacktrace),
             sleep_random_interval(MaxNum - CurrentNum + 1),
             do_task(Task, CurrentNum - 1, MaxNum)
     end.
@@ -328,7 +328,7 @@ kill_all(Level) ->
             OtherNode ->
                 case rpc:call(OtherNode, ?MODULE, kill_owner, [Value#task_pool.owner]) of
                     {badrpc, R} ->
-                        ?error("Badrpc: ~p killing task ~p", [R, Task]),
+                        ?error("Badrpc: ~tp killing task ~tp", [R, Task]),
                         ok;
                     CallAns ->
                         CallAns

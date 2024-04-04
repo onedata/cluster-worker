@@ -195,7 +195,7 @@ wait_for_database_flush() ->
 wait_for_database_flush(0) ->
     ok;
 wait_for_database_flush(Size) ->
-    ?info("Waiting for couchbase to flush documents, current queue size ~p", [Size]),
+    ?info("Waiting for couchbase to flush documents, current queue size ~tp", [Size]),
     timer:sleep(5000),
     wait_for_database_flush(couchbase_config:get_flush_queue_size()).
 
@@ -220,7 +220,7 @@ db_action_loop(Operation, InfoLog) ->
         {ok, _} = OkAns ->
             OkAns;
         Error ->
-            ?debug("Db action ~p failed with error ~p", [Operation, Error]),
+            ?debug("Db action ~tp failed with error ~tp", [Operation, Error]),
             ?info(InfoLog),
             timer:sleep(?SAVE_CHECK_INTERVAL),
             db_action_loop(Operation, InfoLog)
