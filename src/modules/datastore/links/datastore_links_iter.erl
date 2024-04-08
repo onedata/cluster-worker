@@ -305,7 +305,7 @@ get_from_tree(LinkName, TreeId, #forest_it{
                         false -> {ok, Link}
                     end, UpdatedBatch};
                 {{error, interrupted_call} = Error, Tree2} ->
-                    ?THROTTLE_LOG(Key, TreeId, ?warning("Interrupted call (link get)~ts", [?autoformat([TreeId, Key, Ctx])])),
+                    ?THROTTLE_LOG(Key, TreeId, ?warning(?autoformat_with_msg("Interrupted call (link get)", [TreeId, Key, Ctx]))),
                     UpdatedBatch = datastore_links:finalize_tree_operation(Tree2),
                     case Ctx of
                         #{handle_interrupted_call := false} ->
@@ -526,7 +526,7 @@ init_tree_fold(TreeId, ForestIt = #forest_it{
                             {{ok, #tree_it{}}, ForestIt#forest_it{batch = datastore_links:finalize_tree_operation(Tree2)}}
                     end;
                 {{error, interrupted_call} = Error, Tree2} ->
-                    ?THROTTLE_LOG(Key, TreeId, ?warning("Interrupted call (fold init)~ts", [?autoformat([TreeId, Key, Ctx])])),
+                    ?THROTTLE_LOG(Key, TreeId, ?warning(?autoformat_with_msg("Interrupted call (fold init)", [TreeId, Key, Ctx])),
                     case {Ctx, Opts} of
                         {#{handle_interrupted_call := false}, _} ->
                             {Error, ForestIt#forest_it{batch = datastore_links:finalize_tree_operation(Tree2)}};
