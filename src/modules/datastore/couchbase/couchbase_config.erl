@@ -49,7 +49,9 @@ get_buckets() ->
     {ok, Buckets} = node_cache:acquire(couchbase_buckets, fun() ->
         DbHost = lists_utils:random_element(get_hosts()),
         Url = <<DbHost/binary, ":8091/pools/default/buckets">>,
-        {ok, 200, _, Body} = http_client:get(Url),
+        {ok, 200, _, Body} = http_client:get(Url, #{
+            <<"Authorization">> => <<"Basic YWRtaW46cGFzc3dvcmQ=">>
+        }),
         Ans = lists:map(fun(BucketMap) ->
             maps:get(<<"name">>, BucketMap)
         end, json_utils:decode(Body)),
@@ -70,7 +72,9 @@ get_flush_queue_size() ->
     lists:foldl(fun(Bucket, Max) ->
         Url = <<DbHost/binary, ":8091/pools/default/buckets/",
             Bucket/binary, "/stats">>,
-        {ok, 200, _, Body} = http_client:get(Url),
+        {ok, 200, _, Body} = http_client:get(Url, #{
+            <<"Authorization">> => <<"Basic YWRtaW46cGFzc3dvcmQ=">>
+        }),
         BucketSize = lists:last(maps:get(<<"disk_write_queue">>,
             maps:get(<<"samples">>,
                 maps:get(<<"op">>, json_utils:decode(Body))))),
