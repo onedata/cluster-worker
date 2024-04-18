@@ -60,11 +60,6 @@
 
 -define(CALL_PLUGIN(Fun, Args), plugins:apply(node_manager_plugin, Fun, Args)).
 
-% make sure the retries take more than 4 minutes, which is the time required
-% for a hanging socket to exit the TIME_WAIT state and terminate
--define(PORT_CHECK_RETRIES, 41).
--define(PORT_CHECK_INTERVAL, timer:seconds(6)).
-
 -define(DEFAULT_TERMINATE_TIMEOUT, 5000).
 
 -define(CLUSTER_WORKER_MODULES, [
@@ -359,22 +354,6 @@ init([]) ->
         ok = ?CALL_PLUGIN(before_init, []),
 
         ?info("node manager plugin initialized"),
-
-        ?info("Checking if all ports are free..."),
-        lists:foreach(
-            fun(Module) ->
-                Port = erlang:apply(Module, port, []),
-                case ensure_port_free(Port) of
-                    ok ->
-                        ok;
-                    {error, Reason} ->
-                        ?error("The port ~B for ~p is not free: ~p. Terminating.",
-                            [Port, Module, Reason]),
-                        throw({port_in_use, Port})
-                end
-            end, node_manager:listeners()),
-
-        ?info("Ports OK"),
 
         next_task_check(),
         erlang:send_after(datastore_throttling:plan_next_throttling_check(), self(), {timer, configure_throttling}),
@@ -1006,39 +985,6 @@ next_task_check() ->
     {ok, IntervalMin} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_checking_period_minutes),
     Interval = timer:minutes(IntervalMin),
     erlang:send_after(Interval, self(), {timer, check_tasks}).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Checks whether port is free on localhost.
-%% @TODO VFS-7847 Currently the listener ports are not freed correctly and after
-%% a restart, they may still be not available for some time. This appears to be
-%% triggered by listener healthcheck connections made by hackney, which causes
-%% the listener to go into TIME_WAIT state for some duration.
-%% @end
-%%--------------------------------------------------------------------
--spec ensure_port_free(integer()) -> ok | {error, term()}.
-ensure_port_free(Port) ->
-    ensure_port_free(Port, ?PORT_CHECK_RETRIES).
-
-%% @private
--spec ensure_port_free(integer(), integer()) -> ok | {error, term()}.
-ensure_port_free(Port, AttemptsLeft) ->
-    case gen_tcp:listen(Port, [{reuseaddr, true}, {ip, any}]) of
-        {ok, Socket} ->
-            gen_tcp:close(Socket);
-        {error, Reason} ->
-            case AttemptsLeft of
-                1 ->
-                    {error, Reason};
-                _ ->
-                    ?warning("Port ~B required by the application is not free, attempts left: ~B",
-                        [Port, AttemptsLeft - 1]),
-                    timer:sleep(?PORT_CHECK_INTERVAL),
-                    ensure_port_free(Port, AttemptsLeft - 1)
-            end
-    end.
 
 
 %%--------------------------------------------------------------------
