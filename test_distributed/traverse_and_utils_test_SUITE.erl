@@ -65,6 +65,7 @@ all() ->
 -define(CACHE, test_cache).
 -define(CALL_CACHE(Worker, Op, Args), rpc:call(Worker, bounded_cache, Op, [?CACHE | Args])).
 -define(POOL, <<"traverse_test_pool">>).
+-define(CALLBACK_MODULE, traverse_test_pool).
 -define(MASTER_POOL_NAME, traverse_test_pool_master).
 -define(SLAVE_POOL_NAME, traverse_test_pool_slave).
 
@@ -345,7 +346,7 @@ traverse_restart_test_base(Config, TaskNameBase, BeforeRestartAction, FirstJobSt
         [{workers, 3}, {queue_type, lifo}]])),
     ?assertMatch({ok, _}, rpc:call(Worker, worker_pool, start_sup_pool, [?SLAVE_POOL_NAME,
         [{workers, 3}, {queue_type, lifo}]])),
-    ?assertEqual(ok, rpc:call(Worker, traverse, restart_tasks, [?POOL, #{}, Worker])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, restart_tasks, [?POOL, #{callback_modules => [?CALLBACK_MODULE]}, Worker])),
 
     {Expected, Description} = traverse_test_pool:get_expected(),
     ExpLen = length(Expected),
@@ -454,7 +455,7 @@ init_per_testcase(sequential_traverse_test, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]),
     rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []]),
-    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 1, 3, 10])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 1, 3, 10, #{callback_modules => [?CALLBACK_MODULE]}])),
     Config;
 init_per_testcase(Case, Config) when
     Case =:= traverse_test ; Case =:= single_master_job_test ; Case =:= traverse_multitask_concurrent_test ;
@@ -462,7 +463,7 @@ init_per_testcase(Case, Config) when
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]),
     rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []]),
-    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 10])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 10, #{callback_modules => [?CALLBACK_MODULE]}])),
     Config;
 init_per_testcase(Case, Config) when
     Case =:= traverse_multitask_sequential_test ; Case =:= traverse_loadbalancing_test ;
@@ -473,7 +474,7 @@ init_per_testcase(Case, Config) when
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]),
     rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []]),
-    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 1])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 1, #{callback_modules => [?CALLBACK_MODULE]}])),
     Config;
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),

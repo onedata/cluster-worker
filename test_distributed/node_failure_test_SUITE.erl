@@ -107,7 +107,8 @@ init_per_testcase(_, Config) ->
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, test_job, []),
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     lists:foreach(fun(Worker) ->
-        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 2, 2, 10]))
+        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 2, 2, 10,
+            #{callback_modules => [traverse_test_pool]}]))
     end, Workers),
     Config.
 
