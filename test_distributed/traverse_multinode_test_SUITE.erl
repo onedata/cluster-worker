@@ -33,6 +33,7 @@ all() ->
     ]).
 
 -define(POOL, <<"traverse_test_pool">>).
+-define(CALLBACK_MODULE, traverse_test_pool).
 -define(MASTER_POOL_NAME, traverse_test_pool_master).
 -define(SLAVE_POOL_NAME, traverse_test_pool_slave).
 
@@ -121,7 +122,7 @@ traverse_restart_test(Config) ->
             [{workers, 3}, {queue_type, lifo}]])),
         ?assertMatch({ok, _}, rpc:call(W, worker_pool, start_sup_pool, [?SLAVE_POOL_NAME,
             [{workers, 3}, {queue_type, lifo}]])),
-        ?assertEqual(ok, rpc:call(W, traverse, restart_tasks, [?POOL, #{}, W]))
+        ?assertEqual(ok, rpc:call(W, traverse, restart_tasks, [?POOL, #{callback_modules => [?CALLBACK_MODULE]}, W]))
     end, Workers),
 
     {Expected, Description} = traverse_test_pool:get_expected(),
@@ -189,7 +190,7 @@ init_per_testcase(traverse_test, Config) ->
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     lists:foreach(fun(Worker) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, init_pool,
-            [?POOL, 3, 3, 10, #{parallel_orders_per_node_limit => 10}]))
+            [?POOL, 3, 3, 10, #{parallel_orders_per_node_limit => 10, callback_modules => [?CALLBACK_MODULE]}]))
     end, Workers),
     Config;
 init_per_testcase(Case, Config) when
@@ -199,7 +200,7 @@ init_per_testcase(Case, Config) when
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     lists:foreach(fun(Worker) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, init_pool,
-            [?POOL, 3, 3, 2, #{parallel_orders_per_node_limit => 10}]))
+            [?POOL, 3, 3, 2, #{parallel_orders_per_node_limit => 10, callback_modules => [?CALLBACK_MODULE]}]))
     end, Workers),
     Config.
 
