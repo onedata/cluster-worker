@@ -63,7 +63,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([init_pool/4, init_pool/5, init_pool_service/5, restart_tasks/3, stop_pool/1, stop_pool_service/1,
+-export([init_pool/5, init_pool_service/5, restart_tasks/3, stop_pool/1, stop_pool_service/1,
     run/3, run/4, cancel/2, cancel/3, on_task_change/2, on_job_change/5]).
 %% Functions executed on pools
 -export([execute_master_job/10, execute_slave_job/5, is_job_cancelled/1]).
@@ -77,7 +77,7 @@
 -type environment_id() :: traverse_task_list:tree(). % environment (cluster) where task is scheduled or processed
 -type pool_options() :: #{
     executor => environment_id(),
-    callback_modules => [callback_module()],
+    callback_modules := [callback_module()],
     restart => boolean(),
     % If the limit is not set, limit is equal to overall limit (argument of init_pool function) divided by nodes number
     parallel_orders_per_node_limit => traverse_tasks_scheduler:ongoing_tasks_limit()
@@ -180,15 +180,6 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% @equiv init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, #{}).
-%% @end
-%%--------------------------------------------------------------------
--spec init_pool(pool(), non_neg_integer(), non_neg_integer(), non_neg_integer()) -> ok | no_return().
-init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) ->
-    init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, #{}).
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Inits the pool as an internal service to allow failover.
 %% @end
 %%--------------------------------------------------------------------
@@ -241,7 +232,7 @@ init_pool_service(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Op
 -spec restart_tasks(pool(), pool_options(), node()) -> ok | no_return().
 restart_tasks(PoolName, Options, Node) ->
     Executor = maps:get(executor, Options, ?DEFAULT_ENVIRONMENT_ID),
-    CallbackModules = maps:get(callback_modules, Options, [binary_to_atom(PoolName, utf8)]),
+    CallbackModules = maps:get(callback_modules, Options),
     LocalNode = node(),
     ok = traverse_tasks_scheduler:reset_node_ongoing_tasks(PoolName, Node),
 
