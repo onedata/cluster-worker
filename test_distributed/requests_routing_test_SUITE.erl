@@ -384,7 +384,7 @@ test_get(Size) ->
     end, Seq),
     Diff5 = stopwatch:read_micros(Stopwatch5),
 
-    ct:pal("Get test for size ~p: tuple ~p, list ~p, map ~p, gb_set ~p, gb_tree ~p",
+    ct:pal("Get test for size ~tp: tuple ~tp, list ~tp, map ~tp, gb_set ~tp, gb_tree ~tp",
         [Size, Diff1, Diff2, Diff3, Diff4, Diff5]).
 
 put_test(Size) ->
@@ -424,7 +424,7 @@ put_test(Size) ->
     end, gb_trees:empty(), Seq),
     Diff5 = stopwatch:read_micros(Stopwatch5),
 
-    ct:pal("Put test for size ~p: tuple ~p, list ~p, map ~p, gb_set ~p, gb_tree ~p",
+    ct:pal("Put test for size ~tp: tuple ~tp, list ~tp, map ~tp, gb_set ~tp, gb_tree ~tp",
         [Size, Diff1, Diff2, Diff3, Diff4, Diff5]).
 
 del_test(Size) ->
@@ -460,7 +460,7 @@ del_test(Size) ->
     end, Seq),
     Diff5 = stopwatch:read_micros(Stopwatch5),
 
-    ct:pal("Del test for size ~p: list ~p, map ~p, gb_set ~p, gb_tree ~p",
+    ct:pal("Del test for size ~tp: list ~tp, map ~tp, gb_set ~tp, gb_tree ~tp",
         [Size, Diff2, Diff3, Diff4, Diff5]).
 
 test_tree(Size) ->
@@ -485,5 +485,5 @@ test_tree(Size) ->
     end, Tree2, Seq3),
     Diff3 = stopwatch:read_micros(Stopwatch3),
 
-    ct:pal("Tree test for size ~p: add 1: ~p, del half: ~p, add 2: ~p",
+    ct:pal("Tree test for size ~tp: add 1: ~tp, del half: ~tp, add 2: ~tp",
         [Size, Diff1, Diff2, Diff3]).

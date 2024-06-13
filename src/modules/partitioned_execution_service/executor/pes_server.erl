@@ -161,7 +161,7 @@ init([Plugin, KeyHash]) ->
         end
     catch
         Error:Reason:Stacktrace ->
-            ?error_stacktrace("PES server init error ~p:~p for plug-in ~p and hash ~p",
+            ?error_stacktrace("PES server init error ~tp:~tp for plug-in ~tp and hash ~tp",
                 [Error, Reason, Plugin, KeyHash], Stacktrace),
             pes_process_manager:deregister_server(Plugin, KeyHash),
             {stop, Reason}
@@ -181,7 +181,7 @@ handle_call(?PES_CALL(Request), _From, #state{
         {reply, RequestAns, reset_idle_timeout_timer(State#state{executor_state = UpdatedExecutorState})}
     catch
         Error:Reason:Stacktrace ->
-            ?error_stacktrace("PES server handle_call error ~p:~p for plug-in ~p and request ~p",
+            ?error_stacktrace("PES server handle_call error ~tp:~tp for plug-in ~tp and request ~tp",
                 [Error, Reason, Plugin, Request], Stacktrace),
             {reply, ?ERROR_INTERNAL_SERVER_ERROR, reset_idle_timeout_timer(State)}
     end;
@@ -333,7 +333,7 @@ handle_cast_internal(Request, #state{
         pes_plugin:handle_cast(Plugin, Request, ExecutorState)
     catch
         Error:Reason:Stacktrace ->
-            ?error_stacktrace("PES server handle_cast error ~p:~p for plug-in ~p and request ~p",
+            ?error_stacktrace("PES server handle_cast error ~tp:~tp for plug-in ~tp and request ~tp",
                 [Error, Reason, Plugin, Request], Stacktrace),
             ExecutorState
     end,

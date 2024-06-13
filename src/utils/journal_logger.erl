@@ -28,7 +28,7 @@
 -spec log(string()) -> ok.
 log(Message) ->
     {Date, Time} = lager_util:format_time(lager_util:maybe_utc(lager_util:localtime_ms())),
-    write_to_log_file("[~s ~s] ~s~n", [Date, Time, Message]).
+    write_to_log_file("[~ts ~ts] ~ts~n", [Date, Time, Message]).
 
 
 % useful for better readability of the logs

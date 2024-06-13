@@ -155,7 +155,7 @@ browse(Id, BrowseOpts) ->
         {error, not_found} ->
             ?ERROR_NOT_FOUND;
         {error, _} = Error ->
-            ?report_internal_server_error("returned error: ~p", [Error])
+            ?report_internal_server_error("returned error: ~tp", [Error])
     end.
 
 
@@ -234,14 +234,14 @@ resolve_threshold_opt(Key, Opts) ->
     if
         RequestedThreshold > MaxThreshold ->
             ?warning(
-                "Requested an audit log with ~s of ~B, which is greater than allowed maximum (~B), "
+                "Requested an audit log with ~ts of ~B, which is greater than allowed maximum (~B), "
                 "using the max value instead",
                 [Key, RequestedThreshold, MaxThreshold]
             ),
             MaxThreshold;
         RequestedThreshold < MinThreshold ->
             ?warning(
-                "Requested an audit log with ~s of ~B, which is lower than allowed minimum (~B), "
+                "Requested an audit log with ~ts of ~B, which is lower than allowed minimum (~B), "
                 "using the min value instead",
                 [Key, RequestedThreshold, MinThreshold]
             ),

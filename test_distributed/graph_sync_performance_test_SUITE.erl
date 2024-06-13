@@ -424,7 +424,7 @@ random_node(Config) ->
 
 get_gs_ws_url(Config) ->
     NodeIP = test_utils:get_docker_ip(random_node(Config)),
-    str_utils:format_bin("wss://~s:~B/", [NodeIP, ?GS_PORT]).
+    str_utils:format_bin("wss://~ts:~B/", [NodeIP, ?GS_PORT]).
 
 
 start_gs_listener(Node) ->

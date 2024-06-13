@@ -95,7 +95,7 @@ inf_log_test_() ->
         end,
         lists:flatmap(fun({Name, Fun}) ->
             lists:map(fun(MaxEntriesPerNode) ->
-                {timeout, 120, {str_utils:format("~s [~B]", [Name, MaxEntriesPerNode]), fun() ->
+                {timeout, 120, {str_utils:format("~ts [~B]", [Name, MaxEntriesPerNode]), fun() ->
                     LogId = create_log_for_test(#{
                         max_entries_per_node => MaxEntriesPerNode
                     }),

@@ -118,7 +118,7 @@ init_supervisors() ->
         ) of
             {ok, _} -> ok;
             {error, {already_started, _}} ->
-                ?debug("Tp supervisor ~p already started", [Name]),
+                ?debug("Tp supervisor ~tp already started", [Name]),
                 ok
         end
     end, datastore_multiplier:get_names(?TP_ROUTER_SUP)).
@@ -349,7 +349,7 @@ wait_and_check([{Ref, Pid} | Tail]) ->
         ok ->
             wait_and_check(Tail);
         Error ->
-            ?error("Error waiting for tp proocess ~p ans: ~p", [Pid, Error]),
+            ?error("Error waiting for tp proocess ~tp ans: ~tp", [Pid, Error]),
             Error
     end.
 

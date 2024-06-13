@@ -447,7 +447,7 @@ fix_description(ExtendedCtx, Pool, TaskId, NodeToFix) ->
             SDone = maps:get(slave_jobs_done, Description, 0),
             SFailed = maps:get(slave_jobs_failed, Description, 0),
 
-            ?info("Fixing task description after restart: ~s", [?autoformat([Pool, TaskId, Task])]),
+            ?info(?autoformat_with_msg("Fixing task description after restart: ", [Pool, TaskId, Task])),
             FinalDescription = Description#{
                 master_jobs_delegated => MDone + MFailed,
                 slave_jobs_delegated => SDone + SFailed

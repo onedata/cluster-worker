@@ -174,13 +174,13 @@ configure_throttling(SendTo) ->
 
         case FilteredConfigResult of
             [] ->
-                log_monitoring_stats("No throttling: config: ~p, tp num ~p,
-                    db queue max ~p, flush queue ~p, db queue sum ~p, tp sizes sum ~p, mem usage ~p",
+                log_monitoring_stats("No throttling: config: ~tp, tp num ~tp,
+                    db queue max ~tp, flush queue ~tp, db queue sum ~tp, tp sizes sum ~tp, mem usage ~tp",
                     [ConfigResult, TPNum, DBQueueMax, FlushQueue, DBQueueSum, TPSizesSum, MemUsage]),
                 plan_next_throttling_check();
             _ ->
-                Msg = "Throttling config: ~p, tp num ~p, db queue max ~p,
-                    db queue sum ~p, flush queue ~p, tp sizes sum ~p, mem usage ~p",
+                Msg = "Throttling config: ~tp, tp num ~tp, db queue max ~tp,
+                    db queue sum ~tp, flush queue ~tp, tp sizes sum ~tp, mem usage ~tp",
                 Args = [ConfigResult, TPNum, DBQueueMax, FlushQueue, DBQueueSum, TPSizesSum, MemUsage],
                 log_monitoring_stats(Msg, Args),
                 plan_next_throttling_check(true)
@@ -190,7 +190,7 @@ configure_throttling(SendTo) ->
             % Debug log only, possible during start of the system when connection to
             % database is not ready
             log_monitoring_stats("Error during throttling configuration: "
-            "~p:~p, ~p", [E1, E2, Stacktrace]),
+            "~tp:~tp, ~tp", [E1, E2, Stacktrace]),
             plan_next_throttling_check()
     end,
     ?MODULE:send_after(CheckInterval, SendTo, {timer, configure_throttling}),
@@ -272,7 +272,7 @@ set_idle_time(ProcNum) ->
     Multip = max(0, min(1, (ProcNum - Idle1) / (Idle2 - Idle1))),
     NewIdleTimeout = round(IdleTimeout - Multip * (IdleTimeout - MinIdleTimeout)),
 
-    log_monitoring_stats("New idle time: ~p", [NewIdleTimeout]),
+    log_monitoring_stats("New idle time: ~tp", [NewIdleTimeout]),
 
     node_cache:put(?MEMORY_PROC_IDLE_KEY, NewIdleTimeout).
 

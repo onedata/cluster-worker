@@ -85,7 +85,7 @@ call(Module, Args, Key, Request, Timeout, Attempts) ->
                     {error, Reason}
             end;
         _ ->
-            ?debug("Tp internal call, args: ~p", [{Module, Args, Key, Request}]),
+            ?debug("Tp internal call, args: ~tp", [{Module, Args, Key, Request}]),
             {error, internal_call}
     end.
 

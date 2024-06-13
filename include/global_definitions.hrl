@@ -44,6 +44,6 @@
 -define(HEALTHCHECK_ERROR_LOG_MSG(_Msg),
     HEALTHCHECK_ERROR_LOG(_Msg, [])).
 -define(HEALTHCHECK_ERROR_LOG_MSG(_Msg, _Args),
-    lists:flatten(io_lib:format("Healthcheck error in ~p on node ~p: " ++ _Msg, [?MODULE, node()] ++ _Args))).
+    lists:flatten(io_lib:format("Healthcheck error in ~tp on node ~tp: " ++ _Msg, [?MODULE, node()] ++ _Args))).
 
 -endif.

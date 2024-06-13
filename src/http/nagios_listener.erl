@@ -45,7 +45,7 @@ port() ->
 %%--------------------------------------------------------------------
 -spec start() -> ok | {error, Reason :: term()}.
 start() ->
-    ?info("Starting '~p' server...", [?NAGIOS_LISTENER]),
+    ?info("Starting '~tp' server...", [?NAGIOS_LISTENER]),
 
     {ok, NbAcceptors} = application:get_env(
         ?CLUSTER_WORKER_APP_NAME, http_number_of_acceptors
@@ -79,9 +79,9 @@ start() ->
         }),
     case Result of
         {ok, _} ->
-            ?info("Server '~p' started successfully", [?NAGIOS_LISTENER]);
+            ?info("Server '~tp' started successfully", [?NAGIOS_LISTENER]);
         _ ->
-            ?error("Could not start server '~p' - ~p", [?NAGIOS_LISTENER, Result]),
+            ?error("Could not start server '~tp' - ~tp", [?NAGIOS_LISTENER, Result]),
             Result
     end.
 
@@ -93,13 +93,13 @@ start() ->
 %%--------------------------------------------------------------------
 -spec stop() -> ok | {error, Reason :: term()}.
 stop() ->
-    ?info("Stopping '~p' server...", [?NAGIOS_LISTENER]),
+    ?info("Stopping '~tp' server...", [?NAGIOS_LISTENER]),
 
     case cowboy:stop_listener(?NAGIOS_LISTENER) of
         ok ->
-            ?info("Server '~p' stopped", [?NAGIOS_LISTENER]);
+            ?info("Server '~tp' stopped", [?NAGIOS_LISTENER]);
         {error, Error} ->
-            ?error("Error on stopping server ~p: ~p", [?NAGIOS_LISTENER, Error]),
+            ?error("Error on stopping server ~tp: ~tp", [?NAGIOS_LISTENER, Error]),
             {error, nagios_stop_error}
     end.
 

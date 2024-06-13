@@ -147,10 +147,10 @@ init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
         {broken_root, Tree} ->
             % The tree has been broken by abnormal termination of application
             % Some data could be lost, proceeding with fixed root
-            ?THROTTLE_LOG(Key, TreeId, ?error("Broken bp_tree~s", [?autoformat([TreeId, Key, Ctx])])),
+            ?THROTTLE_LOG(Key, TreeId, ?error(?autoformat_with_msg("Broken bp_tree", [TreeId, Key, Ctx]))),
             {ok, Tree};
         {{error, interrupted_call} = Error, Tree} ->
-            ?THROTTLE_LOG(Key, TreeId, ?warning("Interrupted call (tree init)~s", [?autoformat([TreeId, Key, Ctx])])),
+            ?THROTTLE_LOG(Key, TreeId, ?warning(?autoformat_with_msg("Interrupted call (tree init)", [TreeId, Key, Ctx]))),
             case Ctx of
                 #{handle_interrupted_call := false} ->
                     Error;

@@ -197,7 +197,7 @@ send_store_backup_request(ProcessKey, Keys, CacheRequests, #data{propagation_met
             ?debug("Cannot broadcast HA data - slave down"),
             Data;
         Error ->
-            ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
+            ?warning("Cannot broadcast HA data because of error: ~tp", [Error]),
             Data
     end;
 send_store_backup_request(ProcessKey, Keys, CacheRequests, #data{link_status = ?SLAVE_NOT_LINKED,
@@ -211,7 +211,7 @@ send_store_backup_request(ProcessKey, Keys, CacheRequests, #data{link_status = ?
             ?debug("Cannot broadcast HA data to backup changed documents - slave down"),
             Data;
         Error ->
-            ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
+            ?warning("Cannot broadcast HA data because of error: ~tp", [Error]),
             Data
     end;
 send_store_backup_request(_ProcessKey, Keys, CacheRequests, #data{slave_pid = Pid} = Data) ->

@@ -189,7 +189,7 @@ set_standby_mode_and_broadcast_master_up_message() ->
 
 -spec change_config(nodes_assigned_per_key(), propagation_method()) -> ok.
 change_config(NodesAssignedPerKey, PropagationMethod) ->
-    ?notice("New HA configuration: nodes assiged per key: ~p, propagation method: ~p - "
+    ?notice("New HA configuration: nodes assiged per key: ~tp, propagation method: ~tp - "
         "broadcasting information to tp processes", [NodesAssignedPerKey, PropagationMethod]),
     consistent_hashing:set_nodes_assigned_per_label(NodesAssignedPerKey),
     clean_backup_nodes_cache(),
@@ -202,7 +202,7 @@ change_config(NodesAssignedPerKey, PropagationMethod) ->
 
 -spec change_propagation_method(propagation_method()) -> ok.
 change_propagation_method(PropagationMethod) ->
-    ?notice("New HA propagation method: ~p - broadcasting information to tp processes",
+    ?notice("New HA propagation method: ~tp - broadcasting information to tp processes",
         [PropagationMethod]),
     set_propagation_method_env(PropagationMethod),
     broadcast_async_management_message(?CONFIG_CHANGED).
