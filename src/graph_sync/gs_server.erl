@@ -34,6 +34,7 @@
 
 
 %% API
+-export([circuit_breaker_assert_close/1]).
 -export([handshake/5]).
 -export([report_heartbeat/1]).
 -export([cleanup_session/1, terminate_connection/1]).
@@ -56,6 +57,14 @@ gs_logic_plugin_module() ->
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+-spec circuit_breaker_assert_close(translator()) -> ok | no_return().
+circuit_breaker_assert_close(Translator) ->
+    case Translator:circuit_breaker_status() of
+        open -> throw(?ERROR_SERVICE_UNAVAILABLE);
+        closed -> ok
+    end.
+
 
 %%--------------------------------------------------------------------
 %% @doc

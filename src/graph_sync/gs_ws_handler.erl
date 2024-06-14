@@ -100,6 +100,7 @@ websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
         cookies = Cookies,
         translator = Translator
     } = State,
+    gs_server:assert_service_available(),
     % If there was no handshake yet, expect only handshake messages
     {Response, NewState} = case decode_body(?BASIC_PROTOCOL, Data) of
         {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
@@ -119,7 +120,10 @@ websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
     {ok, JSONMap} = gs_protocol:encode(?BASIC_PROTOCOL, Response),
     {reply, {text, json_utils:encode(JSONMap)}, NewState};
 
-websocket_handle({text, Data}, SessionData = #gs_session{protocol_version = ProtoVersion}) ->
+websocket_handle({text, Data}, SessionData = #gs_session{
+    protocol_version = ProtoVersion
+}) ->
+    gs_server:assert_service_available(),
     case decode_body(ProtoVersion, Data) of
         {ok, Requests} ->
             % process_request_async should not crash, but if it does,
@@ -140,7 +144,8 @@ websocket_handle({ping, _Payload}, State) ->
 
 websocket_handle(pong, #pre_handshake_state{} = State) ->
     {ok, State};
-websocket_handle(pong, #gs_session{} = SessionData) ->
+
+websocket_handle(pong,  #gs_session{} = SessionData) ->
     % pongs are received in response to the keepalive pings sent to the client
     % (see 'keepalive' periodical message)
     gs_server:report_heartbeat(SessionData),

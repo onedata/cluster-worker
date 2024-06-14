@@ -108,3 +108,6 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback is_type_supported(gri:gri()) -> boolean().
+
+
+-callback assert_service_available() -> ok | no_return().
