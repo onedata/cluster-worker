@@ -10,7 +10,7 @@
   0},
  {<<"cberl">>,
   {git,"ssh://git@git.onedata.org:7999/vfs/cberl.git",
-       {ref,"1158041f45ee133dae20a6ca20159cefdf0b0638"}},
+       {ref,"1fb5eec7d78d66bdf94703c0f3a0101ae1db78c0"}},
   0},
  {<<"certifi">>,{pkg,<<"certifi">>,<<"2.6.1">>},2},
  {<<"cluster_manager">>,
