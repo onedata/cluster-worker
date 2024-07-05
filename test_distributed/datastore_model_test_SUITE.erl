@@ -1080,7 +1080,7 @@ link_del_should_delay_inactivate(Config) ->
     end, undefined, Inactivated),
 
     case Timestamp of
-        undefined -> ct:print("Inactivated ~p", [Inactivated]);
+        undefined -> ct:print("Inactivated ~tp", [Inactivated]);
         _ -> ok
     end,
 
@@ -1796,12 +1796,12 @@ links_performance_base(Config, Order) ->
     DelTime2Diff = T3Del - T2Del,
     DelTime3Diff = T5Del - T4Del,
     DelTime4Diff = T7Del - T6Del,
-    ct:pal("Results for order ~p, links num ~p:~n"
-    "add all ~p, add half ~p, add second half ~p~n"
-    "list all ~p, list offset (batch 100) ~p, list offset (batch 2000) ~p~n"
-    "list token (batch 100) ~p, list token (batch 2000) ~p~n"
-    "list by id (batch 2000) ~p, list by id with neg offest (batch 2000) ~p~n"
-    "dell all ~p, dell all reversed ~p, dell 1/3 ~p, dell one by one ~p~n",
+    ct:pal("Results for order ~tp, links num ~tp:~n"
+    "add all ~tp, add half ~tp, add second half ~tp~n"
+    "list all ~tp, list offset (batch 100) ~tp, list offset (batch 2000) ~tp~n"
+    "list token (batch 100) ~tp, list token (batch 2000) ~tp~n"
+    "list by id (batch 2000) ~tp, list by id with neg offest (batch 2000) ~tp~n"
+    "dell all ~tp, dell all reversed ~tp, dell 1/3 ~tp, dell one by one ~tp~n",
         [Order, LinksNum, AddTime1Diff, AddTime2Diff, AddTime3Diff,
             ListTimeDiff1, ListTimeDiff2, ListTimeDiff3,
             ListTimeDiff4, ListTimeDiff5, ListTimeDiff6, ListTimeDiff7,
@@ -1811,7 +1811,7 @@ create_get_performance(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, Times} = ?assertMatch({ok, _},
         rpc:call(Worker, ?MODULE, test_create_get, [])),
-    ct:print("Times: ~p", [Times]),
+    ct:print("Times: ~tp", [Times]),
     ok.
 
 test_create_get() ->
@@ -1920,14 +1920,14 @@ infinite_log_append_performance_test_base(Config) ->
                 AvgTime = repeat_infinite_log_appends(Repeats, Worker, Model, LogId, LogSize, ProcCount, AppendsPerProcess),
                 ?assertMatch(ok, rpc:call(Worker, Model, infinite_log_destroy, [LogId])),
                 ct:pal("Results for infinite log append tests:\n"
-                "model:                  ~p~n"
-                "process count:          ~p~n"
-                "process repeats:        ~p~n"
-                "log size:               ~p~n"
-                "max entries per node:   ~p~n"
-                "size pruning threshold: ~p~n"
-                "age pruning threshold:  ~p~n"
-                "efficiency:             ~p [appends/s]",
+                "model:                  ~tp~n"
+                "process count:          ~tp~n"
+                "process repeats:        ~tp~n"
+                "log size:               ~tp~n"
+                "max entries per node:   ~tp~n"
+                "size pruning threshold: ~tp~n"
+                "age pruning threshold:  ~tp~n"
+                "efficiency:             ~tp [appends/s]",
                     [Model, ProcCount, AppendsPerProcess, LogSize, MaxEntriesPerNode, SizePruningThreshold, AgePruningThreshold,
                         AppendsCount / AvgTime * 1000])
             end, MaxEntriesPerNodeList)
@@ -2037,18 +2037,18 @@ infinite_log_list_performance_test_base(Config) ->
                                 AvgTime = repeat_infinite_log_listings(Repeats, Worker, Model, LogId, ListOpts, ProcCount, ListingsPerProcess),
 
                                 ct:pal("Results for infinite log list tests:~n"
-                                "model:                  ~p~n"
-                                "process count:          ~p~n"
-                                "process repeats:        ~p~n"
-                                "log size:               ~p~n"
-                                "max entries per node:   ~p~n"
-                                "size pruning threshold: ~p~n"
-                                "age pruning threshold:  ~p~n"
-                                "list direction:         ~p~n"
-                                "list starting from:     ~p~n"
-                                "offset:                 ~p~n"
-                                "limit:                  ~p~n"
-                                "efficiency:             ~p [listings/s]",
+                                "model:                  ~tp~n"
+                                "process count:          ~tp~n"
+                                "process repeats:        ~tp~n"
+                                "log size:               ~tp~n"
+                                "max entries per node:   ~tp~n"
+                                "size pruning threshold: ~tp~n"
+                                "age pruning threshold:  ~tp~n"
+                                "list direction:         ~tp~n"
+                                "list starting from:     ~tp~n"
+                                "offset:                 ~tp~n"
+                                "limit:                  ~tp~n"
+                                "efficiency:             ~tp [listings/s]",
                                     [Model, ProcCount, ListingsPerProcess, LogSize, MaxEntriesPerNode, SizePruningThreshold,
                                         AgePruningThreshold, ListingDirection, ListingStartFromParsed, ListingOffset,
                                         ListingLimit, 1000 * ProcCount * ListingsPerProcess / AvgTime])

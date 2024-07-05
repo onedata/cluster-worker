@@ -321,7 +321,7 @@ cberl_test_base(Config) ->
 
     FinalAns = maps:map(fun(_K, V) -> V / Repeats/ ProcsPerOperation end, FinalAns0),
 
-    ct:pal("Avg batch times: ~p", [FinalAns]),
+    ct:pal("Avg batch times: ~tp", [FinalAns]),
     ClientPid ! stop,
 
     lists:foldl(fun({K, V}, Acc) ->

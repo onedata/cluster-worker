@@ -900,7 +900,7 @@ compare_slice(ExpectedSlice, SliceLayout, ListWindowsOptions) ->
         timestamp = T, value = V, first_measurement_timestamp = undefined, last_measurement_timestamp = undefined
     } end, ValuesList) end, ExpectedSlice),
     AreSlicesEqual = Slice =:= MappedExpectedSlice,
-    AreSlicesEqual orelse eunit_utils:debug_log("ExpectedSlice: ~p~nActualSlice  : ~p", [ExpectedSlice, Slice]),
+    AreSlicesEqual orelse eunit_utils:debug_log("ExpectedSlice: ~tp~nActualSlice  : ~tp", [ExpectedSlice, Slice]),
     AreSlicesEqual.
 
 

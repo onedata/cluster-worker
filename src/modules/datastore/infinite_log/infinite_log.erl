@@ -186,7 +186,7 @@ list(Ctx, LogId, Opts, AccessMode, InitialBatch) ->
                 {Res, FinalDatastoreBatch} = infinite_log_browser:list(Ctx, Sentinel, Opts, AcquireBatch),
                 {{ok, Res}, FinalDatastoreBatch}
             catch Class:Reason:Stacktrace ->
-                ?error_stacktrace("Unexpected error during infinite log listing (id: ~s) - ~w:~p", [
+                ?error_stacktrace("Unexpected error during infinite log listing (id: ~ts) - ~w:~tp", [
                     LogId, Class, Reason
                 ], Stacktrace),
                 {{error, internal_server_error}, AcquireBatch}

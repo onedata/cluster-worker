@@ -147,7 +147,7 @@ websocket_handle(pong, #gs_session{} = SessionData) ->
     {ok, SessionData};
 
 websocket_handle(Msg, SessionData) ->
-    ?warning("Unexpected frame in GS websocket handler: ~p", [Msg]),
+    ?warning("Unexpected frame in GS websocket handler: ~tp", [Msg]),
     {ok, SessionData}.
 
 
@@ -180,14 +180,14 @@ websocket_info({push, Msg}, #gs_session{protocol_version = ProtoVer} = SessionDa
         Type:Message:Stacktrace ->
             ?error_stacktrace(
                 "Discarding GS message to client as "
-                "it cannot be encoded - ~p:~p~nMessage: ~p", [
+                "it cannot be encoded - ~tp:~tp~nMessage: ~tp", [
                     Type, Message, Msg
                 ], Stacktrace),
             {ok, SessionData}
     end;
 
 websocket_info(Msg, SessionData) ->
-    ?warning("Unexpected message in GS websocket handler: ~p", [Msg]),
+    ?warning("Unexpected message in GS websocket handler: ~tp", [Msg]),
     {ok, SessionData}.
 
 
@@ -206,7 +206,7 @@ websocket_info(Msg, SessionData) ->
 terminate(_Reason, _Req, #pre_handshake_state{}) ->
     ok;
 terminate(_Reason, _Req, #gs_session{id = SessionId} = SessionData) ->
-    ?debug("Graph Sync connection terminating, sessionId: ~s", [SessionId]),
+    ?debug("Graph Sync connection terminating, sessionId: ~ts", [SessionId]),
     gs_server:cleanup_session(SessionData),
     ok.
 
@@ -270,7 +270,7 @@ process_request_async(SessionData, Request) ->
                 gs_protocol:generate_error_response(Request, Error);
             Type:Message:Stacktrace ->
                 ?error_stacktrace(
-                    "Unexpected error while handling graph_sync request - ~p:~p",
+                    "Unexpected error while handling graph_sync request - ~tp:~tp",
                     [Type, Message],
                     Stacktrace
                 ),

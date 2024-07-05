@@ -165,15 +165,15 @@ handle_call(#datastore_internal_requests_batch{ref = Ref, requests = Requests, m
                 {badrpc, nodedown} ->
                     % TODO VFS-6169 - wrong return status in such case
                     % TODO VFS-6295 - log to dedicated logfile
-                    ?debug("Proxy call to failed node ~p for requests ~p", [RemoteNode, RemoteRequestsReversed]),
+                    ?debug("Proxy call to failed node ~tp for requests ~tp", [RemoteNode, RemoteRequestsReversed]),
                     handle_requests(RemoteRequests, true, State2);
                 {badrpc, Reason} ->
-                    ?error("Proxy call to node ~p badrpc ~p for requests ~p",
+                    ?error("Proxy call to node ~tp badrpc ~tp for requests ~tp",
                         [RemoteNode, Reason, RemoteRequestsReversed]),
                     send_proxy_info(RemoteRequestsReversed, {error, Reason}),
                     State2;
                 Error ->
-                    ?error("Proxy call to node ~p error ~p for requests ~p",
+                    ?error("Proxy call to node ~tp error ~tp for requests ~tp",
                         [RemoteNode, Error, RemoteRequestsReversed]),
                     send_proxy_info(RemoteRequestsReversed, Error),
                     State2

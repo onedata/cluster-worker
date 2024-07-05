@@ -255,7 +255,7 @@ start_worker(Module, Args, Options) ->
                 ) of
                     {ok, _} -> ok;
                     {error, {already_started, _}} ->
-                        ?warning("Module ~p already started", [Module]),
+                        ?warning("Module ~tp already started", [Module]),
                         ok
                 end,
                 case supervisor:start_child(
@@ -266,7 +266,7 @@ start_worker(Module, Args, Options) ->
                 ) of
                     {ok, _} -> ok;
                     {error, {already_started, _}} ->
-                        ?warning("Module supervisor ~p already started", [Module]),
+                        ?warning("Module supervisor ~tp already started", [Module]),
                         ok
                 end;
             _ ->
@@ -278,7 +278,7 @@ start_worker(Module, Args, Options) ->
                 ) of
                     {ok, _} -> ok;
                     {error, {already_started, _}} ->
-                        ?warning("Module supervisor ~p already started", [Module]),
+                        ?warning("Module supervisor ~tp already started", [Module]),
                         ok
                 end,
                 case supervisor:start_child(
@@ -290,15 +290,15 @@ start_worker(Module, Args, Options) ->
                 ) of
                     {ok, _} -> ok;
                     {error, {already_started, _}} ->
-                        ?warning("Module ~p already started", [Module]),
+                        ?warning("Module ~tp already started", [Module]),
                         ok
                 end
         end,
-        ?info("Worker: ~s started", [Module]),
+        ?info("Worker: ~ts started", [Module]),
         ok
     catch
         _:Error:Stacktrace ->
-            ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module], Stacktrace),
+            ?error_stacktrace("Error: ~tp during start of worker: ~ts", [Error, Module], Stacktrace),
             {error, Error}
     end.
 
@@ -372,7 +372,7 @@ init([]) ->
         }}
     catch
         _:Error:Stacktrace ->
-            ?error_stacktrace("Cannot start node_manager: ~p", [Error], Stacktrace),
+            ?error_stacktrace("Cannot start node_manager: ~tp", [Error], Stacktrace),
             {stop, cannot_start_node_manager}
     end.
 
@@ -453,7 +453,7 @@ handle_cast(?INIT_STEP_MSG(Step), State) ->
         end
     catch
         Class:Reason:Stacktrace ->
-            ?error_exception("Error during cluster initialization in step ~p", [Step], Class, Reason, Stacktrace),
+            ?error_exception("Error during cluster initialization in step ~tp", [Step], Class, Reason, Stacktrace),
             report_step_result(Step, failure)
     end,
     {noreply, State};
@@ -567,7 +567,7 @@ handle_cast({update_scheduler_info, SI}, State) ->
     {noreply, State#state{scheduler_info = SI}};
 
 handle_cast(?FORCE_STOP(ReasonMsg), State) ->
-    ?critical("Received stop signal from cluster manager: ~s", [ReasonMsg]),
+    ?critical("Received stop signal from cluster manager: ~ts", [ReasonMsg]),
     ?critical("Force stopping application..."),
     init:stop(),
     {noreply, State};
@@ -635,10 +635,10 @@ handle_info({nodedown, Node}, State) ->
     {ok, CMNodes} = ?CALL_PLUGIN(cm_nodes, []),
     case lists:member(Node, CMNodes) of
         false ->
-            ?warning("Node manager received unexpected nodedown msg: ~p", [{nodedown, Node}]),
+            ?warning("Node manager received unexpected nodedown msg: ~tp", [{nodedown, Node}]),
             {noreply, State};
         true ->
-            ?critical("Connection to cluster manager node (~p) lost, shutting down", [Node]),
+            ?critical("Connection to cluster manager node (~tp) lost, shutting down", [Node]),
             init:stop(),
             {stop, normal, State}
     end;
@@ -669,7 +669,7 @@ handle_info(Request, State) ->
 terminate(Reason, _State) ->
     % TODO VFS-6339 - Unregister node during normal stop not to start HA procedures
     journal_logger:log("Application gracefully stopped"),
-    ?info("Application gracefully stopped. Shutting down ~w due to ~p", [?MODULE, Reason]).
+    ?info("Application gracefully stopped. Shutting down ~w due to ~tp", [?MODULE, Reason]).
 
 
 %%--------------------------------------------------------------------
@@ -707,7 +707,7 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
     case whereis(?MAIN_WORKER_SUPERVISOR_NAME) of
         undefined ->
             % Main application did not started workers supervisor
-            ?debug("Workers supervisor not started, retrying in ~p ms", [Interval]),
+            ?debug("Workers supervisor not started, retrying in ~tp ms", [Interval]),
             State#state{cm_con_status = not_connected};
         _ ->
             {ok, CMNodes} = ?CALL_PLUGIN(cm_nodes, []),
@@ -717,7 +717,7 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
                     gen_server2:cast({global, ?CLUSTER_MANAGER}, {cm_conn_req, node()}),
                     State#state{cm_con_status = connected};
                 Err ->
-                    ?debug("No connection with cluster manager: ~p, retrying in ~p ms", [Err, Interval]),
+                    ?debug("No connection with cluster manager: ~tp, retrying in ~tp ms", [Err, Interval]),
                     State#state{cm_con_status = not_connected}
             end
     end.
@@ -765,7 +765,7 @@ cluster_init_step(?UPGRADE_CLUSTER) ->
                     upgrade_cluster(),
                     success
                 catch Type:Reason:Stacktrace ->
-                    ?error_stacktrace("Failed to upgrade cluster - ~p:~p", [
+                    ?error_stacktrace("Failed to upgrade cluster - ~tp:~tp", [
                         Type, Reason
                     ], Stacktrace),
                     failure
@@ -807,7 +807,7 @@ cluster_init_step(?CLUSTER_READY) ->
 upgrade_cluster() ->
     case get_current_cluster_generation() of
         {error, _} = Error ->
-            ?error("Error when retrieving current cluster generation: ~p", [Error]),
+            ?error("Error when retrieving current cluster generation: ~tp", [Error]),
             throw(Error);
         {ok, CurrentGen} ->
             AllClusterGens = ?CALL_PLUGIN(cluster_generations, []),
@@ -822,21 +822,21 @@ upgrade_cluster() ->
     {OldestKnownGen :: cluster_generation(), ReadableVersion :: binary()}) -> ok.
 upgrade_cluster(CurrentGen, _InstalledGen, {OldestUpgradableGen, ReadableVersion}) when CurrentGen < OldestUpgradableGen ->
     ?critical("Cluster in too old version to be upgraded directly. Upgrade to intermediate version first."
-    "~nOldest supported version: ~s", [ReadableVersion]),
+    "~nOldest supported version: ~ts", [ReadableVersion]),
     throw({error, too_old_cluster_generation});
 
 upgrade_cluster(CurrentGen, InstalledGen, OldestUpgradableGen) when CurrentGen < InstalledGen ->
-    ?info("Upgrading cluster from generation ~p to ~p...", [CurrentGen, InstalledGen]),
+    ?info("Upgrading cluster from generation ~tp to ~tp...", [CurrentGen, InstalledGen]),
     {ok, NewGeneration} = ?CALL_PLUGIN(upgrade_cluster, [CurrentGen]),
     case NewGeneration > InstalledGen of
         true ->
-            ?error("Cluster upgraded to too high generation ~p. Installed generation: ~p",
+            ?error("Cluster upgraded to too high generation ~tp. Installed generation: ~tp",
                 [NewGeneration, InstalledGen]),
             throw({error, too_high_generation});
         false ->
             ok
     end,
-    ?info("Cluster succesfully upgraded to generation ~p", [NewGeneration]),
+    ?info("Cluster succesfully upgraded to generation ~tp", [NewGeneration]),
     {ok, _} = cluster_generation:save(NewGeneration),
     upgrade_cluster(NewGeneration, InstalledGen, OldestUpgradableGen);
 
@@ -916,16 +916,16 @@ init_net_connection([Node | Nodes]) ->
             global:sync(),
             case global:whereis_name(?CLUSTER_MANAGER) of
                 undefined ->
-                    ?error("Connection to node ~p global_synch error", [Node]),
+                    ?error("Connection to node ~tp global_synch error", [Node]),
                     rpc:eval_everywhere(erlang, disconnect_node, [node()]),
                     {error, global_synch};
                 _ ->
-                    ?debug("Connection to node ~p initialized", [Node]),
+                    ?debug("Connection to node ~tp initialized", [Node]),
                     erlang:monitor_node(Node, true),
                     ok
             end;
         pang ->
-            ?error("Cannot connect to node ~p", [Node]),
+            ?error("Cannot connect to node ~tp", [Node]),
             init_net_connection(Nodes)
     end.
 
@@ -955,7 +955,7 @@ init_workers(Workers) ->
             case gen_server2:call({global, ?CLUSTER_MANAGER},
                 {register_singleton_module, Module, node()}) of
                 ok ->
-                    ?info("Starting singleton module ~p", [Module]),
+                    ?info("Starting singleton module ~tp", [Module]),
                     ok = start_worker(Module, Args);
                 already_started ->
                     ok
@@ -1026,8 +1026,8 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
         andalso not LastPidAlive of
         true ->
             Pid = spawn(fun() ->
-                log_monitoring_stats("Monitoring state: ~p", [MonState]),
-                log_monitoring_stats("Erlang ets mem usage: ~p", [
+                log_monitoring_stats("Monitoring state: ~tp", [MonState]),
+                log_monitoring_stats("Erlang ets mem usage: ~tp", [
                     lists:reverse(lists:sort(lists:map(fun(N) ->
                         {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
                 ]),
@@ -1083,18 +1083,18 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                             end, lists:reverse(Top5B))
                 end,
 
-                log_monitoring_stats("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n"
-                "single proc memory cosumption (binary): ~p~n"
-                "aggregated memory consumption: ~p~n"
-                "simmilar procs: ~p~n"
-                "aggregated memory consumption (binary): ~p~n"
-                "simmilar procs (binary): ~p", [
+                log_monitoring_stats("Erlang Procs stats:~n procs num: ~tp~n single proc memory cosumption: ~tp~n"
+                "single proc memory cosumption (binary): ~tp~n"
+                "aggregated memory consumption: ~tp~n"
+                "simmilar procs: ~tp~n"
+                "aggregated memory consumption (binary): ~tp~n"
+                "simmilar procs (binary): ~tp", [
                     ProcNum, TopProcesses, TopProcessesBin, MergedStacks,
                     MergedStacks2, MergedStacksBin, MergedStacksBin2
                 ]),
 
                 % Log schedulers info
-                log_monitoring_stats("Schedulers basic info: all: ~p, online: ~p",
+                log_monitoring_stats("Schedulers basic info: all: ~tp, online: ~tp",
                     [erlang:system_info(schedulers), erlang:system_info(schedulers_online)]),
                 NewSchedulerInfo0 = erlang:statistics(scheduler_wall_time),
                 case is_list(NewSchedulerInfo0) of
@@ -1102,7 +1102,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                         NewSchedulerInfo = lists:sort(NewSchedulerInfo0),
                         gen_server2:cast(?NODE_MANAGER_NAME, {update_scheduler_info, NewSchedulerInfo}),
 
-                        log_monitoring_stats("Schedulers advanced info: ~p", [NewSchedulerInfo]),
+                        log_monitoring_stats("Schedulers advanced info: ~tp", [NewSchedulerInfo]),
                         case is_list(SchedulerInfo) of
                             true ->
                                 Percent = lists:map(fun({{I, A0, T0}, {I, A1, T1}}) ->
@@ -1110,7 +1110,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalys
                                 {A, T} = lists:foldl(fun({{_, A0, T0}, {_, A1, T1}}, {Ai, Ti}) ->
                                     {Ai + (A1 - A0), Ti + (T1 - T0)} end, {0, 0}, lists:zip(SchedulerInfo, NewSchedulerInfo)),
                                 Aggregated = A / T,
-                                log_monitoring_stats("Schedulers utilization percent: ~p, aggregated: ~p", [Percent, Aggregated]);
+                                log_monitoring_stats("Schedulers utilization percent: ~tp, aggregated: ~tp", [Percent, Aggregated]);
                             _ ->
                                 ok
                         end;
@@ -1365,7 +1365,7 @@ report_step_result(Step, Result) ->
 %% @private
 -spec human_readable_app_description() -> string().
 human_readable_app_description() ->
-    str_utils:format("~s v. ~s (build ~s)", [
+    str_utils:format("~ts v. ~ts (build ~ts)", [
         ?CALL_PLUGIN(app_name, []),
         ?CALL_PLUGIN(release_version, []),
         ?CALL_PLUGIN(build_version, [])
@@ -1397,14 +1397,14 @@ finalize_recovery() ->
 -spec handle_node_status_change_async(node(), NodeStatusNotificationType :: node_down | node_up | node_ready,
     HandlingFun :: fun(() -> ok)) -> ok.
 handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
-    ?info("Started processing transition of node ~p to status ~p", [Node, NewStatus]),
+    ?info("Started processing transition of node ~tp to status ~tp", [Node, NewStatus]),
     spawn(fun() ->
         try
             HandlingFun(),
-            ?info("Finished processing transition of node ~p to status ~p", [Node, NewStatus])
+            ?info("Finished processing transition of node ~tp to status ~tp", [Node, NewStatus])
         catch
             Error:Reason:Stacktrace ->
-                ?error_stacktrace("Error while processing transition of node ~p to status ~p: ~p:~p",
+                ?error_stacktrace("Error while processing transition of node ~tp to status ~tp: ~tp:~tp",
                     [Node, NewStatus, Error, Reason], Stacktrace)
         end
     end),

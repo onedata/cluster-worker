@@ -116,14 +116,14 @@ init([Bucket, Scope, Callback, PropagationSince]) ->
             Seq2 = max(Seq, SeqSafe),
             {ok, _, _} = couchbase_driver:update_counter(Ctx, SeqKey, Seq2 - Seq, Seq2),
 
-            ?warning("Wrong seq and seq_safe for scope ~p: seq_safe = ~p, "
-            "seq = ~p, new_seq = ~p", [Scope, SeqSafe, Seq, Seq2]),
+            ?warning("Wrong seq and seq_safe for scope ~tp: seq_safe = ~tp, "
+            "seq = ~tp, new_seq = ~tp", [Scope, SeqSafe, Seq, Seq2]),
             Seq2;
         _ ->
             Seq
     end,
 
-    ?info("~p for scope ~p init with seq: ~p, seq_safe ~p, propagation since ~p",
+    ?info("~tp for scope ~tp init with seq: ~tp, seq_safe ~tp, propagation since ~tp",
         [?MODULE, Scope, Seq3, SeqSafe, PropagationSince]),
 
     {ok, #state{
@@ -286,7 +286,7 @@ fetch_changes(#state{
                 end,
                 State2;
             Error ->
-                ?warning("Cannot fetch changes, error: ~p, scope: ~p, start: ~p, stop: ~p", [
+                ?warning("Cannot fetch changes, error: ~tp, scope: ~tp, start: ~tp, stop: ~tp", [
                     Error, Scope, SeqSafe2, Seq
                 ]),
 
@@ -384,7 +384,7 @@ ignore_change(Seq, State = #state{bucket = Bucket, scope = Scope},
                     end
             end;
         Error ->
-            ?error("Error during ignore change procedure ~p", [Error]),
+            ?error("Error during ignore change procedure ~tp", [Error]),
             {false, WorkersChecked}
     end.
 
@@ -405,7 +405,7 @@ ignore_change(Seq, Key, #state{bucket = Bucket}) ->
         {ok, _, #document{seq = Seq2}} when Seq2 < Seq -> undefined;
         {error, not_found} -> undefined;
         Error ->
-            ?error("Error during ignore change procedure ~p", [Error]),
+            ?error("Error during ignore change procedure ~tp", [Error]),
             false
     end.
 
@@ -487,7 +487,7 @@ propagate_changes(Since, #state{seq_safe = SeqSafe, interval = Interval,
             stream_docs(Changes, Bucket, UpperSeqNum, State),
             UpperSeqNum + 1;
         Error ->
-            ?error("Cannot get changes, error: ~p", [Error]),
+            ?error("Cannot get changes, error: ~tp", [Error]),
             Since
     end,
 

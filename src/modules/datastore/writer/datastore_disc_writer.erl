@@ -113,7 +113,7 @@ handle_cast(Request, #state{} = State) ->
     {stop, Reason :: term(), NewState :: state()}.
 handle_info(Info, #state{} = State) ->
     self() ! Info,
-    ?debug("Datastore_disc_writer info ~p", [Info]),
+    ?debug("Datastore_disc_writer info ~tp", [Info]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------

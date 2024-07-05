@@ -94,7 +94,7 @@ spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback, OnSucce
         Result = try
             {ok, do_spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback, OnSuccessFun)}
         catch Type:Reason:Stacktrace ->
-            ct:pal("Cannot start supervisor due to ~p:~p~nStacktrace: ~p", [
+            ct:pal("Cannot start supervisor due to ~tp:~tp~nStacktrace: ~tp", [
                 Type, Reason, Stacktrace
             ]),
             error
@@ -230,7 +230,7 @@ spawn_client(URL, SslOpts, Auth, Identity, PushCallback, OnSuccessFun, AttemptsL
         {error, _} = Error ->
             case AttemptsLeft =< 1 of
                 true ->
-                    ct:print("Failed to spawn GS client, no retries left. Last error was: ~p", [Error]),
+                    ct:print("Failed to spawn GS client, no retries left. Last error was: ~tp", [Error]),
                     error(failed_to_spawn_gs_client);
                 false ->
                     timer:sleep(rand:uniform(5000)),

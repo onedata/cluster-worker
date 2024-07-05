@@ -1245,7 +1245,7 @@ spawn_client(Config, ProtoVersions, Auth, ExpResult, PushCallback) ->
 get_gs_ws_url(Config) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
     NodeIP = test_utils:get_docker_ip(Node),
-    str_utils:format_bin("wss://~s:~B/", [NodeIP, ?GS_PORT]).
+    str_utils:format_bin("wss://~ts:~B/", [NodeIP, ?GS_PORT]).
 
 
 disconnect_client([]) ->

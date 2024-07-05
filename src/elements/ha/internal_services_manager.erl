@@ -113,9 +113,9 @@ takeover(FailedNode) ->
     case node_internal_services:update(MasterNodeId, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({UniqueName, Service}) ->
-                ?info("Starting takeover of service ~s from node ~ts", [UniqueName, FailedNode]),
+                ?info("Starting takeover of service ~ts from node ~ts", [UniqueName, FailedNode]),
                 init_service(Service, UniqueName, apply_takeover_fun, MasterNodeId),
-                ?info("Finished takeover of service ~s from node ~ts", [UniqueName, FailedNode])
+                ?info("Finished takeover of service ~ts from node ~ts", [UniqueName, FailedNode])
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
@@ -130,10 +130,10 @@ migrate_to_recovered_master(MasterNode) ->
     case node_internal_services:update(MasterNodeId, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({UniqueName, Service}) ->
-                ?info("Starting migration of service ~s to node ~ts", [UniqueName, MasterNode]),
+                ?info("Starting migration of service ~ts to node ~ts", [UniqueName, MasterNode]),
                 ok = internal_service:apply_migrate_fun(Service),
                 rpc:call(MasterNode, ?MODULE, init_service, [Service, UniqueName, apply_start_fun, MasterNodeId]),
-                ?info("Finished migration of service ~s to node ~ts", [UniqueName, MasterNode])
+                ?info("Finished migration of service ~ts to node ~ts", [UniqueName, MasterNode])
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
@@ -154,7 +154,7 @@ do_healthcheck(UniqueName, MasterNodeId, LastInterval) ->
     catch
         Class:Reason:Stacktrace ->
             ?warning_exception(
-                "Healthcheck function of service ~s crashed (this may happen during cluster reorganization)",
+                "Healthcheck function of service ~ts crashed (this may happen during cluster reorganization)",
                 [UniqueName],
                 Class, Reason, Stacktrace
             ),
@@ -237,7 +237,7 @@ init_service(Service, UniqueName, InitFun, MasterNodeId) ->
         end
     catch
         Error:Reason:Stacktrace ->
-            ?error_stacktrace("Error while initializing service ~s - ~p:~p",
+            ?error_stacktrace("Error while initializing service ~ts - ~tp:~tp",
                 [UniqueName, Error, Reason], Stacktrace),
             remove_service_from_doc(MasterNodeId, UniqueName),
             error(service_init_failure)

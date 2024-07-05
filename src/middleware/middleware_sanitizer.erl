@@ -179,7 +179,7 @@ sanitize_param(TypeConstraint, ValueConstraint, Param, RawValue) ->
         throw:Error ->
             throw(Error);
         Type:Message:Stacktrace ->
-            ?error_stacktrace("Error in ~p:~p - ~p:~p", [
+            ?error_stacktrace("Error in ~tp:~tp - ~tp:~tp", [
                 ?MODULE, ?FUNCTION_NAME, Type, Message
             ], Stacktrace),
             throw(?ERROR_BAD_DATA(Param))
@@ -279,7 +279,7 @@ check_type(json, Param, _) ->
     throw(?ERROR_BAD_VALUE_JSON(Param));
 
 check_type(TypeConstraint, Param, _) ->
-    ?error("Unknown type constraint: ~p for param: ~p", [
+    ?error("Unknown type constraint: ~tp for param: ~tp", [
         TypeConstraint, Param
     ]),
     throw(?ERROR_INTERNAL_SERVER_ERROR).
@@ -368,7 +368,7 @@ check_value(_, RectifyFun, Param, Val) when is_function(RectifyFun, 1) ->
     end;
 
 check_value(TypeConstraint, ValueConstraint, Param, _) ->
-    ?error("Unknown {type, value} constraint: {~p, ~p} for param: ~p", [
+    ?error("Unknown {type, value} constraint: {~tp, ~tp} for param: ~tp", [
         TypeConstraint, ValueConstraint, Param
     ]),
     throw(?ERROR_INTERNAL_SERVER_ERROR).

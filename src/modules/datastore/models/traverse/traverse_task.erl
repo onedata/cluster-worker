@@ -24,7 +24,7 @@
     on_remote_change/4, delete_ended/2]).
 
 %%% Setters and getters API
--export([update_description/4, update_status/4, fix_description/4,
+-export([create_doc/4, update_description/4, update_status/4, fix_description/4,
     get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1, is_cancelled/1, is_cancelled/2, 
     get_description/1, get_additional_data/1, get_additional_data/2, update_additional_data/4]).
 
@@ -82,7 +82,7 @@ create(ExtendedCtx, Pool, CallbackModule, TaskId, Creator, Executor, GroupId, Jo
         remote -> Value0;
         _ -> Value0#traverse_task{status = ongoing, enqueued = false, node = Node, start_time = Timestamp}
     end,
-    {ok, _} = datastore_model:create(ExtendedCtx, #document{key = ?DOC_ID(Pool, TaskId), value = Value}),
+    {ok, _} = create_doc(ExtendedCtx, Pool, TaskId, Value),
 
     case Node of
         undefined -> % task is scheduled for later execution
@@ -391,6 +391,10 @@ delete_ended(Pool, TaskId) ->
 %%% Setters and getters API
 %%%===================================================================
 
+-spec create_doc(ctx(), traverse:pool(), traverse:id(), record()) -> {ok, datastore:doc()} | {error, term()}.
+create_doc(ExtendedCtx, Pool, TaskId, Value) ->
+    datastore_model:create(ExtendedCtx, #document{key = ?DOC_ID(Pool, TaskId), value = Value}).
+
 -spec update_description(ctx(), traverse:pool(), traverse:id(), traverse:description()) ->
     {ok, traverse:description(), boolean()} | {error, term()}.
 update_description(ExtendedCtx, Pool, TaskId, NewDescription) ->
@@ -443,7 +447,7 @@ fix_description(ExtendedCtx, Pool, TaskId, NodeToFix) ->
             SDone = maps:get(slave_jobs_done, Description, 0),
             SFailed = maps:get(slave_jobs_failed, Description, 0),
 
-            ?info("Fixing task description after restart: ~s", [?autoformat([Pool, TaskId, Task])]),
+            ?info(?autoformat_with_msg("Fixing task description after restart: ", [Pool, TaskId, Task])),
             FinalDescription = Description#{
                 master_jobs_delegated => MDone + MFailed,
                 slave_jobs_delegated => SDone + SFailed

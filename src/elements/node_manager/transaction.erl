@@ -168,10 +168,10 @@ run_rollback_funs([Fun | Funs], Context, RepeatsList) ->
         {ok, NewContext} ->
             run_rollback_funs(Funs, NewContext, RepeatsList);
         {retry, NewContext, Reason} ->
-            ?warning("Rollback function to be retried: ~p", [Reason]),
+            ?warning("Rollback function to be retried: ~tp", [Reason]),
             run_rollback_funs(Funs, NewContext, [Fun | RepeatsList]);
         Other ->
-            ?error("Rollback function failed: ~p", [Other]),
+            ?error("Rollback function failed: ~tp", [Other]),
             {rollback_fun_error, Other}
     end.
 

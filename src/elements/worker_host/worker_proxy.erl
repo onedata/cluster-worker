@@ -334,11 +334,11 @@ receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request, CheckAndRetry) ->
                 LogRequest = application:get_env(?CLUSTER_WORKER_APP_NAME, log_requests_on_error, false),
                 {MsgFormat, FormatArgs} = case LogRequest of
                     true ->
-                        MF = "Worker: ~p, request: ~p exceeded timeout of ~p ms",
+                        MF = "Worker: ~tp, request: ~tp exceeded timeout of ~tp ms",
                         FA = [WorkerRef, Request, AfterTime],
                         {MF, FA};
                     _ ->
-                        MF = "Worker: ~p, exceeded timeout of ~p ms",
+                        MF = "Worker: ~tp, exceeded timeout of ~tp ms",
                         FA = [WorkerRef, AfterTime],
                         {MF, FA}
                 end,

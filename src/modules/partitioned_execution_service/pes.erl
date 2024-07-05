@@ -186,7 +186,7 @@ start_root_supervisor(Plugin) ->
         {ok, Pid} ->
             {ok, Pid};
         Error ->
-            ?error("PES ~p error for plug-in ~p: ~p",
+            ?error("PES ~tp error for plug-in ~tp: ~tp",
                 [?FUNCTION_NAME, Plugin, Error]),
             ?ERROR_INTERNAL_SERVER_ERROR
     end.
@@ -397,7 +397,7 @@ send_request_and_check_delivery(Plugin, Key, Message, #{
                 _:{timeout, _} ->
                     send_request_and_check_delivery(Plugin, Key, Message, Options#{attempts => Attempts - 1});
                 Error:Reason:Stacktrace when Reason =/= potential_deadlock ->
-                    ?error_stacktrace("PES send_request error ~p:~p for plug-in ~p, key ~p and options ~p",
+                    ?error_stacktrace("PES send_request error ~tp:~tp for plug-in ~tp, key ~tp and options ~tp",
                         [Error, Reason, Plugin, Key, Options], Stacktrace),
                     ?ERROR_INTERNAL_SERVER_ERROR
             end;
@@ -428,7 +428,7 @@ send_request_and_check_delivery(Plugin, Key, Message, Options) ->
                 _:{timeout, _} ->
                     send_request_and_check_delivery(Plugin, Key, Message, Options#{attempts => Attempts - 1});
                 Error:Reason:Stacktrace when Reason =/= potential_deadlock ->
-                    ?error_stacktrace("PES send_request error ~p:~p for plug-in ~p, key ~p and options ~p",
+                    ?error_stacktrace("PES send_request error ~tp:~tp for plug-in ~tp, key ~tp and options ~tp",
                         [Error, Reason, Plugin, Key, Options], Stacktrace),
                     ?ERROR_INTERNAL_SERVER_ERROR
             end;
@@ -455,7 +455,7 @@ send_to_all(Plugin, Message) ->
             _:{timeout, _} ->
                 [?ERROR_TIMEOUT | Acc];
             Error:Reason:Stacktrace ->
-                ?error_stacktrace("PES call error ~p:~p for plug-in ~p and pid ~p",
+                ?error_stacktrace("PES call error ~tp:~tp for plug-in ~tp and pid ~tp",
                     [Error, Reason, Plugin, Pid], Stacktrace),
                 [?ERROR_INTERNAL_SERVER_ERROR | Acc]
         end
@@ -481,12 +481,12 @@ create_pes_server(Plugin, Key) ->
             {ok, Pid} ->
                 {ok, Pid};
             {error, Reason} ->
-                ?error("PES ~p error for plug-in ~p and key ~p: ~p", [?FUNCTION_NAME, Plugin, Key, Reason]),
+                ?error("PES ~tp error for plug-in ~tp and key ~tp: ~tp", [?FUNCTION_NAME, Plugin, Key, Reason]),
                 ?ERROR_INTERNAL_SERVER_ERROR
         end
     catch
         Error:CatchReason:Stacktrace ->
-            ?error_stacktrace("PES ~p error ~p:~p for plug-in ~p and key ~p",
+            ?error_stacktrace("PES ~tp error ~tp:~tp for plug-in ~tp and key ~tp",
                 [?FUNCTION_NAME, Error, CatchReason, Plugin, Key], Stacktrace),
             ?ERROR_INTERNAL_SERVER_ERROR
     end.
@@ -521,10 +521,10 @@ await(Tag, Pid, Timeout, RetryOnFailure) ->
                     await(Tag, Pid, NextTimeout, false); % retry last time to prevent race between
                                                          % answer sending / process terminating
                 {_, _, false} ->
-                    ?error("PES executor ~p is not alive when awaiting for tag ~p", [Pid, Tag]),
+                    ?error("PES executor ~tp is not alive when awaiting for tag ~tp", [Pid, Tag]),
                     ?ERROR_INTERNAL_SERVER_ERROR;
                 {_, _, {badrpc, Reason}} ->
-                    ?error("PES ~p badrpc for tag ~p and pid ~p: ~p", [?FUNCTION_NAME, Tag, Pid, Reason]),
+                    ?error("PES ~tp badrpc for tag ~tp and pid ~tp: ~tp", [?FUNCTION_NAME, Tag, Pid, Reason]),
                     ?ERROR_INTERNAL_SERVER_ERROR
             end
     end.

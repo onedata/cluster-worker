@@ -47,13 +47,13 @@ gen_key_test_base() ->
     
     List = lists:map(fun(T) -> T/Repeats end, TT),
     Total = lists:sum(List),
-    ct:print("Init[ns]: ~p~n"
-             "Hash update1[ns]: ~p~n"
-             "Hash update2[ns]: ~p~n"
-             "Hash final[ns]: ~p~n"
-             "Hex[ns]: ~p~n"
-             "Total[ns]: ~p~n"
-             "Hex in Total[%]: ~p"
+    ct:print("Init[ns]: ~tp~n"
+             "Hash update1[ns]: ~tp~n"
+             "Hash update2[ns]: ~tp~n"
+             "Hash final[ns]: ~tp~n"
+             "Hex[ns]: ~tp~n"
+             "Total[ns]: ~tp~n"
+             "Hex in Total[%]: ~tp"
         ,List ++ [Total, lists:nth(5, List)/Total*100]).
 
 -endif.
