@@ -335,8 +335,7 @@ sync_request(ClientRef, Request) ->
     Id = async_request(ClientRef, Request),
     receive
         {response, Id, Response} ->
-            Response;
-        Response1 -> Response1
+            Response
     after
         ?GS_CLIENT_REQUEST_TIMEOUT ->
             ?ERROR_TIMEOUT

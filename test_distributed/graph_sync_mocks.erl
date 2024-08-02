@@ -50,6 +50,7 @@ mock_callbacks(Config) ->
 
     ok = test_utils:mock_new(Nodes, ?GS_LOGIC_PLUGIN, [non_strict]),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_handshake_auth, fun verify_handshake_auth/3),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, assert_service_available, fun() -> ok end),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_heartbeat, fun client_heartbeat/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_disconnected, fun client_disconnected/2),
