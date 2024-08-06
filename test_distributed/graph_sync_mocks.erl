@@ -50,7 +50,6 @@ mock_callbacks(Config) ->
 
     ok = test_utils:mock_new(Nodes, ?GS_LOGIC_PLUGIN, [non_strict]),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_handshake_auth, fun verify_handshake_auth/3),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, assert_service_available, fun() -> ok end),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_heartbeat, fun client_heartbeat/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_disconnected, fun client_disconnected/2),
@@ -60,6 +59,7 @@ mock_callbacks(Config) ->
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, handle_graph_request, fun handle_graph_request/6),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, is_subscribable, fun is_subscribable/1),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, is_type_supported, fun is_type_supported/1),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, assert_service_available, fun assert_service_available/0),
 
     ok = test_utils:mock_new(Nodes, ?GS_EXAMPLE_TRANSLATOR, [non_strict]),
     ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, handshake_attributes, fun handshake_attributes/1),
@@ -351,6 +351,13 @@ is_type_supported(#gri{type = od_space}) -> true;
 is_type_supported(#gri{type = od_share}) -> true;
 is_type_supported(#gri{type = od_handle_service}) -> true;
 is_type_supported(#gri{type = _}) -> false.
+
+
+assert_service_available() ->
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, circuit_breaker, closed) of
+        open -> throw(?ERROR_SERVICE_UNAVAILABLE);
+        closed -> ok
+    end.
 
 
 handshake_attributes(_) ->

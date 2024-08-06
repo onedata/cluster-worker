@@ -46,7 +46,9 @@
     session_persistence_test/1,
     subscriptions_persistence_test/1,
     gs_server_session_clearing_test_api_level/1,
-    gs_server_session_clearing_test_connection_level/1
+    gs_server_session_clearing_test_connection_level/1,
+    service_availability_rpc_test/1,
+    service_availability_handshake_test/1
 ]).
 
 -define(TEST_CASES, [
@@ -64,7 +66,9 @@
     session_persistence_test,
     subscriptions_persistence_test,
     gs_server_session_clearing_test_api_level,
-    gs_server_session_clearing_test_connection_level
+    gs_server_session_clearing_test_connection_level,
+    service_availability_rpc_test,
+    service_availability_handshake_test
 ]).
 
 -define(KEY_FILE, ?TEST_RELEASE_ETC_DIR("certs/web_key.pem")).
@@ -1174,6 +1178,63 @@ gs_server_session_clearing_test_connection_level_base(Config, ProtoVersion) ->
     ?assertMatch([], rpc:call(Node, gs_subscriber, get_subscriptions, [SessionId])),
     ?assertEqual(#{}, rpc:call(Node, gs_subscription, get_entity_subscribers, [od_user, ?USER_1])),
     ?assertEqual(#{}, rpc:call(Node, gs_subscription, get_entity_subscribers, [od_user, ?USER_2])).
+
+
+service_availability_rpc_test(Config) ->
+    [service_availability_rpc_test(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+service_availability_rpc_test(Config, ProtoVersion) ->
+    Nodes = ?config(cluster_worker_nodes, Config),
+    Self = self(),
+    RpcArgs = #{<<"a">> => <<"b">>},
+
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1), fun(Push) ->
+        Self ! Push
+    end),
+
+    test_utils:set_env(Nodes, ?CLUSTER_WORKER_APP_NAME, circuit_breaker, closed),
+    ?assertMatch(
+        {ok, #gs_resp_rpc{result = #{<<"a">> := <<"b">>}}},
+        gs_client:rpc_request(Client1, <<"user1Fun">>, RpcArgs)
+    ),
+
+    test_utils:set_env(Nodes, ?CLUSTER_WORKER_APP_NAME, circuit_breaker, open),
+    gs_client:async_request(Client1, #gs_req{
+        subtype = rpc,
+        request = #gs_req_rpc{function = <<"user1Fun">>, args = RpcArgs}
+    }),
+
+    %% TODO VFS-12216 update test after handling gs_push_error in gs_client
+    ?assertReceivedEqual(#gs_push_error{error = ?ERROR_SERVICE_UNAVAILABLE}, timer:seconds(60)),
+
+    test_utils:set_env(Nodes, ?CLUSTER_WORKER_APP_NAME, circuit_breaker, closed),
+    ?assertMatch(
+        {ok, #gs_resp_rpc{result = #{<<"a">> := <<"b">>}}},
+        gs_client:rpc_request(Client1, <<"user1Fun">>, RpcArgs)
+    ).
+
+
+service_availability_handshake_test(Config) ->
+    [service_availability_handshake_test(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+service_availability_handshake_test(Config, ProtoVersion) ->
+    Nodes = ?config(cluster_worker_nodes, Config),
+    Self = self(),
+
+    test_utils:set_env(Nodes, ?CLUSTER_WORKER_APP_NAME, circuit_breaker, closed),
+    spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+
+    test_utils:set_env(Nodes, ?CLUSTER_WORKER_APP_NAME, circuit_breaker, open),
+
+    {ok, Pid} = websocket_client:start_link(binary_to_list(get_gs_ws_url(Config)), [], gs_client, [], ?SSL_OPTS(Config)),
+    Pid ! {init, self(), [ProtoVersion], {token, ?USER_1_TOKEN}, fun(Push) -> Self ! Push end},
+
+    %% TODO VFS-12216 update test after handling gs_push_error in gs_client
+    ?assertReceivedEqual(#gs_push_error{error = ?ERROR_SERVICE_UNAVAILABLE}, timer:seconds(60)),
+
+    test_utils:set_env(Nodes, ?CLUSTER_WORKER_APP_NAME, circuit_breaker, closed),
+    spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)).
+
 
 %%%===================================================================
 %%% Helper functions related to asynchronous subscriptions messages
