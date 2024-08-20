@@ -94,34 +94,47 @@ websocket_init(State) ->
     InFrame :: {text | binary | ping | pong, binary()},
     State :: state(),
     OutFrame :: cow_ws:frame().
-websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
-    {Response, NewState} = try
-        gs_server:assert_service_available(),
-        handle_handshake(Data, State)
-    catch Class:Reason:Stacktrace ->
-        Error = ?examine_exception(Class, Reason, Stacktrace),
-        {gs_protocol:generate_error_push_message(Error), State}
-    end,
-    {ok, JSONMap} = gs_protocol:encode(?BASIC_PROTOCOL, Response),
-    {reply, {text, json_utils:encode(JSONMap)}, NewState};
-
-websocket_handle({text, Data}, SessionData = #gs_session{
-    protocol_version = ProtoVersion
-}) ->
-    Result = try
-        gs_server:assert_service_available(),
-        handle_request(Data, SessionData)
+websocket_handle({text, Data}, #pre_handshake_state{
+    peer_ip = PeerIp, cookies = Cookies, translator = Translator} = State
+) ->
+    % If there was no handshake yet, expect only handshake messages
+     try
+         {Response, NewState} = case decode_body(?BASIC_PROTOCOL, Data) of
+            {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
+                case gs_server:handshake(self(), Translator, Request, PeerIp, Cookies) of
+                    {ok, SessionData, HandshakeResp} ->
+                        {gs_protocol:generate_success_response(Request, HandshakeResp), SessionData};
+                    ErrMsg ->
+                        {gs_protocol:generate_error_response(Request, ErrMsg), State}
+                end;
+            {ok, BadRequest} ->
+                {gs_protocol:generate_error_response(
+                    BadRequest, ?ERROR_EXPECTED_HANDSHAKE_MESSAGE
+                ), State};
+            {error, _} = Error ->
+                {gs_protocol:generate_error_push_message(Error), State}
+         end,
+         {ok, JSONMap} = gs_protocol:encode(?BASIC_PROTOCOL, Response),
+         {reply, {text, json_utils:encode(JSONMap)}, NewState}
     catch Class:Reason:Stacktrace ->
         ?examine_exception(Class, Reason, Stacktrace)
-    end,
+    end;
 
-    case Result of
-        {ok, _} ->
-            Result;
-        {error, _} = Error ->
-            ErrorMsg = gs_protocol:generate_error_push_message(Error),
-            {ok, ErrorJSONMap} = gs_protocol:encode(ProtoVersion, ErrorMsg),
-            {reply, {text, json_utils:encode(ErrorJSONMap)}, SessionData}
+websocket_handle({text, Data}, SessionData = #gs_session{protocol_version = ProtoVersion}) ->
+    try
+        case decode_body(ProtoVersion, Data) of
+            {ok, Requests} ->
+                % process_request_async should not crash, but if it does,
+                % cowboy will log the error.
+                process_request_async(SessionData, Requests),
+                {ok, SessionData};
+            {error, _} = Error ->
+                ErrorMsg = gs_protocol:generate_error_push_message(Error),
+                {ok, ErrorJSONMap} = gs_protocol:encode(ProtoVersion, ErrorMsg),
+                {reply, {text, json_utils:encode(ErrorJSONMap)}, SessionData}
+        end
+    catch Class:Reason:Stacktrace ->
+        ?examine_exception(Class, Reason, Stacktrace)
     end;
 
 websocket_handle(ping, State) ->
@@ -239,51 +252,6 @@ keepalive_interval() ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-
-%% @private
--spec handle_handshake(binary(), #pre_handshake_state{}) ->
-    {gs_protocol:resp_wrapper() | gs_protocol:push_wrapper(), state()}.
-handle_handshake(Data, State = #pre_handshake_state{
-    peer_ip = PeerIp,
-    cookies = Cookies,
-    translator = Translator
-}) ->
-    % If there was no handshake yet, expect only handshake messages
-    case decode_body(?BASIC_PROTOCOL, Data) of
-        {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
-            case gs_server:handshake(self(), Translator, Request, PeerIp, Cookies) of
-                {ok, SessionData, HandshakeResp} ->
-                    {HandshakeResp, SessionData};
-                {error, ErrMsg} ->
-                    {ErrMsg, State}
-            end;
-        {ok, BadRequest} ->
-            {gs_protocol:generate_error_response(
-                BadRequest, ?ERROR_EXPECTED_HANDSHAKE_MESSAGE
-            ), State};
-        {error, _} = Error ->
-            {gs_protocol:generate_error_push_message(Error), State}
-    end.
-
-
-%% @private
--spec handle_request(binary(), #gs_session{}) ->
-    {ok, #gs_session{}} | errors:error().
-handle_request(Data, SessionData = #gs_session{
-    protocol_version = ProtoVersion
-}) ->
-    % If there was no handshake yet, expect only handshake messages
-    case decode_body(ProtoVersion, Data) of
-        {ok, Requests} ->
-            % process_request_async should not crash, but if it does,
-            % cowboy will log the error.
-            process_request_async(SessionData, Requests),
-            {ok, SessionData};
-        {error, _} = Error ->
-            Error
-    end.
-
 
 %%--------------------------------------------------------------------
 %% @private

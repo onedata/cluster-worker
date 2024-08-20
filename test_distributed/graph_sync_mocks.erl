@@ -36,7 +36,8 @@
     decode_entity_type/1,
     handle_rpc/4,
     handle_graph_request/6,
-    is_subscribable/1
+    is_subscribable/1,
+    simulate_service_availability/2
 ]).
 -export([
     translate_resource/3,
@@ -345,6 +346,10 @@ is_subscribable(_) ->
     false.
 
 
+simulate_service_availability(ServiceAvailable, Nodes) ->
+    test_utils:set_env(Nodes, ?CLUSTER_WORKER_APP_NAME, mocked_service_availability, ServiceAvailable).
+
+
 is_type_supported(#gri{type = od_user}) -> true;
 is_type_supported(#gri{type = od_group}) -> true;
 is_type_supported(#gri{type = od_space}) -> true;
@@ -354,9 +359,9 @@ is_type_supported(#gri{type = _}) -> false.
 
 
 assert_service_available() ->
-    case application:get_env(?CLUSTER_WORKER_APP_NAME, circuit_breaker, closed) of
-        open -> throw(?ERROR_SERVICE_UNAVAILABLE);
-        closed -> ok
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, mocked_service_availability, true) of
+        false -> throw(?ERROR_SERVICE_UNAVAILABLE);
+        true -> ok
     end.
 
 
