@@ -14,6 +14,9 @@
 -author("Lukasz Opiola").
 
 
+-callback assert_service_available() -> ok | no_return().
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Resolves the authorization of the requesting client based on handshake auth.
@@ -108,6 +111,3 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback is_type_supported(gri:gri()) -> boolean().
-
-
--callback assert_service_available() -> ok | no_return().

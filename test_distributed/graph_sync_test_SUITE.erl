@@ -1194,19 +1194,19 @@ service_availability_rpc_test(Config, ProtoVersion) ->
         Self ! Push
     end),
 
-    graph_sync_mocks:simulate_service_availability(true, Nodes),
+    graph_sync_mocks:simulate_service_availability(Nodes, true),
     ?assertMatch(
         {ok, #gs_resp_rpc{result = #{<<"a">> := <<"b">>}}},
         gs_client:rpc_request(Client1, <<"user1Fun">>, RpcArgs)
     ),
 
-    graph_sync_mocks:simulate_service_availability(false, Nodes),
+    graph_sync_mocks:simulate_service_availability(Nodes, false),
     ?assertMatch(
         ?ERROR_SERVICE_UNAVAILABLE,
         gs_client:rpc_request(Client1, <<"user1Fun">>, RpcArgs)
     ),
 
-    graph_sync_mocks:simulate_service_availability(true, Nodes),
+    graph_sync_mocks:simulate_service_availability(Nodes, true),
     ?assertMatch(
         {ok, #gs_resp_rpc{result = #{<<"a">> := <<"b">>}}},
         gs_client:rpc_request(Client1, <<"user1Fun">>, RpcArgs)
@@ -1224,7 +1224,7 @@ service_availability_graph_test(Config, ProtoVersion) ->
     },
     Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
 
-    graph_sync_mocks:simulate_service_availability(true, Nodes),
+    graph_sync_mocks:simulate_service_availability(Nodes, true),
     ?assertMatch(
         {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
         gs_client:graph_request(Client1, #gri{
@@ -1232,7 +1232,7 @@ service_availability_graph_test(Config, ProtoVersion) ->
         }, get)
     ),
 
-    graph_sync_mocks:simulate_service_availability(false, Nodes),
+    graph_sync_mocks:simulate_service_availability(Nodes, false),
     ?assertMatch(
         ?ERROR_SERVICE_UNAVAILABLE,
         gs_client:graph_request(Client1, #gri{
@@ -1240,7 +1240,7 @@ service_availability_graph_test(Config, ProtoVersion) ->
         }, get)
     ),
 
-    graph_sync_mocks:simulate_service_availability(true, Nodes),
+    graph_sync_mocks:simulate_service_availability(Nodes, true),
     ?assertMatch(
         {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
         gs_client:graph_request(Client1, #gri{
@@ -1255,14 +1255,14 @@ service_availability_handshake_test(Config) ->
 service_availability_handshake_test(Config, ProtoVersion) ->
     Nodes = ?config(cluster_worker_nodes, Config),
 
-    graph_sync_mocks:simulate_service_availability(true, Nodes),
+    graph_sync_mocks:simulate_service_availability(Nodes, true),
     spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
 
-    graph_sync_mocks:simulate_service_availability(false, Nodes),
+    graph_sync_mocks:simulate_service_availability(Nodes, false),
 
     spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?ERROR_SERVICE_UNAVAILABLE),
 
-    graph_sync_mocks:simulate_service_availability(true, Nodes),
+    graph_sync_mocks:simulate_service_availability(Nodes, true),
     spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)).
 
 

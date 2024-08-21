@@ -31,11 +31,9 @@
 %% number of requests to GS_LOGIC_PLUGIN when there is a lot of subscribers
 %% for the same records.
 -type payload_cache() :: #{gri:gri() => {gs_protocol:data(), gs_protocol:revision()}}.
--type gs_resp_handshake() :: #gs_resp_handshake{}.
 
 
 %% API
--export([assert_service_available/0]).
 -export([handshake/5]).
 -export([report_heartbeat/1]).
 -export([cleanup_session/1, terminate_connection/1]).
@@ -59,11 +57,6 @@ gs_logic_plugin_module() ->
 %%% API
 %%%===================================================================
 
--spec assert_service_available() -> ok | no_return().
-assert_service_available() ->
-    ?GS_LOGIC_PLUGIN:assert_service_available().
-
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Validates a handshake request and if it's correct, creates a new session.
@@ -71,12 +64,13 @@ assert_service_available() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handshake(conn_ref(), translator(), gs_protocol:req_wrapper(), ip_utils:ip(), gs_protocol:cookies()) ->
-    {ok, gs_session:data(), gs_resp_handshake()} | errors:error().
+    {ok, gs_session:data(), gs_protocol:handshake_resp()} | errors:error().
 handshake(ConnRef, Translator, Req, PeerIp, Cookies) ->
     ?catch_exceptions(handshake_internal(ConnRef, Translator, Req, PeerIp, Cookies)).
 
+%% @private
 -spec handshake_internal(conn_ref(), translator(), gs_protocol:req_wrapper(), ip_utils:ip(), gs_protocol:cookies()) ->
-    {ok, gs_session:data(), gs_resp_handshake()} | errors:error().
+    {ok, gs_session:data(), gs_protocol:handshake_resp()} | errors:error().
 handshake_internal(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq}, PeerIp, Cookies) ->
     ?GS_LOGIC_PLUGIN:assert_service_available(),
     #gs_req_handshake{supported_versions = AuthVersions, auth = ClientAuth} = HReq,
@@ -227,18 +221,19 @@ deleted(EntityType, EntityId) ->
 %%--------------------------------------------------------------------
 -spec handle_request(gs_session:data(), gs_protocol:req_wrapper() | gs_protocol:req()) ->
     {ok, gs_protocol:resp()} | errors:error().
-% No authorization override - unpack the gs_req record as it's context is
-% no longer important.
 handle_request(SessionData, Req) ->
-    ?catch_exceptions(handle_request_internal(SessionData, Req)).
+    ?catch_exceptions(begin
+        ?GS_LOGIC_PLUGIN:assert_service_available(),
+        handle_request_internal(SessionData, Req)
+    end).
 
 
+%% @private
 -spec handle_request_internal(gs_session:data(), gs_protocol:req_wrapper() | gs_protocol:req()) ->
     {ok, gs_protocol:resp()} | errors:error().
 % No authorization override - unpack the gs_req record as it's context is
 % no longer important.
 handle_request_internal(SessionData, #gs_req{auth_override = undefined, request = Req}) ->
-    ?GS_LOGIC_PLUGIN:assert_service_available(),
     handle_request_internal(SessionData, Req);
 
 % This request has the authorization field specified, override the default
@@ -265,7 +260,6 @@ handle_request_internal(_Session, #gs_req_handshake{}) ->
 handle_request_internal(SessionData, #gs_req_rpc{} = Req) ->
     #gs_session{auth = Auth, protocol_version = ProtoVer} = SessionData,
     #gs_req_rpc{function = Function, args = Args} = Req,
-    ?GS_LOGIC_PLUGIN:assert_service_available(),
     case ?GS_LOGIC_PLUGIN:handle_rpc(ProtoVer, Auth, Function, Args) of
         {ok, Result} ->
             {ok, #gs_resp_rpc{result = Result}};
@@ -309,7 +303,6 @@ handle_request_internal(SessionData, #gs_req_graph{} = Req) ->
         auth_hint = AuthHint,
         subscribe = Subscribe
     } = Req,
-    ?GS_LOGIC_PLUGIN:assert_service_available(),
     ?GS_LOGIC_PLUGIN:is_type_supported(RequestedGRI) orelse throw(?ERROR_BAD_GRI),
     case Subscribe of
         true ->
@@ -384,7 +377,6 @@ handle_request_internal(SessionData, #gs_req_graph{} = Req) ->
     {ok, Response};
 
 handle_request_internal(#gs_session{id = SessionId}, #gs_req_unsub{gri = GRI}) ->
-    ?GS_LOGIC_PLUGIN:assert_service_available(),
     gs_persistence:unsubscribe(SessionId, GRI),
     {ok, #gs_resp_unsub{}}.
 
