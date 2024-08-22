@@ -64,29 +64,34 @@ gs_logic_plugin_module() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handshake(conn_ref(), translator(), gs_protocol:req_wrapper(), ip_utils:ip(), gs_protocol:cookies()) ->
-    {ok, gs_session:data(), gs_protocol:resp_wrapper()} | {error, gs_protocol:resp_wrapper()}.
-handshake(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = Req, PeerIp, Cookies) ->
+    {ok, gs_session:data(), gs_protocol:handshake_resp()} | errors:error().
+handshake(ConnRef, Translator, Req, PeerIp, Cookies) ->
+    ?catch_exceptions(handshake_internal(ConnRef, Translator, Req, PeerIp, Cookies)).
+
+%% @private
+-spec handshake_internal(conn_ref(), translator(), gs_protocol:req_wrapper(), ip_utils:ip(), gs_protocol:cookies()) ->
+    {ok, gs_session:data(), gs_protocol:handshake_resp()} | errors:error().
+handshake_internal(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq}, PeerIp, Cookies) ->
+    ?GS_LOGIC_PLUGIN:assert_service_available(),
     #gs_req_handshake{supported_versions = AuthVersions, auth = ClientAuth} = HReq,
     ServerVersions = gs_protocol:supported_versions(),
     case gs_protocol:greatest_common_version(AuthVersions, ServerVersions) of
         false ->
-            {error, gs_protocol:generate_error_response(
-                Req, ?ERROR_BAD_VERSION(ServerVersions))
-            };
+            ?ERROR_BAD_VERSION(ServerVersions);
         {true, Version} ->
             case ?GS_LOGIC_PLUGIN:verify_handshake_auth(ClientAuth, PeerIp, Cookies) of
                 {error, _} = Error ->
-                    {error, gs_protocol:generate_error_response(Req, Error)};
+                    Error;
                 {ok, Auth} ->
                     SessionData = gs_persistence:create_session(Auth, ConnRef, Version, Translator),
                     ?GS_LOGIC_PLUGIN:client_connected(Auth, ConnRef),
                     Attributes = Translator:handshake_attributes(Auth),
-                    {ok, SessionData, gs_protocol:generate_success_response(Req, #gs_resp_handshake{
+                    {ok, SessionData, #gs_resp_handshake{
                         version = Version,
                         session_id = SessionData#gs_session.id,
                         identity = Auth#auth.subject,
                         attributes = Attributes
-                    })}
+                    }}
             end
     end.
 
@@ -216,33 +221,43 @@ deleted(EntityType, EntityId) ->
 %%--------------------------------------------------------------------
 -spec handle_request(gs_session:data(), gs_protocol:req_wrapper() | gs_protocol:req()) ->
     {ok, gs_protocol:resp()} | errors:error().
+handle_request(SessionData, Req) ->
+    ?catch_exceptions(begin
+        ?GS_LOGIC_PLUGIN:assert_service_available(),
+        handle_request_internal(SessionData, Req)
+    end).
+
+
+%% @private
+-spec handle_request_internal(gs_session:data(), gs_protocol:req_wrapper() | gs_protocol:req()) ->
+    {ok, gs_protocol:resp()} | errors:error().
 % No authorization override - unpack the gs_req record as it's context is
 % no longer important.
-handle_request(SessionData, #gs_req{auth_override = undefined, request = Req}) ->
-    handle_request(SessionData, Req);
+handle_request_internal(SessionData, #gs_req{auth_override = undefined, request = Req}) ->
+    handle_request_internal(SessionData, Req);
 
 % This request has the authorization field specified, override the default
 % authorization - but only allow this for op-worker and op-panel (?PROVIDER auth).
-handle_request(SessionData = #gs_session{auth = ?PROVIDER = Auth}, #gs_req{auth_override = AuthOverride} = Req) ->
+handle_request_internal(SessionData = #gs_session{auth = ?PROVIDER = Auth}, #gs_req{auth_override = AuthOverride} = Req) ->
     case ?GS_LOGIC_PLUGIN:verify_auth_override(Auth, AuthOverride) of
         {ok, OverridenAuth} ->
-            handle_request(
+            handle_request_internal(
                 SessionData#gs_session{auth = OverridenAuth},
                 Req#gs_req{auth_override = undefined}
             );
         {error, _} = Error ->
             Error
     end;
-handle_request(#gs_session{auth = _Auth}, #gs_req{auth_override = _AuthOverride}) ->
+handle_request_internal(#gs_session{auth = _Auth}, #gs_req{auth_override = _AuthOverride}) ->
     % Non-provider auth, disallow auth overrides
     ?ERROR_FORBIDDEN;
 
 
-handle_request(_Session, #gs_req_handshake{}) ->
+handle_request_internal(_Session, #gs_req_handshake{}) ->
     % Handshake is done in handshake/4 function
     ?ERROR_HANDSHAKE_ALREADY_DONE;
 
-handle_request(SessionData, #gs_req_rpc{} = Req) ->
+handle_request_internal(SessionData, #gs_req_rpc{} = Req) ->
     #gs_session{auth = Auth, protocol_version = ProtoVer} = SessionData,
     #gs_req_rpc{function = Function, args = Args} = Req,
     case ?GS_LOGIC_PLUGIN:handle_rpc(ProtoVer, Auth, Function, Args) of
@@ -252,31 +267,31 @@ handle_request(SessionData, #gs_req_rpc{} = Req) ->
             Error
     end;
 
-handle_request(SessionData, #gs_req_graph{gri = #gri{id = ?SELF} = GRI} = Req) ->
+handle_request_internal(SessionData, #gs_req_graph{gri = #gri{id = ?SELF} = GRI} = Req) ->
     #gs_session{auth = Auth} = SessionData,
     case {GRI#gri.type, Auth#auth.subject} of
         {od_user, ?SUB(user, UserId)} ->
-            handle_request(SessionData, Req#gs_req_graph{gri = GRI#gri{id = UserId}});
+            handle_request_internal(SessionData, Req#gs_req_graph{gri = GRI#gri{id = UserId}});
         {od_provider, ?SUB(?ONEPROVIDER, ProviderId)} ->
-            handle_request(SessionData, Req#gs_req_graph{gri = GRI#gri{id = ProviderId}});
+            handle_request_internal(SessionData, Req#gs_req_graph{gri = GRI#gri{id = ProviderId}});
         _ ->
             ?ERROR_NOT_FOUND
     end;
 
-handle_request(SessionData, #gs_req_graph{auth_hint = AuthHint = {_, ?SELF}} = Req) ->
+handle_request_internal(SessionData, #gs_req_graph{auth_hint = AuthHint = {_, ?SELF}} = Req) ->
     #gs_session{auth = Auth} = SessionData,
     case {AuthHint, Auth#auth.subject} of
         {?THROUGH_USER(?SELF), ?SUB(user, UserId)} ->
-            handle_request(SessionData, Req#gs_req_graph{auth_hint = ?THROUGH_USER(UserId)});
+            handle_request_internal(SessionData, Req#gs_req_graph{auth_hint = ?THROUGH_USER(UserId)});
         {?AS_USER(?SELF), ?SUB(user, UserId)} ->
-            handle_request(SessionData, Req#gs_req_graph{auth_hint = ?AS_USER(UserId)});
+            handle_request_internal(SessionData, Req#gs_req_graph{auth_hint = ?AS_USER(UserId)});
         {?THROUGH_PROVIDER(?SELF), ?SUB(?ONEPROVIDER, ProviderId)} ->
-            handle_request(SessionData, Req#gs_req_graph{auth_hint = ?THROUGH_PROVIDER(ProviderId)});
+            handle_request_internal(SessionData, Req#gs_req_graph{auth_hint = ?THROUGH_PROVIDER(ProviderId)});
         _ ->
             ?ERROR_FORBIDDEN
     end;
 
-handle_request(SessionData, #gs_req_graph{} = Req) ->
+handle_request_internal(SessionData, #gs_req_graph{} = Req) ->
     #gs_session{
         id = SessionId, auth = Auth, protocol_version = ProtoVer,
         translator = Translator
@@ -361,7 +376,7 @@ handle_request(SessionData, #gs_req_graph{} = Req) ->
     end,
     {ok, Response};
 
-handle_request(#gs_session{id = SessionId}, #gs_req_unsub{gri = GRI}) ->
+handle_request_internal(#gs_session{id = SessionId}, #gs_req_unsub{gri = GRI}) ->
     gs_persistence:unsubscribe(SessionId, GRI),
     {ok, #gs_resp_unsub{}}.
 

@@ -36,7 +36,8 @@
     decode_entity_type/1,
     handle_rpc/4,
     handle_graph_request/6,
-    is_subscribable/1
+    is_subscribable/1,
+    simulate_service_availability/2
 ]).
 -export([
     translate_resource/3,
@@ -49,6 +50,7 @@ mock_callbacks(Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
 
     ok = test_utils:mock_new(Nodes, ?GS_LOGIC_PLUGIN, [non_strict]),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, assert_service_available, fun assert_service_available/0),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_handshake_auth, fun verify_handshake_auth/3),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_heartbeat, fun client_heartbeat/2),
@@ -78,6 +80,13 @@ unmock_callbacks(Config) ->
     test_utils:mock_unload(Nodes, datastore_config_plugin),
 
     test_utils:mock_unload([node()], ?GS_LOGIC_PLUGIN).
+
+
+assert_service_available() ->
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, mocked_service_availability, true) of
+        false -> throw(?ERROR_SERVICE_UNAVAILABLE);
+        true -> ok
+    end.
 
 
 verify_handshake_auth({token, ?USER_1_TOKEN}, _, _) ->
@@ -342,6 +351,10 @@ is_subscribable(#gri{type = od_handle_service, aspect = instance}) ->
     true;
 is_subscribable(_) ->
     false.
+
+
+simulate_service_availability(Nodes, IsServiceAvailable) ->
+    test_utils:set_env(Nodes, ?CLUSTER_WORKER_APP_NAME, mocked_service_availability, IsServiceAvailable).
 
 
 is_type_supported(#gri{type = od_user}) -> true;
