@@ -46,7 +46,10 @@
     session_persistence_test/1,
     subscriptions_persistence_test/1,
     gs_server_session_clearing_test_api_level/1,
-    gs_server_session_clearing_test_connection_level/1
+    gs_server_session_clearing_test_connection_level/1,
+    service_availability_rpc_test/1,
+    service_availability_graph_test/1,
+    service_availability_handshake_test/1
 ]).
 
 -define(TEST_CASES, [
@@ -64,7 +67,10 @@
     session_persistence_test,
     subscriptions_persistence_test,
     gs_server_session_clearing_test_api_level,
-    gs_server_session_clearing_test_connection_level
+    gs_server_session_clearing_test_connection_level,
+    service_availability_rpc_test,
+    service_availability_graph_test,
+    service_availability_handshake_test
 ]).
 
 -define(KEY_FILE, ?TEST_RELEASE_ETC_DIR("certs/web_key.pem")).
@@ -1097,9 +1103,9 @@ gs_server_session_clearing_test_api_level(Config) ->
         auth = Auth,
         supported_versions = gs_protocol:supported_versions()
     }},
-    {ok, SessionData, #gs_resp{response = #gs_resp_handshake{
+    {ok, SessionData, #gs_resp_handshake{
         identity = ?SUB(user, ?USER_1)
-    }}} = ?assertMatch(
+    }} = ?assertMatch(
         {ok, _, _},
         rpc:call(Node, gs_server, handshake, [ConnRef, Translator, HandshakeReq, ?DUMMY_IP, _Cookies = []])
     ),
@@ -1174,6 +1180,91 @@ gs_server_session_clearing_test_connection_level_base(Config, ProtoVersion) ->
     ?assertMatch([], rpc:call(Node, gs_subscriber, get_subscriptions, [SessionId])),
     ?assertEqual(#{}, rpc:call(Node, gs_subscription, get_entity_subscribers, [od_user, ?USER_1])),
     ?assertEqual(#{}, rpc:call(Node, gs_subscription, get_entity_subscribers, [od_user, ?USER_2])).
+
+
+service_availability_rpc_test(Config) ->
+    [service_availability_rpc_test(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+service_availability_rpc_test(Config, ProtoVersion) ->
+    Nodes = ?config(cluster_worker_nodes, Config),
+    Self = self(),
+    RpcArgs = #{<<"a">> => <<"b">>},
+
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1), fun(Push) ->
+        Self ! Push
+    end),
+
+    graph_sync_mocks:simulate_service_availability(Nodes, true),
+    ?assertMatch(
+        {ok, #gs_resp_rpc{result = #{<<"a">> := <<"b">>}}},
+        gs_client:rpc_request(Client1, <<"user1Fun">>, RpcArgs)
+    ),
+
+    graph_sync_mocks:simulate_service_availability(Nodes, false),
+    ?assertMatch(
+        ?ERROR_SERVICE_UNAVAILABLE,
+        gs_client:rpc_request(Client1, <<"user1Fun">>, RpcArgs)
+    ),
+
+    graph_sync_mocks:simulate_service_availability(Nodes, true),
+    ?assertMatch(
+        {ok, #gs_resp_rpc{result = #{<<"a">> := <<"b">>}}},
+        gs_client:rpc_request(Client1, <<"user1Fun">>, RpcArgs)
+    ).
+
+
+service_availability_graph_test(Config) ->
+    [service_availability_graph_test(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+service_availability_graph_test(Config, ProtoVersion) ->
+    Nodes = ?config(cluster_worker_nodes, Config),
+    User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"revision">> => 1
+    },
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+
+    graph_sync_mocks:simulate_service_availability(Nodes, true),
+    ?assertMatch(
+        {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
+        gs_client:graph_request(Client1, #gri{
+            type = od_user, id = ?USER_1, aspect = instance
+        }, get)
+    ),
+
+    graph_sync_mocks:simulate_service_availability(Nodes, false),
+    ?assertMatch(
+        ?ERROR_SERVICE_UNAVAILABLE,
+        gs_client:graph_request(Client1, #gri{
+            type = od_user, id = ?USER_1, aspect = instance
+        }, get)
+    ),
+
+    graph_sync_mocks:simulate_service_availability(Nodes, true),
+    ?assertMatch(
+        {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
+        gs_client:graph_request(Client1, #gri{
+            type = od_user, id = ?USER_1, aspect = instance
+        }, get)
+    ).
+
+
+service_availability_handshake_test(Config) ->
+    [service_availability_handshake_test(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+service_availability_handshake_test(Config, ProtoVersion) ->
+    Nodes = ?config(cluster_worker_nodes, Config),
+
+    graph_sync_mocks:simulate_service_availability(Nodes, true),
+    spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+
+    graph_sync_mocks:simulate_service_availability(Nodes, false),
+
+    spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?ERROR_SERVICE_UNAVAILABLE),
+
+    graph_sync_mocks:simulate_service_availability(Nodes, true),
+    spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)).
+
 
 %%%===================================================================
 %%% Helper functions related to asynchronous subscriptions messages

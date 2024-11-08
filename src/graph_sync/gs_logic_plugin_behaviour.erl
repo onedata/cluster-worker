@@ -14,6 +14,9 @@
 -author("Lukasz Opiola").
 
 
+-callback assert_service_available() -> ok | no_return().
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Resolves the authorization of the requesting client based on handshake auth.

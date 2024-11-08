@@ -94,40 +94,53 @@ websocket_init(State) ->
     InFrame :: {text | binary | ping | pong, binary()},
     State :: state(),
     OutFrame :: cow_ws:frame().
-websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
-    #pre_handshake_state{
-        peer_ip = PeerIp,
-        cookies = Cookies,
-        translator = Translator
-    } = State,
+websocket_handle({text, Data}, #pre_handshake_state{
+    peer_ip = PeerIp, cookies = Cookies, translator = Translator} = State
+) ->
     % If there was no handshake yet, expect only handshake messages
-    {Response, NewState} = case decode_body(?BASIC_PROTOCOL, Data) of
-        {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
-            case gs_server:handshake(self(), Translator, Request, PeerIp, Cookies) of
-                {ok, SessionData, HandshakeResp} ->
-                    {HandshakeResp, SessionData};
-                {error, ErrMsg} ->
-                    {ErrMsg, State}
-            end;
-        {ok, BadRequest} ->
-            {gs_protocol:generate_error_response(
-                BadRequest, ?ERROR_EXPECTED_HANDSHAKE_MESSAGE
-            ), State};
-        {error, _} = Error ->
-            {gs_protocol:generate_error_push_message(Error), State}
-    end,
-    {ok, JSONMap} = gs_protocol:encode(?BASIC_PROTOCOL, Response),
-    {reply, {text, json_utils:encode(JSONMap)}, NewState};
+     {Response, NewState} = try
+         case decode_body(?BASIC_PROTOCOL, Data) of
+             {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
+                 case gs_server:handshake(self(), Translator, Request, PeerIp, Cookies) of
+                     {ok, SessionData, HandshakeResp} ->
+                         {gs_protocol:generate_success_response(Request, HandshakeResp), SessionData};
+                     ErrMsg ->
+                         {gs_protocol:generate_error_response(Request, ErrMsg), State}
+                 end;
+             {ok, BadRequest} ->
+                 {gs_protocol:generate_error_response(
+                     BadRequest, ?ERROR_EXPECTED_HANDSHAKE_MESSAGE
+                 ), State};
+             {error, _} = Error1 ->
+                 {gs_protocol:generate_error_push_message(Error1), State}
+         end
+     catch Class:Reason:Stacktrace ->
+         Error2 = ?examine_exception(Class, Reason, Stacktrace),
+         {gs_protocol:generate_error_push_message(Error2), State}
+     end ,
+     {ok, JSONMap} = gs_protocol:encode(?BASIC_PROTOCOL, Response),
+     {reply, {text, json_utils:encode(JSONMap)}, NewState};
 
 websocket_handle({text, Data}, SessionData = #gs_session{protocol_version = ProtoVersion}) ->
-    case decode_body(ProtoVersion, Data) of
-        {ok, Requests} ->
-            % process_request_async should not crash, but if it does,
-            % cowboy will log the error.
-            process_request_async(SessionData, Requests),
-            {ok, SessionData};
-        {error, _} = Error ->
-            ErrorMsg = gs_protocol:generate_error_push_message(Error),
+    Result = try
+        case decode_body(ProtoVersion, Data) of
+            {ok, Requests} ->
+                % process_request_async should not crash, but if it does,
+                % cowboy will log the error.
+                process_request_async(SessionData, Requests),
+                {ok, SessionData};
+            {error, _} = Error1 ->
+                Error1
+        end
+    catch Class:Reason:Stacktrace ->
+        ?examine_exception(Class, Reason, Stacktrace)
+    end,
+
+    case Result of
+        {ok, _} ->
+            Result;
+        {error, _} = Error2 ->
+            ErrorMsg = gs_protocol:generate_error_push_message(Error2),
             {ok, ErrorJSONMap} = gs_protocol:encode(ProtoVersion, ErrorMsg),
             {reply, {text, json_utils:encode(ErrorJSONMap)}, SessionData}
     end;
@@ -140,6 +153,7 @@ websocket_handle({ping, _Payload}, State) ->
 
 websocket_handle(pong, #pre_handshake_state{} = State) ->
     {ok, State};
+
 websocket_handle(pong, #gs_session{} = SessionData) ->
     % pongs are received in response to the keepalive pings sent to the client
     % (see 'keepalive' periodical message)
@@ -214,6 +228,7 @@ terminate(_Reason, _Req, #gs_session{id = SessionId} = SessionData) ->
 %%% API
 %%%===================================================================
 
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Sends a request to websocket handler pid to push data to the client
@@ -224,6 +239,7 @@ terminate(_Reason, _Req, #gs_session{id = SessionId} = SessionData) ->
 push(WebsocketPid, Msg) when WebsocketPid /= undefined ->
     WebsocketPid ! {push, Msg},
     ok.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -240,9 +256,35 @@ kill(WebsocketPid) when WebsocketPid /= undefined ->
 keepalive_interval() ->
     ?KEEPALIVE_INTERVAL_MILLIS div 1000.
 
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Decodes a binary JSON message into gs request record(s).
+%% @end
+%%--------------------------------------------------------------------
+-spec decode_body(gs_protocol:protocol_version(), Data :: binary()) ->
+    {ok, gs_protocol:req_wrapper() | [gs_protocol:req_wrapper()]} | errors:error().
+decode_body(ProtocolVersion, Data) ->
+    try
+        case json_utils:decode(Data) of
+            #{<<"batch">> := BatchList} ->
+                {ok, lists:map(fun(JSONMap) ->
+                    {ok, Request} = gs_protocol:decode(ProtocolVersion, JSONMap),
+                    Request
+                end, BatchList)};
+            JSONMap ->
+                {ok, _Request} = gs_protocol:decode(ProtocolVersion, JSONMap)
+        end
+    catch
+        _:_ ->
+            ?ERROR_BAD_MESSAGE(Data)
+    end.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -281,27 +323,3 @@ process_request_async(SessionData, Request) ->
         push(WebsocketPid, Response)
     end),
     ok.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Decodes a binary JSON message into gs request record(s).
-%% @end
-%%--------------------------------------------------------------------
--spec decode_body(gs_protocol:protocol_version(), Data :: binary()) ->
-    {ok, gs_protocol:req_wrapper() | [gs_protocol:req_wrapper()]} | errors:error().
-decode_body(ProtocolVersion, Data) ->
-    try
-        case json_utils:decode(Data) of
-            #{<<"batch">> := BatchList} ->
-                {ok, lists:map(fun(JSONMap) ->
-                    {ok, Request} = gs_protocol:decode(ProtocolVersion, JSONMap),
-                    Request
-                end, BatchList)};
-            JSONMap ->
-                {ok, _Request} = gs_protocol:decode(ProtocolVersion, JSONMap)
-        end
-    catch
-        _:_ ->
-            ?ERROR_BAD_MESSAGE(Data)
-    end.
