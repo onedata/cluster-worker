@@ -103,7 +103,7 @@ start_link(URL, Auth, SupportedVersions, PushCallback, Opts) ->
             after
                 ?GS_CLIENT_HANDSHAKE_TIMEOUT ->
                     Pid ! terminate,
-                    ?ERROR_TIMEOUT
+                    ?ERR_TIMEOUT(?err_ctx())
             end;
         {error, Reason} ->
             {error, Reason}
@@ -338,7 +338,7 @@ sync_request(ClientRef, Request) ->
             Response
     after
         ?GS_CLIENT_REQUEST_TIMEOUT ->
-            ?ERROR_TIMEOUT
+            ?ERR_TIMEOUT(?err_ctx())
     end.
 
 

@@ -258,7 +258,7 @@ encode(ProtocolVersion, Record) ->
         ?error_stacktrace("Cannot encode gs message - ~tp:~tp~nMessage: ~tp", [
             Type, Reason, Record
         ], Stacktrace),
-        ?ERROR_BAD_MESSAGE(Record)
+        ?ERR_BAD_MESSAGE(?err_ctx(), Record)
     end.
 
 
@@ -285,7 +285,7 @@ decode(ProtocolVersion, JSONMap) ->
         % No log is needed here, as this code is expected to crash any time
         % a malformed JSON comes. The error pushed back to the client will
         % contain the message that could not be decoded.
-        ?ERROR_BAD_MESSAGE(JSONMap)
+        ?ERR_BAD_MESSAGE(?err_ctx(), JSONMap)
     end.
 
 

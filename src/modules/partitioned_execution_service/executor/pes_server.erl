@@ -183,21 +183,21 @@ handle_call(?PES_CALL(Request), _From, #state{
         Error:Reason:Stacktrace ->
             ?error_stacktrace("PES server handle_call error ~tp:~tp for plug-in ~tp and request ~tp",
                 [Error, Reason, Plugin, Request], Stacktrace),
-            {reply, ?ERROR_INTERNAL_SERVER_ERROR, reset_idle_timeout_timer(State)}
+            {reply, ?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined), reset_idle_timeout_timer(State)}
     end;
 
 handle_call(?PES_CALL(_), _From, State) ->
-    {reply, ?ERROR_NOT_SUPPORTED, reset_idle_timeout_timer(State)};
+    {reply, ?ERR_NOT_SUPPORTED(?err_ctx()), reset_idle_timeout_timer(State)};
 
 handle_call(?PES_SUBMIT(_), _From, #state{mode = sync} = State) ->
-    {reply, ?ERROR_NOT_SUPPORTED, reset_idle_timeout_timer(State)};
+    {reply, ?ERR_NOT_SUPPORTED(?err_ctx()), reset_idle_timeout_timer(State)};
 
 handle_call(?PES_SUBMIT(Request), {_Pid, Tag} = From, State) ->
     State2 = allocate_for_slave_processing(From, Request, handle_call, State),
     {reply, {ok, {Tag, self()}}, reset_idle_timeout_timer(State2)};
 
 handle_call(?PES_ACKNOWLEDGED_CAST(_), _From, #state{mode = sync} = State) ->
-    {reply, ?ERROR_NOT_SUPPORTED, reset_idle_timeout_timer(State)};
+    {reply, ?ERR_NOT_SUPPORTED(?err_ctx()), reset_idle_timeout_timer(State)};
 
 handle_call(?PES_ACKNOWLEDGED_CAST(Request), _From, State) ->
     State2 = allocate_for_slave_processing(undefined, Request, handle_cast, State),
@@ -357,7 +357,7 @@ handle_graceful_termination_request(#state{
             {stop, {shutdown, graceful_terminate}, State#state{executor_state = UpdatedExecutorState}};
         {defer, UpdatedExecutorState} ->
             {noreply, State#state{executor_state = UpdatedExecutorState}};
-        ?ERROR_INTERNAL_SERVER_ERROR ->
+        ?ERR_INTERNAL_SERVER_ERROR (_) ->
             {noreply, State}
     end;
 
