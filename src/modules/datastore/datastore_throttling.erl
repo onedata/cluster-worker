@@ -242,7 +242,7 @@ configure_throttling(Values, Config, DefaultConfig) ->
     end, {0, 0}, Parameters),
 
     case {ThrottlingBase0, MaxRatio >= 1.0} of
-        {0.0, _} ->
+        {+0.0, _} ->
             ok;
         {_, true} ->
             overloaded;
