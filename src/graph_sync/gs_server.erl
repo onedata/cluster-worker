@@ -250,7 +250,7 @@ handle_request_internal(SessionData = #gs_session{auth = ?PROVIDER = Auth}, #gs_
     end;
 handle_request_internal(#gs_session{auth = _Auth}, #gs_req{auth_override = _AuthOverride}) ->
     % Non-provider auth, disallow auth overrides
-    ?ERR_FORBIDDEN(?err_ctx(), undefined);
+    ?ERR_FORBIDDEN(?err_ctx());
 
 
 handle_request_internal(_Session, #gs_req_handshake{}) ->
@@ -288,7 +288,7 @@ handle_request_internal(SessionData, #gs_req_graph{auth_hint = AuthHint = {_, ?S
         {?THROUGH_PROVIDER(?SELF), ?SUB(?ONEPROVIDER, ProviderId)} ->
             handle_request_internal(SessionData, Req#gs_req_graph{auth_hint = ?THROUGH_PROVIDER(ProviderId)});
         _ ->
-            ?ERR_FORBIDDEN(?err_ctx(), undefined)
+            ?ERR_FORBIDDEN(?err_ctx())
     end;
 
 handle_request_internal(SessionData, #gs_req_graph{} = Req) ->
