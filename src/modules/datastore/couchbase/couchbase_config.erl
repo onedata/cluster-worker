@@ -49,8 +49,8 @@ get_buckets() ->
     {ok, Buckets} = node_cache:acquire(couchbase_buckets, fun() ->
         DbHost = lists_utils:random_element(get_hosts()),
         Url = <<DbHost/binary, ":8091/pools/default/buckets">>,
-        DbUser = str_utils:to_binary(application:get_env(?CLUSTER_WORKER_APP_NAME, couchbase_user)),
-        DbPassword = str_utils:to_binary(application:get_env(?CLUSTER_WORKER_APP_NAME, couchbase_password)),
+        DbUser = str_utils:to_binary(cluster_worker:get_env(couchbase_user)),
+        DbPassword = str_utils:to_binary(cluster_worker:get_env(couchbase_password)),
         Hash = base64:encode(<<DbUser/binary, ":", DbPassword/binary>>),
 	journal_logger:log(io_lib:format("============ Hash is ~p", [Hash])),
 	{ok, 200, _, Body} = http_client:get(Url, #{
