@@ -52,8 +52,7 @@ get_buckets() ->
         DbUser = str_utils:to_binary(cluster_worker:get_env(couchbase_user)),
         DbPassword = str_utils:to_binary(cluster_worker:get_env(couchbase_password)),
         Hash = base64:encode(<<DbUser/binary, ":", DbPassword/binary>>),
-	journal_logger:log(io_lib:format("============ Hash is ~p", [Hash])),
-	{ok, 200, _, Body} = http_client:get(Url, #{
+        {ok, 200, _, Body} = http_client:get(Url, #{
             <<"Authorization">> => <<"Basic ", Hash/binary>>
         }),
         Ans = lists:map(fun(BucketMap) ->
@@ -76,8 +75,11 @@ get_flush_queue_size() ->
     lists:foldl(fun(Bucket, Max) ->
         Url = <<DbHost/binary, ":8091/pools/default/buckets/",
             Bucket/binary, "/stats">>,
+        DbUser = str_utils:to_binary(cluster_worker:get_env(couchbase_user)),
+        DbPassword = str_utils:to_binary(cluster_worker:get_env(couchbase_password)),
+        Hash = base64:encode(<<DbUser/binary, ":", DbPassword/binary>>),
         {ok, 200, _, Body} = http_client:get(Url, #{
-            <<"Authorization">> => <<"Basic YWRtaW46cGFzc3dvcmQ=">>
+            <<"Authorization">> => <<"Basic ", Hash/binary>>
         }),
         BucketSize = lists:last(maps:get(<<"disk_write_queue">>,
             maps:get(<<"samples">>,
