@@ -222,6 +222,11 @@
                 {disc, 50000}
             ]},
 
+            % Default DB credentials, replaced automatically by Onepanel during
+            % cluster configuration. DO NOT edit manually!
+            {couchbase_user, "admin"},
+            {couchbase_password, "password"},
+
             {couchbase_config_total_timeout, 30000},
             {couchbase_pool_operation_timeout, 1800000},
             {couchbase_operation_timeout, 60000},
