@@ -36,6 +36,7 @@
     rpc_req_test/1,
     async_req_test/1,
     graph_req_test/1,
+    batch_req_test/1,
     subscribe_test/1,
     unsubscribe_test/1,
     nosub_test/1,
@@ -57,6 +58,7 @@
     rpc_req_test,
     async_req_test,
     graph_req_test,
+    batch_req_test,
     subscribe_test,
     unsubscribe_test,
     nosub_test,
@@ -329,6 +331,127 @@ graph_req_test_base(Config, ProtoVersion) ->
 
     ok.
 
+
+batch_req_test(Config) ->
+    [batch_req_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+batch_req_test_base(Config, ProtoVersion) ->
+    User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"revision">> => 1
+    },
+    User2Data = (?USER_DATA_WITHOUT_GRI(?USER_2))#{
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_2, aspect = instance}),
+        <<"revision">> => 1
+    },
+
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+    Client2 = spawn_client(Config, ProtoVersion, {token, ?USER_2_TOKEN}, ?SUB(user, ?USER_2)),
+
+    ?assertMatch(
+        {ok, #gs_resp_batch{responses = [
+            #gs_resp{subtype = graph, id = <<"1">>, response = #gs_resp_graph{
+                data_format = resource, data = User1Data
+            }},
+            #gs_resp{subtype = graph, id = <<"2">>, response = #gs_resp_graph{
+                data_format = resource, data = User1Data
+            }},
+            #gs_resp{subtype = graph, id = <<"3">>, response = #gs_resp_graph{
+                data_format = resource, data = User1Data
+            }}
+        ]}},
+        gs_client:batch_request(Client1, [
+            #gs_req{subtype = graph, id = <<"1">>, request = #gs_req_graph{
+                gri = #gri{type = od_user, id = ?USER_1, aspect = instance},
+                operation = get
+            }},
+            #gs_req{subtype = graph, id = <<"2">>, request = #gs_req_graph{
+                gri = #gri{type = od_user, id = ?USER_1, aspect = instance},
+                operation = get
+            }},
+            #gs_req{subtype = graph, id = <<"3">>, request = #gs_req_graph{
+                gri = #gri{type = od_user, id = ?USER_1, aspect = instance},
+                operation = get
+            }}
+        ])
+    ),
+
+    ?assertMatch(
+        {ok, #gs_resp_batch{responses = [
+            #gs_resp{subtype = graph, id = <<"1">>, error = ?ERROR_FORBIDDEN},
+            #gs_resp{subtype = graph, id = <<"2">>, response = #gs_resp_graph{
+                data_format = resource, data = User2Data
+            }},
+            #gs_resp{subtype = graph, id = <<"3">>, error = ?ERROR_FORBIDDEN}
+        ]}},
+        gs_client:batch_request(Client2, [
+            #gs_req{subtype = graph, id = <<"1">>, request = #gs_req_graph{
+                gri = #gri{type = od_user, id = ?USER_1, aspect = instance},
+                operation = get
+            }},
+            #gs_req{subtype = graph, id = <<"2">>, request = #gs_req_graph{
+                gri = #gri{type = od_user, id = ?USER_2, aspect = instance},
+                operation = get,
+                subscribe = true
+            }},
+            #gs_req{subtype = graph, id = <<"3">>, request = #gs_req_graph{
+                gri = #gri{type = od_user, id = ?USER_1, aspect = instance},
+                operation = get
+            }}
+        ])
+    ),
+
+    RpcArgs = #{<<"x">> => 13},
+    ?assertMatch(
+        {ok, #gs_resp_batch{responses = [
+            #gs_resp{subtype = graph, id = <<"1">>, error = ?ERROR_FORBIDDEN},
+            #gs_resp{subtype = batch, id = <<"2">>, response = #gs_resp_batch{responses = [
+                #gs_resp{id = <<"2.1">>, response = #gs_resp_unsub{}},
+                #gs_resp{subtype = batch, id = <<"2.2">>, response = #gs_resp_batch{responses = [
+                    #gs_resp{subtype = graph, id = <<"2.2.1">>, response = #gs_resp_graph{
+                        data_format = resource, data = User2Data
+                    }},
+                    #gs_resp{subtype = rpc, id = <<"2.2.2">>, error = ?ERROR_FORBIDDEN}
+                ]}},
+                #gs_resp{subtype = graph, id = <<"2.3">>, error = ?ERROR_FORBIDDEN}
+            ]}},
+            #gs_resp{subtype = rpc, id = <<"3">>, response = #gs_resp_rpc{result = RpcArgs}}
+        ]}},
+        gs_client:batch_request(Client2, [
+            #gs_req{subtype = graph, id = <<"1">>, request = #gs_req_graph{
+                gri = #gri{type = od_user, id = ?USER_1, aspect = instance},
+                operation = get
+            }},
+            #gs_req{subtype = batch, id = <<"2">>, request = #gs_req_batch{
+                requests = [
+                    % Client2 has subscribed for that record in the previous request
+                    #gs_req{subtype = unsub, id = <<"2.1">>, request = #gs_req_unsub{
+                        gri = #gri{type = od_user, id = ?USER_2, aspect = instance}
+                    }},
+                    #gs_req{subtype = batch, id = <<"2.2">>, request = #gs_req_batch{
+                        requests = [
+                            #gs_req{subtype = graph, id = <<"2.2.1">>, request = #gs_req_graph{
+                                gri = #gri{type = od_user, id = ?USER_2, aspect = instance},
+                                operation = get
+                            }},
+                            #gs_req{subtype = rpc, id = <<"2.2.2">>, request = #gs_req_rpc{
+                                function = <<"user1Fun">>,
+                                args = RpcArgs
+                            }}
+                        ]
+                    }},
+                    #gs_req{subtype = graph, id = <<"2.3">>, request = #gs_req_graph{
+                        gri = #gri{type = od_user, id = ?USER_1, aspect = instance},
+                        operation = get
+                    }}
+                ]
+            }},
+            #gs_req{subtype = rpc, id = <<"3">>, request = #gs_req_rpc{
+                function = <<"user2Fun">>,
+                args = RpcArgs
+            }}
+        ])
+    ).
 
 
 subscribe_test(Config) ->
@@ -1196,7 +1319,7 @@ service_availability_rpc_test(Config, ProtoVersion) ->
 
     graph_sync_mocks:simulate_service_availability(Nodes, true),
     ?assertMatch(
-        {ok, #gs_resp_rpc{result = #{<<"a">> := <<"b">>}}},
+        {ok, #gs_resp_rpc{result = RpcArgs}},
         gs_client:rpc_request(Client1, <<"user1Fun">>, RpcArgs)
     ),
 
@@ -1208,7 +1331,7 @@ service_availability_rpc_test(Config, ProtoVersion) ->
 
     graph_sync_mocks:simulate_service_availability(Nodes, true),
     ?assertMatch(
-        {ok, #gs_resp_rpc{result = #{<<"a">> := <<"b">>}}},
+        {ok, #gs_resp_rpc{result = RpcArgs}},
         gs_client:rpc_request(Client1, <<"user1Fun">>, RpcArgs)
     ).
 
