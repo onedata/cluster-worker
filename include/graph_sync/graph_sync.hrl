@@ -22,7 +22,7 @@
 -define(SUPPORTED_PROTO_VERSIONS, [3, 4]).
 
 -record(gs_req_batch, {
-    requests :: [gs_protocol:req()]
+    requests :: [gs_protocol:req_wrapper()]
 }).
 
 -record(gs_req_handshake, {
@@ -56,7 +56,7 @@
 }).
 
 -record(gs_resp_batch, {
-    responses :: [gs_protocol:resp()]
+    responses :: [gs_protocol:resp_wrapper()]
 }).
 
 -record(gs_resp_graph, {

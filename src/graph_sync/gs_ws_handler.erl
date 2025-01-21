@@ -280,7 +280,7 @@ decode_body(ProtocolVersion, Data) ->
 
 
 %% @private
--spec process_request_async(gs_session:data(), gs_protocol:req_wrapper()) -> ok.
+-spec process_request_async(gs_session:data(), gs_protocol:req_wrapper()) -> pid().
 process_request_async(SessionData, Request) ->
     WebsocketPid = self(),
     % TODO VFS-12568 currently, for every request, there is a new process spawned,
