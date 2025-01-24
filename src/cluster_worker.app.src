@@ -297,6 +297,10 @@
             % Timeout when waiting for synchronous response from Graph Sync client process.
             {graph_sync_client_request_timeout, 30000},
 
+            % How many parallel processes (maximum) can be spawned to process one batch of
+            % GraphSync messages. The limit is per a single GraphSync connection.
+            {graph_sync_batch_parallelism, 10},
+
             %% ===================================================================
             %% EXOMETER
             %% ===================================================================
