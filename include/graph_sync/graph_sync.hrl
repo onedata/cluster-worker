@@ -21,6 +21,10 @@
 % Protocol versions currently supported by this software
 -define(SUPPORTED_PROTO_VERSIONS, [3, 4]).
 
+-record(gs_req_batch, {
+    requests :: [gs_protocol:req_wrapper()]
+}).
+
 -record(gs_req_handshake, {
     supported_versions = [] :: [gs_protocol:protocol_version()],
     auth = undefined :: undefined | gs_protocol:client_auth(),
@@ -49,6 +53,10 @@
     data :: gs_protocol:data(),
     subscribe = false :: boolean(),
     auth_hint :: gs_protocol:auth_hint()
+}).
+
+-record(gs_resp_batch, {
+    responses :: [gs_protocol:resp_wrapper()]
 }).
 
 -record(gs_resp_graph, {
