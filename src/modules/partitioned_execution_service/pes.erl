@@ -377,7 +377,7 @@ multi_acknowledged_cast(Plugin, Msg) ->
 -spec send_request_and_check_delivery(plugin(), key(), message_with_delivery_check(),
     request_with_delivery_check_options()) -> ok | execution_result() | {ok, execution_promise()} | pes_framework_error().
 send_request_and_check_delivery(_Plugin, _Key, _Message, #{attempts := 0}) ->
-    ?ERR_TIMEOUT(?err_ctx());
+    ?ERROR_TIMEOUT;
 send_request_and_check_delivery(Plugin, Key, Message, #{
     ensure_executor_alive := false
 } = Options) ->
@@ -454,7 +454,7 @@ send_to_all(Plugin, Message) ->
             exit:{{shutdown, _}, _} ->
                 Acc; % Ignore terminated process
             _:{timeout, _} ->
-                [?ERR_TIMEOUT(?err_ctx()) | Acc];
+                [?ERROR_TIMEOUT | Acc];
             Error:Reason:Stacktrace ->
                 ?error_stacktrace("PES call error ~tp:~tp for plug-in ~tp and pid ~tp",
                     [Error, Reason, Plugin, Pid], Stacktrace),
@@ -515,7 +515,7 @@ await(Tag, Pid, Timeout, RetryOnFailure) ->
         WaitingTime ->
             case {NextTimeout, RetryOnFailure, erpc:call(node(Pid), erlang, is_process_alive, [Pid])} of
                 {0, _, _} ->
-                    ?ERR_TIMEOUT(?err_ctx());
+                    ?ERROR_TIMEOUT;
                 {_, true, true} ->
                     await(Tag, Pid, NextTimeout, RetryOnFailure);
                 {_, true, _} ->

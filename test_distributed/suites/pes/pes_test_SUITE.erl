@@ -176,11 +176,11 @@ hashing(_Config) ->
 
 
 submit_not_supported(_Config) ->
-    ?assertEqual(?ERR_NOT_SUPPORTED, pes:submit(pes_minimal_executor, <<"exemplary_key">>, exemplary_request)).
+    ?assertEqual(?ERROR_NOT_SUPPORTED, pes:submit(pes_minimal_executor, <<"exemplary_key">>, exemplary_request)).
 
 
 acknowledged_cast_not_supported(_Config) ->
-    ?assertEqual(?ERR_NOT_SUPPORTED, pes:acknowledged_cast(pes_minimal_executor, <<"exemplary_key">>, exemplary_request)).
+    ?assertEqual(?ERROR_NOT_SUPPORTED, pes:acknowledged_cast(pes_minimal_executor, <<"exemplary_key">>, exemplary_request)).
 
 
 long_lasting_call(_Config) ->
@@ -200,7 +200,7 @@ single_cast_sync_mode(_Config) ->
 
 
 call_not_supported(_Config) ->
-    ?assertEqual(?ERR_NOT_SUPPORTED, pes:call(pes_async_executor, <<"exemplary_key">>, exemplary_request)).
+    ?assertEqual(?ERROR_NOT_SUPPORTED, pes:call(pes_async_executor, <<"exemplary_key">>, exemplary_request)).
 
 
 single_submit(_Config) ->
@@ -267,7 +267,7 @@ preventing_self_call(_Config) ->
 
 preventing_deadlock_from_slave(_Config) ->
     ?assertEqual({ok, test_ans}, pes:submit_and_await(pes_async_executor, <<"exemplary_key">>, exemplary_request)),
-    ?assertEqual(?ERR_NOT_SUPPORTED, pes:submit_and_await(pes_async_executor, <<"exemplary_key2">>,
+    ?assertEqual(?ERROR_NOT_SUPPORTED, pes:submit_and_await(pes_async_executor, <<"exemplary_key2">>,
         {perform_internal_call_with_key, pes_async_executor, <<"exemplary_key">>})),
     ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined),
         pes:submit_and_await(pes_async_executor, <<"exemplary_key2">>, {perform_internal_await, ?EXEMPLARY_PROMISE})).
@@ -275,7 +275,7 @@ preventing_deadlock_from_slave(_Config) ->
 
 preventing_self_call_from_slave(_Config) ->
     ?assertEqual({ok, test_ans}, pes:submit_and_await(pes_async_executor, <<"exemplary_key">>, exemplary_request)),
-    ?assertEqual(?ERR_NOT_SUPPORTED, pes:submit_and_await(pes_async_executor, <<"exemplary_key">>,
+    ?assertEqual(?ERROR_NOT_SUPPORTED, pes:submit_and_await(pes_async_executor, <<"exemplary_key">>,
         {perform_internal_call_with_key, pes_async_executor, <<"exemplary_key">>})).
 
 

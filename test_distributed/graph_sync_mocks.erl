@@ -340,7 +340,7 @@ handle_graph_request(Auth, _, #gri{type = od_share, id = ?SHARE, aspect = instan
     end;
 
 handle_graph_request(_, _, _, _, _, _) ->
-    ?ERR_NOT_FOUND.
+    ?ERROR_NOT_FOUND.
 
 
 is_subscribable(#gri{type = od_user, aspect = instance, scope = private}) ->

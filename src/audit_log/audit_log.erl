@@ -153,7 +153,7 @@ browse(Id, BrowseOpts) ->
                 <<"isLast">> => ProgressMarker =:= done
             }};
         {error, not_found} ->
-            ?ERR_NOT_FOUND(?err_ctx());
+            ?ERROR_NOT_FOUND;
         {error, _} = Error ->
             ?report_internal_server_error("returned error: ~tp", [Error])
     end.
@@ -185,7 +185,7 @@ next_batch(BatchSize, Id, LastListedIndex) ->
                 _ -> {ok, Entries, maps:get(<<"index">>, lists:last(Entries))}
             end;
         {error, not_found} ->
-            ?ERR_NOT_FOUND(?err_ctx());
+            ?ERROR_NOT_FOUND;
         {error, _} = Error ->
             Error
     end.

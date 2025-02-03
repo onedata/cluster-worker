@@ -275,7 +275,7 @@ handle_request_internal(SessionData, #gs_req_graph{gri = #gri{id = ?SELF} = GRI}
         {od_provider, ?SUB(?ONEPROVIDER, ProviderId)} ->
             handle_request_internal(SessionData, Req#gs_req_graph{gri = GRI#gri{id = ProviderId}});
         _ ->
-            ?ERR_NOT_FOUND(?err_ctx())
+            ?ERROR_NOT_FOUND
     end;
 
 handle_request_internal(SessionData, #gs_req_graph{auth_hint = AuthHint = {_, ?SELF}} = Req) ->

@@ -20,18 +20,20 @@
 
 
 -type req_wrapper() :: #gs_req{}.
+-type batch_req() :: #gs_req_batch{}.
 -type handshake_req() :: #gs_req_handshake{}.
 -type rpc_req() :: #gs_req_rpc{}.
 -type graph_req() :: #gs_req_graph{}.
 -type unsub_req() :: #gs_req_unsub{}.
--type req() :: handshake_req() | rpc_req() | graph_req() | unsub_req().
+-type req() :: batch_req() | handshake_req() | rpc_req() | graph_req() | unsub_req().
 
 -type resp_wrapper() :: #gs_resp{}.
+-type batch_resp() :: #gs_resp_batch{}.
 -type handshake_resp() :: #gs_resp_handshake{}.
 -type rpc_resp() :: #gs_resp_rpc{}.
 -type graph_resp() :: #gs_resp_graph{}.
 -type unsub_resp() :: #gs_resp_unsub{}.
--type resp() :: handshake_resp() | rpc_resp() | graph_resp() | unsub_resp().
+-type resp() :: batch_resp() | handshake_resp() | rpc_resp() | graph_resp() | unsub_resp().
 
 -type push_wrapper() :: #gs_push{}.
 -type graph_push() :: #gs_push_graph{}.
@@ -41,6 +43,7 @@
 
 -export_type([
     req_wrapper/0,
+    batch_req/0,
     handshake_req/0,
     rpc_req/0,
     graph_req/0,
@@ -48,6 +51,7 @@
     req/0,
 
     resp_wrapper/0,
+    batch_resp/0,
     handshake_resp/0,
     rpc_resp/0,
     graph_resp/0,
@@ -74,7 +78,7 @@
 % Denotes type of message so the payload can be properly interpreted
 -type message_type() :: request | response | push.
 % Denotes subtype of message so the payload can be properly interpreted
--type message_subtype() :: handshake | rpc | graph | unsub | nosub | error.
+-type message_subtype() :: batch | handshake | rpc | graph | unsub | nosub | error.
 
 % Clients authorization, used during handshake or auth override.
 % Special 'nobody' auth can be used to indicate that the client is requesting
@@ -255,9 +259,10 @@ encode(ProtocolVersion, Record) ->
         end,
         {ok, JSONMap}
     catch Type:Reason:Stacktrace ->
-        ?error_stacktrace("Cannot encode gs message - ~tp:~tp~nMessage: ~tp", [
-            Type, Reason, Record
-        ], Stacktrace),
+        ?error_exception(
+            ?autoformat_with_msg("Cannot encode gs message", [Record]),
+            Type, Reason, Stacktrace
+        ),
         ?ERR_BAD_MESSAGE(?err_ctx(), Record)
     end.
 
@@ -340,12 +345,15 @@ generate_error_push_message(Error) ->
 %%% Internal functions
 %%%===================================================================
 
+%% @private
 -spec encode_request(protocol_version(), req_wrapper()) -> json_map().
 encode_request(ProtocolVersion, #gs_req{} = GSReq) ->
     #gs_req{
         id = Id, subtype = Subtype, auth_override = AuthOverride, request = Request
     } = GSReq,
     Payload = case Request of
+        #gs_req_batch{} ->
+            encode_request_batch(ProtocolVersion, Request);
         #gs_req_handshake{} ->
             encode_request_handshake(ProtocolVersion, Request);
         #gs_req_rpc{} ->
@@ -364,6 +372,18 @@ encode_request(ProtocolVersion, #gs_req{} = GSReq) ->
     }.
 
 
+%% @private
+-spec encode_request_batch(protocol_version(), batch_req()) -> json_map().
+encode_request_batch(ProtocolVersion, #gs_req_batch{} = Req) ->
+    #gs_req_batch{
+        requests = Requests
+    } = Req,
+    #{
+        <<"batch">> => [encode_request(ProtocolVersion, R) || R <- Requests]
+    }.
+
+
+%% @private
 -spec encode_request_handshake(protocol_version(), handshake_req()) -> json_map().
 encode_request_handshake(_, #gs_req_handshake{} = Req) ->
     % Handshake messages do not change regardless of the protocol version
@@ -377,6 +397,7 @@ encode_request_handshake(_, #gs_req_handshake{} = Req) ->
     }.
 
 
+%% @private
 -spec encode_request_rpc(protocol_version(), rpc_req()) -> json_map().
 encode_request_rpc(_, #gs_req_rpc{} = Req) ->
     #gs_req_rpc{
@@ -388,6 +409,7 @@ encode_request_rpc(_, #gs_req_rpc{} = Req) ->
     }.
 
 
+%% @private
 -spec encode_request_graph(protocol_version(), graph_req()) -> json_map().
 encode_request_graph(_, #gs_req_graph{} = Req) ->
     #gs_req_graph{
@@ -403,6 +425,7 @@ encode_request_graph(_, #gs_req_graph{} = Req) ->
     }.
 
 
+%% @private
 -spec encode_request_unsub(protocol_version(), unsub_req()) -> json_map().
 encode_request_unsub(_, #gs_req_unsub{} = Req) ->
     #gs_req_unsub{
@@ -413,6 +436,7 @@ encode_request_unsub(_, #gs_req_unsub{} = Req) ->
     }.
 
 
+%% @private
 -spec encode_response(protocol_version(), resp_wrapper()) -> json_map().
 encode_response(ProtocolVersion, #gs_resp{} = GSReq) ->
     #gs_resp{
@@ -423,6 +447,8 @@ encode_response(ProtocolVersion, #gs_resp{} = GSReq) ->
             #{};
         true ->
             case Response of
+                #gs_resp_batch{} ->
+                    encode_response_batch(ProtocolVersion, Response);
                 #gs_resp_handshake{} ->
                     encode_response_handshake(ProtocolVersion, Response);
                 #gs_resp_rpc{} ->
@@ -445,6 +471,19 @@ encode_response(ProtocolVersion, #gs_resp{} = GSReq) ->
     }.
 
 
+%% @private
+-spec encode_response_batch(protocol_version(), batch_resp()) -> json_map().
+encode_response_batch(ProtocolVersion, #gs_resp_batch{} = Resp) ->
+    % Handshake messages do not change regardless of the protocol version
+    #gs_resp_batch{
+        responses = Responses
+    } = Resp,
+    #{
+        <<"batch">> => [encode_response(ProtocolVersion, R) || R <- Responses]
+    }.
+
+
+%% @private
 -spec encode_response_handshake(protocol_version(), handshake_resp()) -> json_map().
 encode_response_handshake(ProtocolVersion, #gs_resp_handshake{} = Resp) ->
     % Handshake messages do not change regardless of the protocol version
@@ -463,6 +502,7 @@ encode_response_handshake(ProtocolVersion, #gs_resp_handshake{} = Resp) ->
     }.
 
 
+%% @private
 -spec encode_response_rpc(protocol_version(), rpc_resp()) -> json_map().
 encode_response_rpc(_, #gs_resp_rpc{} = Resp) ->
     #gs_resp_rpc{
@@ -471,6 +511,7 @@ encode_response_rpc(_, #gs_resp_rpc{} = Resp) ->
     utils:undefined_to_null(Result).
 
 
+%% @private
 -spec encode_response_graph(protocol_version(), graph_resp()) -> json_map().
 encode_response_graph(_, #gs_resp_graph{data_format = undefined}) ->
     undefined;
@@ -482,12 +523,14 @@ encode_response_graph(_, #gs_resp_graph{data_format = Format, data = Result}) ->
     }.
 
 
+%% @private
 -spec encode_response_unsub(protocol_version(), unsub_resp()) -> json_map().
 encode_response_unsub(_, #gs_resp_unsub{}) ->
     % Currently the response does not carry any information
     #{}.
 
 
+%% @private
 -spec encode_push(protocol_version(), push_wrapper()) -> json_map().
 encode_push(ProtocolVersion, #gs_push{} = GSReq) ->
     #gs_push{
@@ -508,6 +551,7 @@ encode_push(ProtocolVersion, #gs_push{} = GSReq) ->
     }.
 
 
+%% @private
 -spec encode_push_graph(protocol_version(), graph_push()) -> json_map().
 encode_push_graph(_, #gs_push_graph{} = Message) ->
     #gs_push_graph{
@@ -520,6 +564,7 @@ encode_push_graph(_, #gs_push_graph{} = Message) ->
     }.
 
 
+%% @private
 -spec encode_push_nosub(protocol_version(), nosub_push()) -> json_map().
 encode_push_nosub(_, #gs_push_nosub{} = Message) ->
     #gs_push_nosub{
@@ -532,6 +577,7 @@ encode_push_nosub(_, #gs_push_nosub{} = Message) ->
     }.
 
 
+%% @private
 -spec encode_push_error(error_push()) -> json_map().
 encode_push_error(#gs_push_error{error = Error}) ->
     #{
@@ -539,12 +585,15 @@ encode_push_error(#gs_push_error{error = Error}) ->
     }.
 
 
+%% @private
 -spec decode_request(protocol_version(), json_map()) -> req_wrapper().
 decode_request(ProtocolVersion, ReqJSON) ->
     PayloadJSON = maps:get(<<"payload">>, ReqJSON),
     Subtype = string_to_subtype(maps:get(<<"subtype">>, ReqJSON)),
     AuthOverride = maps:get(<<"authOverride">>, ReqJSON, null),
     Request = case Subtype of
+        batch ->
+            decode_request_batch(ProtocolVersion, PayloadJSON);
         handshake ->
             decode_request_handshake(ProtocolVersion, PayloadJSON);
         rpc ->
@@ -563,6 +612,16 @@ decode_request(ProtocolVersion, ReqJSON) ->
     }.
 
 
+%% @private
+-spec decode_request_batch(protocol_version(), json_map()) -> batch_req().
+decode_request_batch(ProtocolVersion, PayloadJSON) ->
+    Requests = maps:get(<<"batch">>, PayloadJSON),
+    #gs_req_batch{
+        requests = [decode_request(ProtocolVersion, R) || R <- Requests]
+    }.
+
+
+%% @private
 -spec decode_request_handshake(protocol_version(), json_map()) -> handshake_req().
 decode_request_handshake(_, PayloadJSON) ->
     % Handshake messages do not change regardless of the protocol version
@@ -576,6 +635,7 @@ decode_request_handshake(_, PayloadJSON) ->
     }.
 
 
+%% @private
 -spec decode_request_rpc(protocol_version(), json_map()) -> rpc_req().
 decode_request_rpc(_, PayloadJSON) ->
     #gs_req_rpc{
@@ -584,6 +644,7 @@ decode_request_rpc(_, PayloadJSON) ->
     }.
 
 
+%% @private
 -spec decode_request_graph(protocol_version(), json_map()) -> graph_req().
 decode_request_graph(_, PayloadJSON) ->
     #gs_req_graph{
@@ -595,6 +656,7 @@ decode_request_graph(_, PayloadJSON) ->
     }.
 
 
+%% @private
 -spec decode_request_unsub(protocol_version(), json_map()) -> unsub_req().
 decode_request_unsub(_, PayloadJSON) ->
     #gs_req_unsub{
@@ -602,6 +664,7 @@ decode_request_unsub(_, PayloadJSON) ->
     }.
 
 
+%% @private
 -spec decode_response(protocol_version(), json_map()) -> resp_wrapper().
 decode_response(ProtocolVersion, ReqJSON) ->
     PayloadJSON = maps:get(<<"payload">>, ReqJSON),
@@ -614,6 +677,8 @@ decode_response(ProtocolVersion, ReqJSON) ->
             undefined;
         true ->
             case Subtype of
+                batch ->
+                    decode_response_batch(ProtocolVersion, DataJSON);
                 handshake ->
                     decode_response_handshake(ProtocolVersion, DataJSON);
                 rpc ->
@@ -633,6 +698,16 @@ decode_response(ProtocolVersion, ReqJSON) ->
     }.
 
 
+%% @private
+-spec decode_response_batch(protocol_version(), json_map()) -> batch_resp().
+decode_response_batch(ProtocolVersion, DataJSON) ->
+    Responses = maps:get(<<"batch">>, DataJSON),
+    #gs_resp_batch{
+        responses = [decode_response(ProtocolVersion, R) || R <- Responses]
+    }.
+
+
+%% @private
 -spec decode_response_handshake(protocol_version(), json_map()) -> handshake_resp().
 decode_response_handshake(ProtocolVersion, DataJSON) ->
     % Handshake messages do not change regardless of the protocol version
@@ -651,6 +726,7 @@ decode_response_handshake(ProtocolVersion, DataJSON) ->
     }.
 
 
+%% @private
 -spec decode_response_rpc(protocol_version(), json_map()) -> rpc_resp().
 decode_response_rpc(_, DataJSON) ->
     #gs_resp_rpc{
@@ -658,6 +734,7 @@ decode_response_rpc(_, DataJSON) ->
     }.
 
 
+%% @private
 -spec decode_response_graph(protocol_version(), json_map()) -> graph_resp().
 decode_response_graph(_, null) ->
     #gs_resp_graph{};
@@ -671,6 +748,7 @@ decode_response_graph(_, DataJSON) ->
     }.
 
 
+%% @private
 -spec decode_response_unsub(protocol_version(), json_map()) -> unsub_resp().
 decode_response_unsub(_, _DataJSON) ->
     % Currently the response does not carry any information
@@ -678,6 +756,7 @@ decode_response_unsub(_, _DataJSON) ->
 
 
 
+%% @private
 -spec decode_push(protocol_version(), json_map()) -> push_wrapper().
 decode_push(ProtocolVersion, ReqJSON) ->
     PayloadJSON = maps:get(<<"payload">>, ReqJSON),
@@ -695,6 +774,7 @@ decode_push(ProtocolVersion, ReqJSON) ->
     }.
 
 
+%% @private
 -spec decode_push_graph(protocol_version(), json_map()) -> graph_push().
 decode_push_graph(_, PayloadJSON) ->
     GRI = gri:deserialize(maps:get(<<"gri">>, PayloadJSON)),
@@ -707,6 +787,7 @@ decode_push_graph(_, PayloadJSON) ->
     }.
 
 
+%% @private
 -spec decode_push_nosub(protocol_version(), json_map()) -> nosub_push().
 decode_push_nosub(_, PayloadJSON) ->
     GRI = maps:get(<<"gri">>, PayloadJSON),
@@ -719,6 +800,7 @@ decode_push_nosub(_, PayloadJSON) ->
     }.
 
 
+%% @private
 -spec decode_push_error(json_map()) -> error_push().
 decode_push_error(#{<<"error">> := Error}) ->
     #gs_push_error{
@@ -726,7 +808,9 @@ decode_push_error(#{<<"error">> := Error}) ->
     }.
 
 
+%% @private
 -spec subtype_to_string(message_subtype()) -> binary().
+subtype_to_string(batch) -> <<"batch">>;
 subtype_to_string(handshake) -> <<"handshake">>;
 subtype_to_string(rpc) -> <<"rpc">>;
 subtype_to_string(graph) -> <<"graph">>;
@@ -735,7 +819,9 @@ subtype_to_string(nosub) -> <<"nosub">>;
 subtype_to_string(error) -> <<"error">>.
 
 
+%% @private
 -spec string_to_subtype(binary()) -> message_subtype().
+string_to_subtype(<<"batch">>) -> batch;
 string_to_subtype(<<"handshake">>) -> handshake;
 string_to_subtype(<<"rpc">>) -> rpc;
 string_to_subtype(<<"graph">>) -> graph;
@@ -744,6 +830,7 @@ string_to_subtype(<<"nosub">>) -> nosub;
 string_to_subtype(<<"error">>) -> error.
 
 
+%% @private
 -spec json_to_client_auth(null | json_map() | binary()) -> client_auth().
 json_to_client_auth(null) ->
     undefined;
@@ -756,6 +843,7 @@ json_to_client_auth(#{<<"macaroon">> := Token}) ->
     {token, Token}.
 
 
+%% @private
 -spec client_auth_to_json(client_auth()) -> null | json_map() | binary().
 client_auth_to_json(undefined) ->
     null;
@@ -768,6 +856,7 @@ client_auth_to_json({token, Token}) -> #{
 }.
 
 
+%% @private
 -spec json_to_auth_override(protocol_version(), null | json_map() | binary()) -> auth_override().
 json_to_auth_override(_, null) ->
     undefined;
@@ -798,6 +887,7 @@ json_to_auth_override(_, #{<<"clientAuth">> := ClientAuth} = Data) ->
     }.
 
 
+%% @private
 -spec auth_override_to_json(protocol_version(), auth_override()) -> null | json_map() | binary().
 auth_override_to_json(_, undefined) ->
     null;
@@ -821,6 +911,7 @@ auth_override_to_json(_, #auth_override{} = AuthOverride) ->
     }.
 
 
+%% @private
 -spec operation_to_string(operation()) -> binary().
 operation_to_string(create) -> <<"create">>;
 operation_to_string(get) -> <<"get">>;
@@ -828,6 +919,7 @@ operation_to_string(update) -> <<"update">>;
 operation_to_string(delete) -> <<"delete">>.
 
 
+%% @private
 -spec string_to_operation(binary()) -> operation().
 string_to_operation(<<"create">>) -> create;
 string_to_operation(<<"get">>) -> get;
@@ -835,6 +927,7 @@ string_to_operation(<<"update">>) -> update;
 string_to_operation(<<"delete">>) -> delete.
 
 
+%% @private
 -spec auth_hint_to_json(undefined | auth_hint()) -> null | json_map().
 auth_hint_to_json(undefined) -> null;
 auth_hint_to_json(?THROUGH_USER(UserId)) -> <<"throughUser:", UserId/binary>>;
@@ -852,6 +945,7 @@ auth_hint_to_json(?AS_SPACE(SpaceId)) -> <<"asSpace:", SpaceId/binary>>;
 auth_hint_to_json(?AS_HARVESTER(HarvesterId)) -> <<"asHarvester:", HarvesterId/binary>>.
 
 
+%% @private
 -spec json_to_auth_hint(null | json_map()) -> undefined | auth_hint().
 json_to_auth_hint(null) -> undefined;
 json_to_auth_hint(<<"throughUser:", UserId/binary>>) -> ?THROUGH_USER(UserId);
@@ -869,39 +963,47 @@ json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId);
 json_to_auth_hint(<<"asHarvester:", HarvesterId/binary>>) -> ?AS_HARVESTER(HarvesterId).
 
 
+%% @private
 -spec nosub_reason_to_str(nosub_reason()) -> binary().
 nosub_reason_to_str(forbidden) -> <<"forbidden">>.
 
 
+%% @private
 -spec str_to_nosub_reason(binary()) -> nosub_reason().
 str_to_nosub_reason(<<"forbidden">>) -> forbidden.
 
 
+%% @private
 -spec update_type_to_str(change_type()) -> binary().
 update_type_to_str(updated) -> <<"updated">>;
 update_type_to_str(deleted) -> <<"deleted">>.
 
 
+%% @private
 -spec str_to_update_type(binary()) -> change_type().
 str_to_update_type(<<"updated">>) -> updated;
 str_to_update_type(<<"deleted">>) -> deleted.
 
 
+%% @private
 -spec data_format_to_str(atom()) -> binary().
 data_format_to_str(resource) -> <<"resource">>;
 data_format_to_str(value) -> <<"value">>.
 
 
+%% @private
 -spec str_to_data_format(binary()) -> atom().
 str_to_data_format(<<"resource">>) -> resource;
 str_to_data_format(<<"value">>) -> value.
 
 
+%% @private
 -spec data_access_caveats_policy_to_str(data_access_caveats:policy()) -> binary().
 data_access_caveats_policy_to_str(disallow_data_access_caveats) -> <<"disallowDataAccessCaveats">>;
 data_access_caveats_policy_to_str(allow_data_access_caveats) -> <<"allowDataAccessCaveats">>.
 
 
+%% @private
 -spec str_to_data_access_caveats_policy(binary()) -> data_access_caveats:policy().
 str_to_data_access_caveats_policy(<<"disallowDataAccessCaveats">>) -> disallow_data_access_caveats;
 str_to_data_access_caveats_policy(<<"allowDataAccessCaveats">>) -> allow_data_access_caveats.

@@ -187,17 +187,17 @@ handle_call(?PES_CALL(Request), _From, #state{
     end;
 
 handle_call(?PES_CALL(_), _From, State) ->
-    {reply, ?ERR_NOT_SUPPORTED(?err_ctx()), reset_idle_timeout_timer(State)};
+    {reply, ?ERROR_NOT_SUPPORTED, reset_idle_timeout_timer(State)};
 
 handle_call(?PES_SUBMIT(_), _From, #state{mode = sync} = State) ->
-    {reply, ?ERR_NOT_SUPPORTED(?err_ctx()), reset_idle_timeout_timer(State)};
+    {reply, ?ERROR_NOT_SUPPORTED, reset_idle_timeout_timer(State)};
 
 handle_call(?PES_SUBMIT(Request), {_Pid, Tag} = From, State) ->
     State2 = allocate_for_slave_processing(From, Request, handle_call, State),
     {reply, {ok, {Tag, self()}}, reset_idle_timeout_timer(State2)};
 
 handle_call(?PES_ACKNOWLEDGED_CAST(_), _From, #state{mode = sync} = State) ->
-    {reply, ?ERR_NOT_SUPPORTED(?err_ctx()), reset_idle_timeout_timer(State)};
+    {reply, ?ERROR_NOT_SUPPORTED, reset_idle_timeout_timer(State)};
 
 handle_call(?PES_ACKNOWLEDGED_CAST(Request), _From, State) ->
     State2 = allocate_for_slave_processing(undefined, Request, handle_cast, State),
