@@ -95,8 +95,8 @@ init([Bucket, Mode, Id, DbHosts, Client]) ->
     DbUser = str_utils:to_binary(cluster_worker:get_env(couchbase_user)),
     DbPassword = str_utils:to_binary(cluster_worker:get_env(couchbase_password)),
     {ok, Connection} = case Client of
-        undefined -> cberl:connect(Host, <<DbUser/binary>>, <<DbPassword/binary>>, Bucket, Opts, Timeout);
-        _ -> cberl:connect(Host, <<DbUser/binary>>, <<DbPassword/binary>>, Bucket, Opts, Timeout, Client)
+        undefined -> cberl:connect(Host, DbUser, DbPassword, Bucket, Opts, Timeout);
+        _ -> cberl:connect(Host, DbUser, DbPassword, Bucket, Opts, Timeout, Client)
     end,
 
     couchbase_pool:reset_request_queue_size(Bucket, Mode, Id),
