@@ -213,8 +213,8 @@ cberl_test_base(Config) ->
                 [Bucket] = couchbase_config:get_buckets(),
                 DbUser = str_utils:to_binary(application:get_env(
                     ?CLUSTER_WORKER_APP_NAME, couchbase_user, "admin")),
-                DbPassword = str_utils:to_binary(
-                    application:get_env(?CLUSTER_WORKER_APP_NAME, couchbase_password, "password")),
+                DbPassword = str_utils:to_binary(application:get_env(
+                    ?CLUSTER_WORKER_APP_NAME, couchbase_password, "password")),
 
                 {ok, Client} = case SingleClient of
                     false ->
