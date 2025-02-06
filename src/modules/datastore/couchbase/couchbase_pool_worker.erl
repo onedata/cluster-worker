@@ -92,9 +92,11 @@ init([Bucket, Mode, Id, DbHosts, Client]) ->
     Opts = get_connect_opts(),
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_config_total_timeout, timer:seconds(30)),
+    DbUser = str_utils:to_binary(cluster_worker:get_env(couchbase_user)),
+    DbPassword = str_utils:to_binary(cluster_worker:get_env(couchbase_password)),
     {ok, Connection} = case Client of
-        undefined -> cberl:connect(Host, <<"admin">>, <<"password">>, Bucket, Opts, Timeout);
-        _ -> cberl:connect(Host, <<"admin">>, <<"password">>, Bucket, Opts, Timeout, Client)
+        undefined -> cberl:connect(Host, DbUser, DbPassword, Bucket, Opts, Timeout);
+        _ -> cberl:connect(Host, DbUser, DbPassword, Bucket, Opts, Timeout, Client)
     end,
 
     couchbase_pool:reset_request_queue_size(Bucket, Mode, Id),

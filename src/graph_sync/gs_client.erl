@@ -48,6 +48,7 @@
 -export([init/2, websocket_handle/3, websocket_info/3, websocket_terminate/3]).
 -export([start_link/4, start_link/5, kill/1]).
 -export([
+    batch_request/2,
     rpc_request/3,
     graph_request/3, graph_request/4, graph_request/5, graph_request/6,
     unsub_request/2,
@@ -235,6 +236,12 @@ websocket_terminate(Reason, _ConnState, _State) ->
 %%% Graph Sync client API
 %%%===================================================================
 
+-spec batch_request(client_ref(), [gs_protocol:req_wrapper()]) ->
+    {ok, gs_protocol:batch_resp()} | errors:error().
+batch_request(ClientRef, Batch) ->
+    sync_request(ClientRef, #gs_req_batch{requests = Batch}).
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Sends a synchronous RPC request to GS server using given GS client instance
@@ -321,10 +328,23 @@ unsub_request(ClientRef, GRI) ->
 %% response message still reaches the caller process after the timeout.
 %% @end
 %%--------------------------------------------------------------------
--spec sync_request(client_ref(), gs_protocol:req_wrapper() |
-    gs_protocol:rpc_req() | gs_protocol:graph_req() | gs_protocol:unsub_req()) ->
-    {ok, gs_protocol:rpc_resp() | gs_protocol:graph_resp() |
-    gs_protocol:unsub_resp()} | errors:error().
+-spec sync_request(
+    client_ref(),
+    gs_protocol:req_wrapper() |
+    gs_protocol:batch_req() |
+    gs_protocol:rpc_req() |
+    gs_protocol:graph_req() |
+    gs_protocol:unsub_req()
+) ->
+    {ok,
+        gs_protocol:batch_resp() |
+        gs_protocol:rpc_resp() |
+        gs_protocol:graph_resp() |
+        gs_protocol:unsub_resp()
+    } |
+    errors:error().
+sync_request(ClientRef, #gs_req_batch{} = BatchReq) ->
+    sync_request(ClientRef, #gs_req{subtype = batch, request = BatchReq});
 sync_request(ClientRef, #gs_req_rpc{} = RPCReq) ->
     sync_request(ClientRef, #gs_req{subtype = rpc, request = RPCReq});
 sync_request(ClientRef, #gs_req_graph{} = GraphReq) ->

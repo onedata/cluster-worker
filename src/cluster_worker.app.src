@@ -222,6 +222,11 @@
                 {disc, 50000}
             ]},
 
+            % Default DB credentials, replaced automatically by Onepanel during
+            % cluster configuration. DO NOT edit manually!
+            {couchbase_user, "admin"},
+            {couchbase_password, "password"},
+
             {couchbase_config_total_timeout, 30000},
             {couchbase_pool_operation_timeout, 1800000},
             {couchbase_operation_timeout, 60000},
@@ -296,6 +301,10 @@
 
             % Timeout when waiting for synchronous response from Graph Sync client process.
             {graph_sync_client_request_timeout, 30000},
+
+            % How many parallel processes (maximum) can be spawned to process one batch of
+            % GraphSync messages. The limit is per a single GraphSync connection.
+            {graph_sync_batch_parallelism, 10},
 
             %% ===================================================================
             %% EXOMETER

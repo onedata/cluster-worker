@@ -211,6 +211,10 @@ cberl_test_base(Config) ->
                 end, hd(DbHosts), tl(DbHosts)),
                 Opts = get_connect_opts(),
                 [Bucket] = couchbase_config:get_buckets(),
+                DbUser = str_utils:to_binary(application:get_env(
+                    ?CLUSTER_WORKER_APP_NAME, couchbase_user, "admin")),
+                DbPassword = str_utils:to_binary(application:get_env(
+                    ?CLUSTER_WORKER_APP_NAME, couchbase_password, "password")),
 
                 {ok, Client} = case SingleClient of
                     false ->
@@ -224,7 +228,7 @@ cberl_test_base(Config) ->
                 end,
 
                 {ok, Ref} = cberl_nif:connect(
-                    self(), Client, Host, <<>>, <<>>, Bucket, Opts
+                    self(), Client, Host, DbUser, DbPassword, Bucket, Opts
                 ),
                 {ok, Connection} = receive
                     {Ref, {ok, C}} ->

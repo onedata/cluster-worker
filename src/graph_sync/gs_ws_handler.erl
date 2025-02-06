@@ -33,6 +33,10 @@
     ?CLUSTER_WORKER_APP_NAME, graph_sync_websocket_keepalive, timer:seconds(15)
 )).
 
+-define(BATCH_PARALLELISM, application:get_env(
+    ?CLUSTER_WORKER_APP_NAME, graph_sync_batch_parallelism, 10
+)).
+
 %% Cowboy WebSocket handler callbacks
 -export([
     init/2,
@@ -94,40 +98,53 @@ websocket_init(State) ->
     InFrame :: {text | binary | ping | pong, binary()},
     State :: state(),
     OutFrame :: cow_ws:frame().
-websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
-    #pre_handshake_state{
-        peer_ip = PeerIp,
-        cookies = Cookies,
-        translator = Translator
-    } = State,
+websocket_handle({text, Data}, #pre_handshake_state{
+    peer_ip = PeerIp, cookies = Cookies, translator = Translator} = State
+) ->
     % If there was no handshake yet, expect only handshake messages
-    {Response, NewState} = case decode_body(?BASIC_PROTOCOL, Data) of
-        {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
-            case gs_server:handshake(self(), Translator, Request, PeerIp, Cookies) of
-                {ok, SessionData, HandshakeResp} ->
-                    {HandshakeResp, SessionData};
-                {error, ErrMsg} ->
-                    {ErrMsg, State}
-            end;
-        {ok, BadRequest} ->
-            {gs_protocol:generate_error_response(
-                BadRequest, ?ERROR_EXPECTED_HANDSHAKE_MESSAGE
-            ), State};
-        {error, _} = Error ->
-            {gs_protocol:generate_error_push_message(Error), State}
+    {Response, NewState} = try
+        case decode_body(?BASIC_PROTOCOL, Data) of
+            {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
+                case gs_server:handshake(self(), Translator, Request, PeerIp, Cookies) of
+                    {ok, SessionData, HandshakeResp} ->
+                        {gs_protocol:generate_success_response(Request, HandshakeResp), SessionData};
+                    ErrMsg ->
+                        {gs_protocol:generate_error_response(Request, ErrMsg), State}
+                end;
+            {ok, BadRequest} ->
+                {gs_protocol:generate_error_response(
+                    BadRequest, ?ERROR_EXPECTED_HANDSHAKE_MESSAGE
+                ), State};
+            {error, _} = Error1 ->
+                {gs_protocol:generate_error_push_message(Error1), State}
+        end
+    catch Class:Reason:Stacktrace ->
+        Error2 = ?examine_exception(Class, Reason, Stacktrace),
+        {gs_protocol:generate_error_push_message(Error2), State}
     end,
     {ok, JSONMap} = gs_protocol:encode(?BASIC_PROTOCOL, Response),
     {reply, {text, json_utils:encode(JSONMap)}, NewState};
 
 websocket_handle({text, Data}, SessionData = #gs_session{protocol_version = ProtoVersion}) ->
-    case decode_body(ProtoVersion, Data) of
-        {ok, Requests} ->
-            % process_request_async should not crash, but if it does,
-            % cowboy will log the error.
-            process_request_async(SessionData, Requests),
-            {ok, SessionData};
-        {error, _} = Error ->
-            ErrorMsg = gs_protocol:generate_error_push_message(Error),
+    Result = try
+        case decode_body(ProtoVersion, Data) of
+            {ok, Request} ->
+                % process_request_async should not crash, but if it does,
+                % cowboy will log the error.
+                process_request_async(SessionData, Request),
+                {ok, SessionData};
+            {error, _} = Error1 ->
+                Error1
+        end
+    catch Class:Reason:Stacktrace ->
+        ?examine_exception(Class, Reason, Stacktrace)
+    end,
+
+    case Result of
+        {ok, _} ->
+            Result;
+        {error, _} = Error2 ->
+            ErrorMsg = gs_protocol:generate_error_push_message(Error2),
             {ok, ErrorJSONMap} = gs_protocol:encode(ProtoVersion, ErrorMsg),
             {reply, {text, json_utils:encode(ErrorJSONMap)}, SessionData}
     end;
@@ -140,6 +157,7 @@ websocket_handle({ping, _Payload}, State) ->
 
 websocket_handle(pong, #pre_handshake_state{} = State) ->
     {ok, State};
+
 websocket_handle(pong, #gs_session{} = SessionData) ->
     % pongs are received in response to the keepalive pings sent to the client
     % (see 'keepalive' periodical message)
@@ -214,6 +232,7 @@ terminate(_Reason, _Req, #gs_session{id = SessionId} = SessionData) ->
 %%% API
 %%%===================================================================
 
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Sends a request to websocket handler pid to push data to the client
@@ -224,6 +243,7 @@ terminate(_Reason, _Req, #gs_session{id = SessionId} = SessionData) ->
 push(WebsocketPid, Msg) when WebsocketPid /= undefined ->
     WebsocketPid ! {push, Msg},
     ok.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -240,68 +260,56 @@ kill(WebsocketPid) when WebsocketPid /= undefined ->
 keepalive_interval() ->
     ?KEEPALIVE_INTERVAL_MILLIS div 1000.
 
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
-%%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Spawns a new process to process a request (or a group of processes in case of
-%% multiple requests). After processing, the response is pushed to the client.
-%% @end
-%%--------------------------------------------------------------------
--spec process_request_async(gs_session:data(), gs_protocol:req_wrapper() | [gs_protocol:req_wrapper()]) ->
-    ok.
-process_request_async(SessionData, RequestList) when is_list(RequestList) ->
-    lists:foreach(fun(Request) ->
-        process_request_async(SessionData, Request)
-    end, RequestList);
-process_request_async(SessionData, Request) ->
-    WebsocketPid = self(),
-    spawn(fun() ->
-        Response = try gs_server:handle_request(SessionData, Request) of
-            {ok, Resp} ->
-                gs_protocol:generate_success_response(Request, Resp);
-            {error, _} = Error ->
-                gs_protocol:generate_error_response(Request, Error)
-        catch
-            throw:{error, _} = Error ->
-                gs_protocol:generate_error_response(Request, Error);
-            Type:Message:Stacktrace ->
-                ?error_stacktrace(
-                    "Unexpected error while handling graph_sync request - ~tp:~tp",
-                    [Type, Message],
-                    Stacktrace
-                ),
-                gs_protocol:generate_error_response(
-                    Request, ?ERROR_INTERNAL_SERVER_ERROR
-                )
-        end,
-        push(WebsocketPid, Response)
-    end),
-    ok.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Decodes a binary JSON message into gs request record(s).
-%% @end
-%%--------------------------------------------------------------------
 -spec decode_body(gs_protocol:protocol_version(), Data :: binary()) ->
-    {ok, gs_protocol:req_wrapper() | [gs_protocol:req_wrapper()]} | errors:error().
+    {ok, gs_protocol:req_wrapper()} | errors:error().
 decode_body(ProtocolVersion, Data) ->
     try
-        case json_utils:decode(Data) of
-            #{<<"batch">> := BatchList} ->
-                {ok, lists:map(fun(JSONMap) ->
-                    {ok, Request} = gs_protocol:decode(ProtocolVersion, JSONMap),
-                    Request
-                end, BatchList)};
-            JSONMap ->
-                {ok, _Request} = gs_protocol:decode(ProtocolVersion, JSONMap)
-        end
+        JSONMap = json_utils:decode(Data),
+        gs_protocol:decode(ProtocolVersion, JSONMap)
     catch
-        _:_ ->
+        Class:Reason:Stacktrace ->
+            ?debug_exception(Class, Reason, Stacktrace),
             ?ERROR_BAD_MESSAGE(Data)
+    end.
+
+
+%% @private
+-spec process_request_async(gs_session:data(), gs_protocol:req_wrapper()) -> pid().
+process_request_async(SessionData, Request) ->
+    WebsocketPid = self(),
+    % TODO VFS-12568 currently, for every request, there is a new process spawned,
+    % it would be better to have a worker pool of processes for throttling and load balancing
+    spawn(fun() ->
+        Response = handle_request(SessionData, Request),
+        push(WebsocketPid, Response)
+    end).
+
+
+%% @private
+-spec handle_request(gs_session:data(), gs_protocol:req_wrapper()) -> gs_protocol:resp_wrapper().
+handle_request(SessionData, #gs_req{request = #gs_req_batch{requests = Requests}} = BatchRequest) ->
+    Result = ?catch_exceptions(
+        {ok, lists_utils:pmap(fun(Request) ->
+            % TODO VFS-12568 run this on the pool of processes - see process_request_async/2
+            handle_request(SessionData, Request)
+        end, Requests, ?BATCH_PARALLELISM)}
+    ),
+    case Result of
+        {ok, BatchResponses} ->
+            gs_protocol:generate_success_response(BatchRequest, #gs_resp_batch{responses = BatchResponses});
+        {error, _} = Error ->
+            gs_protocol:generate_error_response(BatchRequest, Error)
+    end;
+handle_request(SessionData, Request) ->
+    case gs_server:handle_request(SessionData, Request) of
+        {ok, Resp} ->
+            gs_protocol:generate_success_response(Request, Resp);
+        {error, _} = Error ->
+            gs_protocol:generate_error_response(Request, Error)
     end.
