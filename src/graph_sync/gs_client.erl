@@ -145,7 +145,6 @@ init([], _) ->
 -spec websocket_handle({text | binary | ping | pong, binary()},
     websocket_req:req(), state()) ->
     {ok, state()} |
-    {reply, websocket_req:frame(), state()} |
     {close, Reply :: binary(), state()}.
 websocket_handle({text, Data}, _, #state{protocol_version = ProtoVer} = State) ->
     try
@@ -178,9 +177,9 @@ websocket_handle(Msg, _, State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec websocket_info(term(), websocket_req:req(), state()) ->
-    {ok, state()} |
-    {reply, websocket_req:frame(), state()} |
-    {close, Reply :: binary(), state()}.
+    {ok, State :: term()} |
+    {reply, websocket_req:frame(), State :: term()} |
+    {close, Reply :: binary(), State :: term()}.
 websocket_info({init, CallerPid, SupportedVersions, Auth, PushCallback}, _, State) ->
     Id = datastore_key:new(),
     HandshakeRequest = #gs_req{
@@ -389,8 +388,7 @@ async_request(ClientRef, #gs_req{id = Id} = Request) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_message(gs_protocol:resp_wrapper() | gs_protocol:push_wrapper(), state()) ->
-    {ok, State :: state()} |
-    {reply, websocket_req:frame(), state()} |
+    {ok, state()} |
     {close, Reply :: binary(), state()}.
 handle_message(
     #gs_resp{id = Id, subtype = handshake, success = false, error = Error},
