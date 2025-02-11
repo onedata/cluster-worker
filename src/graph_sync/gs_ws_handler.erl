@@ -298,7 +298,7 @@ handle_request(SessionData, #gs_req{request = #gs_req_batch{requests = Requests}
         {ok, lists_utils:pmap(fun(Request) ->
             % TODO VFS-12568 run this on the pool of processes - see process_request_async/2
             handle_request(SessionData, Request)
-        end, Requests, ?BATCH_PARALLELISM)}
+        end, Requests)}
     ),
     case Result of
         {ok, BatchResponses} ->
