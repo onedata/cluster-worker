@@ -113,7 +113,7 @@
 -define(make_missing_layout_error(TimeSeriesCollectionHeads, RequestLayout), begin
     ActualLayout = tsc_structure:to_layout(TimeSeriesCollectionHeads),
     MissingLayout = tsc_structure:subtract_layout(RequestLayout, ActualLayout),
-    ?ERROR_TSC_MISSING_LAYOUT(MissingLayout)
+    ?ERR_TSC_MISSING_LAYOUT(?err_ctx(), MissingLayout)
 end).
 
 
@@ -289,21 +289,21 @@ get_slice(Ctx, Id, SliceLayout, ListWindowsOptions, Batch) ->
 -spec sanitize_config(config()) -> ok | no_return().
 sanitize_config(Config) ->
     tsc_structure:foreach(fun(TimeSeriesName, MetricName, MetricConfig) ->
-        str_utils:validate_name(TimeSeriesName) orelse throw(?ERROR_BAD_VALUE_NAME(<<"timeSeriesName">>)),
-        str_utils:validate_name(MetricName) orelse throw(?ERROR_BAD_VALUE_NAME(<<"metricName">>)),
+        str_utils:validate_name(TimeSeriesName) orelse throw(?ERR_BAD_VALUE_NAME(?err_ctx(), <<"timeSeriesName">>)),
+        str_utils:validate_name(MetricName) orelse throw(?ERR_BAD_VALUE_NAME(?err_ctx(), <<"metricName">>)),
 
         lists:member(MetricConfig#metric_config.resolution, ?ALLOWED_METRIC_RESOLUTIONS) orelse throw(
-            ?ERROR_BAD_VALUE_NOT_ALLOWED(<<"resolution">>, ?ALLOWED_METRIC_RESOLUTIONS)
+            ?ERR_BAD_VALUE_NOT_ALLOWED(?err_ctx(), <<"resolution">>, ?ALLOWED_METRIC_RESOLUTIONS)
         ),
         lists:member(MetricConfig#metric_config.aggregator, ?ALLOWED_METRIC_AGGREGATORS) orelse throw(
-            ?ERROR_BAD_VALUE_NOT_ALLOWED(<<"aggregator">>, ?ALLOWED_METRIC_AGGREGATORS)
+            ?ERR_BAD_VALUE_NOT_ALLOWED(?err_ctx(), <<"aggregator">>, ?ALLOWED_METRIC_AGGREGATORS)
         ),
 
         case MetricConfig of
             #metric_config{retention = Retention} when Retention =< 0 orelse Retention > ?MAX_METRIC_RETENTION ->
-                throw(?ERROR_BAD_VALUE_NOT_IN_RANGE(<<"retention">>, 1, ?MAX_METRIC_RETENTION));
+                throw(?ERR_BAD_VALUE_NOT_IN_RANGE(?err_ctx(), <<"retention">>, 1, ?MAX_METRIC_RETENTION));
             #metric_config{resolution = 0, retention = Retention} when Retention /= 1 ->
-                throw(?ERROR_BAD_DATA(<<"retention">>, <<
+                throw(?ERR_BAD_DATA(?err_ctx(), <<"retention">>, <<
                     "Retention must be set to 1 if resolution is set to 0 (infinite window resolution)"
                 >>));
             _ ->
@@ -320,8 +320,8 @@ integrate_config_with_extension(BaseConfig, Extension) ->
             true ->
                 FirstMetricConfig;
             false ->
-                throw(?ERROR_BAD_VALUE_TSC_CONFLICTING_METRIC_CONFIG(
-                    TimeSeriesName, MetricName, FirstMetricConfig, SecondMetricConfig
+                throw(?ERR_BAD_VALUE_TSC_CONFLICTING_METRIC_CONFIG(
+                    ?err_ctx(), TimeSeriesName, MetricName, FirstMetricConfig, SecondMetricConfig
                 ))
         end
     end, BaseConfig, Extension).

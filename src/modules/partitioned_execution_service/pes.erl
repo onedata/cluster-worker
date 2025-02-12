@@ -127,7 +127,7 @@
 -type mode() :: sync | async.
 
 -type message_with_delivery_check() :: ?PES_CALL(request()) | ?PES_SUBMIT(request()) | ?PES_ACKNOWLEDGED_CAST(request()).
--type communication_error() :: ?ERROR_INTERNAL_SERVER_ERROR | ?ERROR_TIMEOUT.
+-type communication_error() :: od_error_internal_server_error:t() | od_error_timeout:t().
 -type pes_framework_error() :: ignored | communication_error().
 
 -type graceful_termination_request() :: graceful_termination_request.
@@ -179,7 +179,7 @@ stop(Plugin) ->
 %%% get_root_supervisor_child_specs/1)
 %%%===================================================================
 
--spec start_root_supervisor(plugin()) -> {ok, pid()} | ?ERROR_INTERNAL_SERVER_ERROR.
+-spec start_root_supervisor(plugin()) -> {ok, pid()} | od_error_internal_server_error:t().
 start_root_supervisor(Plugin) ->
     SupervisorModule = resolve_root_supervisor_module(Plugin),
     case SupervisorModule:start_link(pes_plugin:get_root_supervisor_name(Plugin)) of
@@ -188,7 +188,7 @@ start_root_supervisor(Plugin) ->
         Error ->
             ?error("PES ~tp error for plug-in ~tp: ~tp",
                 [?FUNCTION_NAME, Plugin, Error]),
-            ?ERROR_INTERNAL_SERVER_ERROR
+            ?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined)
     end.
 
 
@@ -317,12 +317,13 @@ self_cast_after(Request, Time) ->
 %%% process termination.
 %%%===================================================================
 
--spec cast(plugin(), key(), request()) -> ok | ignored | ?ERROR_INTERNAL_SERVER_ERROR.
+-spec cast(plugin(), key(), request()) -> ok | ignored | od_error_internal_server_error:t().
 cast(Plugin, Key, Request) ->
     cast(Plugin, Key, Request, #{}).
 
 
--spec cast(plugin(), key(), request(), cast_options()) -> ok | ignored | ?ERROR_INTERNAL_SERVER_ERROR.
+-spec cast(plugin(), key(), request(), cast_options()) ->
+    ok | ignored | od_error_internal_server_error:t().
 cast(Plugin, Key, Request, #{ensure_executor_alive := false}) ->
     case pes_process_manager:get_server_if_initialized(Plugin, Key) of
         {ok, Pid} -> pes_server:cast(Pid, ?PES_CAST(Request));
@@ -399,7 +400,7 @@ send_request_and_check_delivery(Plugin, Key, Message, #{
                 Error:Reason:Stacktrace when Reason =/= potential_deadlock ->
                     ?error_stacktrace("PES send_request error ~tp:~tp for plug-in ~tp, key ~tp and options ~tp",
                         [Error, Reason, Plugin, Key, Options], Stacktrace),
-                    ?ERROR_INTERNAL_SERVER_ERROR
+                    ?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined)
             end;
         not_alive ->
             ignored
@@ -430,7 +431,7 @@ send_request_and_check_delivery(Plugin, Key, Message, Options) ->
                 Error:Reason:Stacktrace when Reason =/= potential_deadlock ->
                     ?error_stacktrace("PES send_request error ~tp:~tp for plug-in ~tp, key ~tp and options ~tp",
                         [Error, Reason, Plugin, Key, Options], Stacktrace),
-                    ?ERROR_INTERNAL_SERVER_ERROR
+                    ?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined)
             end;
         {error, Reason} ->
             {error, Reason} % Error starting process - do not try again
@@ -457,13 +458,13 @@ send_to_all(Plugin, Message) ->
             Error:Reason:Stacktrace ->
                 ?error_stacktrace("PES call error ~tp:~tp for plug-in ~tp and pid ~tp",
                     [Error, Reason, Plugin, Pid], Stacktrace),
-                [?ERROR_INTERNAL_SERVER_ERROR | Acc]
+                [?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined) | Acc]
         end
     end, [])).
 
 
 %% @private
--spec acquire_pes_server(plugin(), key()) -> {ok, pid()} | ?ERROR_INTERNAL_SERVER_ERROR.
+-spec acquire_pes_server(plugin(), key()) -> {ok, pid()} | od_error_internal_server_error:t().
 acquire_pes_server(Plugin, Key) ->
     case pes_process_manager:get_server(Plugin, Key) of
         {ok, Pid} -> {ok, Pid};
@@ -472,7 +473,7 @@ acquire_pes_server(Plugin, Key) ->
 
 
 %% @private
--spec create_pes_server(plugin(), key()) -> {ok, pid()} | ?ERROR_INTERNAL_SERVER_ERROR.
+-spec create_pes_server(plugin(), key()) -> {ok, pid()} | od_error_internal_server_error:t().
 create_pes_server(Plugin, Key) ->
     try
         case pes_process_manager:start_server(Plugin, Key) of
@@ -482,13 +483,13 @@ create_pes_server(Plugin, Key) ->
                 {ok, Pid};
             {error, Reason} ->
                 ?error("PES ~tp error for plug-in ~tp and key ~tp: ~tp", [?FUNCTION_NAME, Plugin, Key, Reason]),
-                ?ERROR_INTERNAL_SERVER_ERROR
+                ?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined)
         end
     catch
         Error:CatchReason:Stacktrace ->
             ?error_stacktrace("PES ~tp error ~tp:~tp for plug-in ~tp and key ~tp",
                 [?FUNCTION_NAME, Error, CatchReason, Plugin, Key], Stacktrace),
-            ?ERROR_INTERNAL_SERVER_ERROR
+            ?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined)
     end.
 
 
@@ -522,10 +523,10 @@ await(Tag, Pid, Timeout, RetryOnFailure) ->
                                                          % answer sending / process terminating
                 {_, _, false} ->
                     ?error("PES executor ~tp is not alive when awaiting for tag ~tp", [Pid, Tag]),
-                    ?ERROR_INTERNAL_SERVER_ERROR;
+                    ?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined);
                 {_, _, {badrpc, Reason}} ->
                     ?error("PES ~tp badrpc for tag ~tp and pid ~tp: ~tp", [?FUNCTION_NAME, Tag, Pid, Reason]),
-                    ?ERROR_INTERNAL_SERVER_ERROR
+                    ?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined)
             end
     end.
 

@@ -76,4 +76,4 @@ from_json(Data = #{<<"mode">> := <<"slice">>}) ->
     };
 
 from_json(#{<<"mode">> := _InvalidMode}) ->
-    throw(?ERROR_BAD_VALUE_NOT_ALLOWED(<<"mode">>, [<<"layout">>, <<"slice">>])).
+    throw(?ERR_BAD_VALUE_NOT_ALLOWED(?err_ctx(), <<"mode">>, [<<"layout">>, <<"slice">>])).

@@ -137,7 +137,7 @@ multiple_metrics_splitting_strategies_create() ->
     ConfigMap3 = #{<<"TS1">> => GetLargeTimeSeries(), <<"TS2">> => GetLargeTimeSeries()},
     Id = datastore_key:new(),
     Batch = datastore_doc_batch:init(),
-    ?assertEqual({?ERROR_TSC_TOO_MANY_METRICS(?MAX_DOC_SIZE), Batch}, time_series_collection:create(#{}, Id, ConfigMap3, Batch)).
+    ?assertMatch({?ERR_TSC_TOO_MANY_METRICS(?MAX_DOC_SIZE), Batch}, time_series_collection:create(#{}, Id, ConfigMap3, Batch)).
 
 
 %%%===================================================================

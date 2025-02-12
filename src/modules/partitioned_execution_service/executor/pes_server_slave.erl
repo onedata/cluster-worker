@@ -107,7 +107,7 @@ handle_cast(graceful_termination_request, #state{
         {defer, UpdatedExecutorState} ->
             MasterPid ! slave_termination_deferred,
             {noreply, State#state{executor_state = UpdatedExecutorState}};
-        ?ERROR_INTERNAL_SERVER_ERROR ->
+        ?ERR_INTERNAL_SERVER_ERROR(_) ->
             MasterPid ! slave_termination_deferred,
             {noreply, State}
     end;
@@ -178,7 +178,7 @@ process_slave_task(#pes_slave_task{request = Request, callback = handle_call, fr
         Error:Reason:Stacktrace ->
             ?error_stacktrace("PES server slave handle_call error ~tp:~tp for plug-in ~tp and request ~tp",
                 [Error, Reason, Plugin, Request], Stacktrace),
-            send_submit_result(From, ?ERROR_INTERNAL_SERVER_ERROR),
+            send_submit_result(From, ?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined)),
             ExecutorState
     end;
 
