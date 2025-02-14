@@ -274,7 +274,7 @@ encode_decode_message_test() ->
             id = <<"mess20">>,
             subtype = handshake,
             success = false,
-            error = ?ERROR_BAD_VERSION([1, 2, 3]),
+            error = ?ERR_BAD_VERSION(?UNDEFINED_ERR_CTX, [1, 2, 3]),
             response = undefined
         },
         #gs_resp{
@@ -317,7 +317,7 @@ encode_decode_message_test() ->
             id = <<"mess23.3">>,
             subtype = rpc,
             success = false,
-            error = ?ERROR_RPC_UNDEFINED,
+            error = ?ERR_RPC_UNDEFINED(?UNDEFINED_ERR_CTX),
             response = undefined
         },
         #gs_resp{
@@ -342,7 +342,7 @@ encode_decode_message_test() ->
             id = <<"mess25">>,
             subtype = graph,
             success = false,
-            error = ?ERROR_FORBIDDEN,
+            error = ?ERR_FORBIDDEN(?UNDEFINED_ERR_CTX),
             response = undefined
         },
         #gs_resp{
@@ -405,7 +405,7 @@ encode_decode_message_test() ->
             id = <<"mess28">>,
             subtype = unsub,
             success = false,
-            error = ?ERROR_NOT_SUBSCRIBABLE,
+            error = ?ERR_NOT_SUBSCRIBABLE(?UNDEFINED_ERR_CTX),
             response = undefined
         },
         #gs_resp{
@@ -419,7 +419,7 @@ encode_decode_message_test() ->
         #gs_push{
             subtype = error,
             message = #gs_push_error{
-                error = ?ERROR_BAD_MESSAGE(#{<<"mesaz">> => <<"mesaz">>})
+                error = ?ERR_BAD_MESSAGE(?UNDEFINED_ERR_CTX, #{<<"mesaz">> => <<"mesaz">>})
             }
         },
         #gs_push{
@@ -458,7 +458,7 @@ encode_decode_message_test() ->
     lists:foreach(fun(ProtoVersion) ->
         lists:foreach(fun(Request) ->
             check_encode_decode_for_proto_version(ProtoVersion, Request),
-            ?assertMatch(?ERROR_BAD_MESSAGE(_), gs_protocol:decode(ProtoVersion, <<"sdfsdviuyasd9fas">>))
+            ?assertMatch(?ERR_BAD_MESSAGE(_), gs_protocol:decode(ProtoVersion, <<"sdfsdviuyasd9fas">>))
         end, RequestsToCheck)
     end, gs_protocol:supported_versions()).
 

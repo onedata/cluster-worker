@@ -77,7 +77,7 @@ sanitize_data(RawData, DataSpec) ->
     SanitizedData1 = lists:foldl(fun(Param, SanitizedDataAcc) ->
         case sanitize_param(Param, RawData, RequiredParamsSpec) of
             false ->
-                throw(?ERROR_MISSING_REQUIRED_VALUE(Param));
+                throw(?ERR_MISSING_REQUIRED_VALUE(?err_ctx(), Param));
             {true, Val} ->
                 SanitizedDataAcc#{Param => Val}
         end
@@ -108,7 +108,7 @@ sanitize_data(RawData, DataSpec) ->
         {0, false} ->
             ok;
         {_, false} ->
-            throw(?ERROR_MISSING_AT_LEAST_ONE_VALUE(lists:sort(maps:keys(AtLeastOneParamsSpec))))
+            throw(?ERR_MISSING_AT_LEAST_ONE_VALUE(?err_ctx(), lists:sort(maps:keys(AtLeastOneParamsSpec))))
     end,
 
     SanitizedData3.
@@ -182,7 +182,7 @@ sanitize_param(TypeConstraint, ValueConstraint, Param, RawValue) ->
             ?error_stacktrace("Error in ~tp:~tp - ~tp:~tp", [
                 ?MODULE, ?FUNCTION_NAME, Type, Message
             ], Stacktrace),
-            throw(?ERROR_BAD_DATA(Param))
+            throw(?ERR_BAD_DATA(?err_ctx(), Param, undefined))
     end.
 
 
@@ -209,14 +209,14 @@ check_type(atom, _Key, Binary) when is_binary(Binary) ->
         ''
     end;
 check_type(atom, Key, _) ->
-    throw(?ERROR_BAD_VALUE_ATOM(Key));
+    throw(?ERR_BAD_VALUE_STRING(?err_ctx(), Key));
 
 check_type(binary, _Param, Binary) when is_binary(Binary) ->
     Binary;
 check_type(binary, _Param, Atom) when is_atom(Atom) ->
     atom_to_binary(Atom, utf8);
 check_type(binary, Param, _) ->
-    throw(?ERROR_BAD_VALUE_BINARY(Param));
+    throw(?ERR_BAD_VALUE_STRING(?err_ctx(), Param));
 
 check_type(list_of_binaries, Key, Values) ->
     try
@@ -226,7 +226,7 @@ check_type(list_of_binaries, Key, Values) ->
         end, Values)
     catch
         _:_ ->
-            throw(?ERROR_BAD_VALUE_LIST_OF_BINARIES(Key))
+            throw(?ERR_BAD_VALUE_LIST_OF_STRINGS(?err_ctx(), Key))
     end;
 
 check_type(boolean, _Param, true) ->
@@ -238,18 +238,18 @@ check_type(boolean, _Param, false) ->
 check_type(boolean, _Param, <<"false">>) ->
     false;
 check_type(boolean, Param, _) ->
-    throw(?ERROR_BAD_VALUE_BOOLEAN(Param));
+    throw(?ERR_BAD_VALUE_BOOLEAN(?err_ctx(), Param));
 
 check_type(integer, Param, Bin) when is_binary(Bin) ->
     try
         binary_to_integer(Bin)
     catch _:_ ->
-        throw(?ERROR_BAD_VALUE_INTEGER(Param))
+        throw(?ERR_BAD_VALUE_INTEGER(?err_ctx(), Param))
     end;
 check_type(integer, _Param, Int) when is_integer(Int) ->
     Int;
 check_type(integer, Param, _) ->
-    throw(?ERROR_BAD_VALUE_INTEGER(Param));
+    throw(?ERR_BAD_VALUE_INTEGER(?err_ctx(), Param));
 
 check_type(gri, _Param, #gri{} = GRI) ->
     GRI;
@@ -257,32 +257,32 @@ check_type(gri, Param, EncodedGri) when is_binary(EncodedGri) ->
     try
         gri:deserialize(EncodedGri)
     catch _:_ ->
-        throw(?ERROR_BAD_DATA(Param))
+        throw(?ERR_BAD_DATA(?err_ctx(), Param, undefined))
     end;
 check_type(gri, Param, _) ->
-    throw(?ERROR_BAD_DATA(Param));
+    throw(?ERR_BAD_DATA(?err_ctx(), Param, undefined));
 
 check_type(page_token, _Param, undefined) ->
     undefined;
 check_type(page_token, _Param, <<"undefined">>) ->
     undefined;
 check_type(page_token, Param, <<>>) ->
-    throw(?ERROR_BAD_VALUE_EMPTY(Param));
+    throw(?ERR_BAD_VALUE_EMPTY(?err_ctx(), Param));
 check_type(page_token, _Param, PageToken) when is_binary(PageToken) ->
     PageToken;
 check_type(page_token, Param, _) ->
-    throw(?ERROR_BAD_DATA(Param));
+    throw(?ERR_BAD_DATA(?err_ctx(), Param, undefined));
 
 check_type(json, _Param, JSON) when is_map(JSON) ->
     JSON;
 check_type(json, Param, _) ->
-    throw(?ERROR_BAD_VALUE_JSON(Param));
+    throw(?ERR_BAD_VALUE_JSON(?err_ctx(), Param));
 
 check_type(TypeConstraint, Param, _) ->
     ?error("Unknown type constraint: ~tp for param: ~tp", [
         TypeConstraint, Param
     ]),
-    throw(?ERROR_INTERNAL_SERVER_ERROR).
+    throw(?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined)).
 
 
 %%--------------------------------------------------------------------
@@ -300,28 +300,28 @@ check_value(_, any, _Param, _) ->
     ok;
 
 check_value(binary, non_empty, Param, <<"">>) ->
-    throw(?ERROR_BAD_VALUE_EMPTY(Param));
+    throw(?ERR_BAD_VALUE_EMPTY(?err_ctx(), Param));
 check_value(json, non_empty, Param, Map) when map_size(Map) == 0 ->
-    throw(?ERROR_BAD_VALUE_EMPTY(Param));
+    throw(?ERR_BAD_VALUE_EMPTY(?err_ctx(), Param));
 check_value(_, non_empty, _Param, _) ->
     ok;
 
 check_value(_, guid, Param, []) ->
-    throw(?ERROR_BAD_VALUE_IDENTIFIER(Param));
+    throw(?ERR_BAD_VALUE_IDENTIFIER(?err_ctx(), Param));
 check_value(_, guid, Param, Value) ->
     try
         lists:foreach(fun(G) ->
             {_, _, _} = file_id:unpack_share_guid(G)
         end, utils:ensure_list(Value))
     catch _:_ ->
-        throw(?ERROR_BAD_VALUE_IDENTIFIER(Param))
+        throw(?ERR_BAD_VALUE_IDENTIFIER(?err_ctx(), Param))
     end;
 
 check_value(binary, octal, Param, Value) ->
     try
         {ok, binary_to_integer(Value, 8)}
     catch _:_->
-        throw(?ERROR_BAD_VALUE_OCTAL(Param))
+        throw(?ERR_BAD_VALUE_OCTAL(?err_ctx(), Param))
     end;
 
 check_value(_, {not_lower_than, Threshold}, Param, Value) ->
@@ -329,14 +329,14 @@ check_value(_, {not_lower_than, Threshold}, Param, Value) ->
         true ->
             ok;
         false ->
-            throw(?ERROR_BAD_VALUE_TOO_LOW(Param, Threshold))
+            throw(?ERR_BAD_VALUE_TOO_LOW(?err_ctx(), Param, Threshold))
     end;
 check_value(_, {between, Low, High}, Param, Value) ->
     case Value >= Low andalso Value =< High of
         true ->
             ok;
         false ->
-            throw(?ERROR_BAD_VALUE_NOT_IN_RANGE(Param, Low, High))
+            throw(?ERR_BAD_VALUE_NOT_IN_RANGE(?err_ctx(), Param, Low, High))
     end;
 
 check_value(_, AllowedValues, Param, Values) when is_list(AllowedValues) andalso is_list(Values) ->
@@ -345,7 +345,7 @@ check_value(_, AllowedValues, Param, Values) when is_list(AllowedValues) andalso
             true ->
                 ok;
             _ ->
-                throw(?ERROR_BAD_VALUE_LIST_NOT_ALLOWED(Param, AllowedValues))
+                throw(?ERR_BAD_VALUE_LIST_NOT_ALLOWED(?err_ctx(), Param, AllowedValues))
         end
     end, Values);
 
@@ -354,7 +354,7 @@ check_value(_, AllowedValues, Param, Val) when is_list(AllowedValues) ->
         true ->
             ok;
         _ ->
-            throw(?ERROR_BAD_VALUE_NOT_ALLOWED(Param, AllowedValues))
+            throw(?ERR_BAD_VALUE_NOT_ALLOWED(?err_ctx(), Param, AllowedValues))
     end;
 
 check_value(_, RectifyFun, Param, Val) when is_function(RectifyFun, 1) ->
@@ -364,11 +364,11 @@ check_value(_, RectifyFun, Param, Val) when is_function(RectifyFun, 1) ->
         {true, NewVal} ->
             {ok, NewVal};
         false ->
-            throw(?ERROR_BAD_DATA(Param))
+            throw(?ERR_BAD_DATA(?err_ctx(), Param, undefined))
     end;
 
 check_value(TypeConstraint, ValueConstraint, Param, _) ->
     ?error("Unknown {type, value} constraint: {~tp, ~tp} for param: ~tp", [
         TypeConstraint, ValueConstraint, Param
     ]),
-    throw(?ERROR_INTERNAL_SERVER_ERROR).
+    throw(?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined)).

@@ -65,7 +65,7 @@ init(Plugin) ->
 
 
 -spec graceful_terminate(pes:plugin(), pes:executor_state()) ->
-    {ok | defer, pes:executor_state()} | ?ERROR_INTERNAL_SERVER_ERROR.
+    {ok | defer, pes:executor_state()} | od_error_internal_server_error:t().
 graceful_terminate(Plugin, PluginState) ->
     call_optional_callback(
         Plugin, ?FUNCTION_NAME, [PluginState], fun(_) -> {ok, PluginState} end, catch_and_return_error).
@@ -113,7 +113,7 @@ call_optional_callback(Plugin, FunName, FunArgs, FallbackFun, ErrorHandlingMode)
                         [FunName, Error, Reason, Plugin], Stacktrace),
                     case ErrorHandlingMode of
                         execute_fallback_on_error -> apply(FallbackFun, FunArgs);
-                        catch_and_return_error -> ?ERROR_INTERNAL_SERVER_ERROR
+                        catch_and_return_error -> ?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined)
                     end
             end;
         _ ->

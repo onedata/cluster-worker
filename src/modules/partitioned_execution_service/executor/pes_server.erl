@@ -183,7 +183,7 @@ handle_call(?PES_CALL(Request), _From, #state{
         Error:Reason:Stacktrace ->
             ?error_stacktrace("PES server handle_call error ~tp:~tp for plug-in ~tp and request ~tp",
                 [Error, Reason, Plugin, Request], Stacktrace),
-            {reply, ?ERROR_INTERNAL_SERVER_ERROR, reset_idle_timeout_timer(State)}
+            {reply, ?ERR_INTERNAL_SERVER_ERROR(?err_ctx(), undefined), reset_idle_timeout_timer(State)}
     end;
 
 handle_call(?PES_CALL(_), _From, State) ->
@@ -357,7 +357,7 @@ handle_graceful_termination_request(#state{
             {stop, {shutdown, graceful_terminate}, State#state{executor_state = UpdatedExecutorState}};
         {defer, UpdatedExecutorState} ->
             {noreply, State#state{executor_state = UpdatedExecutorState}};
-        ?ERROR_INTERNAL_SERVER_ERROR ->
+        ?ERR_INTERNAL_SERVER_ERROR (_) ->
             {noreply, State}
     end;
 

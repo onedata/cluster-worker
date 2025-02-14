@@ -113,7 +113,7 @@ websocket_handle({text, Data}, #pre_handshake_state{
                 end;
             {ok, BadRequest} ->
                 {gs_protocol:generate_error_response(
-                    BadRequest, ?ERROR_EXPECTED_HANDSHAKE_MESSAGE
+                    BadRequest, ?ERR_EXPECTED_HANDSHAKE_MESSAGE(?err_ctx())
                 ), State};
             {error, _} = Error1 ->
                 {gs_protocol:generate_error_push_message(Error1), State}
@@ -275,7 +275,7 @@ decode_body(ProtocolVersion, Data) ->
     catch
         Class:Reason:Stacktrace ->
             ?debug_exception(Class, Reason, Stacktrace),
-            ?ERROR_BAD_MESSAGE(Data)
+            ?ERR_BAD_MESSAGE(?err_ctx(), Data)
     end.
 
 
