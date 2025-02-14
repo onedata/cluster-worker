@@ -114,22 +114,22 @@ handshake_test_base(Config, ProtoVersion) ->
     % ... it should not succeed if there are no cookies provided
     spawn_client(
         Config, ProtoVersion, {with_http_cookies, {token, ?USER_1_TOKEN_REQUIRING_COOKIES}, []},
-        ?ERROR_UNAUTHORIZED
+        ?ERR_UNAUTHORIZED(undefined)
     ),
     spawn_client(
         Config, ProtoVersion, {token, ?USER_1_TOKEN_REQUIRING_COOKIES},
-        ?ERROR_UNAUTHORIZED
+        ?ERR_UNAUTHORIZED(undefined)
     ),
 
     % Try to connect with bad token
-    spawn_client(Config, ProtoVersion, {token, <<"bkkwksdf">>}, ?ERROR_UNAUTHORIZED),
+    spawn_client(Config, ProtoVersion, {token, <<"bkkwksdf">>}, ?ERR_UNAUTHORIZED(undefined)),
 
     % Try to connect with provider token
     Client5 = spawn_client(Config, ProtoVersion, {token, ?PROVIDER_1_TOKEN}, ?SUB(?ONEPROVIDER, ?PROVIDER_1)),
 
     % Try to connect with bad protocol version
     SuppVersions = gs_protocol:supported_versions(),
-    spawn_client(Config, [lists:max(SuppVersions) + 1], undefined, ?ERROR_BAD_VERSION(SuppVersions)),
+    spawn_client(Config, [lists:max(SuppVersions) + 1], undefined, ?ERR_BAD_VERSION(SuppVersions)),
 
     disconnect_client([Client1, Client2, Client3, Client4, Client5]),
 
@@ -148,7 +148,7 @@ rpc_req_test_base(Config, ProtoVersion) ->
         gs_client:rpc_request(Client1, <<"user1Fun">>, #{<<"a">> => <<"b">>})
     ),
     ?assertMatch(
-        ?ERROR_FORBIDDEN,
+        ?ERR_FORBIDDEN(_),
         gs_client:rpc_request(Client1, <<"user2Fun">>, #{<<"a">> => <<"b">>})
     ),
     ?assertMatch(
@@ -156,11 +156,11 @@ rpc_req_test_base(Config, ProtoVersion) ->
         gs_client:rpc_request(Client2, <<"user2Fun">>, #{<<"a">> => <<"b">>})
     ),
     ?assertMatch(
-        ?ERROR_FORBIDDEN,
+        ?ERR_FORBIDDEN(_),
         gs_client:rpc_request(Client2, <<"user1Fun">>, #{<<"a">> => <<"b">>})
     ),
     ?assertMatch(
-        ?ERROR_RPC_UNDEFINED,
+        ?ERR_RPC_UNDEFINED,
         gs_client:rpc_request(Client1, <<"nonExistentFun">>, #{<<"a">> => <<"b">>})
     ),
 
@@ -221,7 +221,7 @@ graph_req_test_base(Config, ProtoVersion) ->
     ),
 
     ?assertMatch(
-        ?ERROR_FORBIDDEN,
+        ?ERR_FORBIDDEN(_),
         gs_client:graph_request(Client2, #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, get)
@@ -253,7 +253,7 @@ graph_req_test_base(Config, ProtoVersion) ->
     ),
 
     ?assertMatch(
-        ?ERROR_BAD_VALUE_BINARY(<<"name">>),
+        ?ERR_BAD_VALUE_STRING(<<"name">>),
         gs_client:graph_request(Client1, #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, update, #{
@@ -262,21 +262,21 @@ graph_req_test_base(Config, ProtoVersion) ->
     ),
 
     ?assertMatch(
-        ?ERROR_MISSING_REQUIRED_VALUE(<<"name">>),
+        ?ERR_MISSING_REQUIRED_VALUE(<<"name">>),
         gs_client:graph_request(Client1, #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, update, #{})
     ),
 
     ?assertMatch(
-        ?ERROR_FORBIDDEN,
+        ?ERR_FORBIDDEN(_),
         gs_client:graph_request(Client2, #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, update)
     ),
 
     ?assertMatch(
-        ?ERROR_FORBIDDEN,
+        ?ERR_FORBIDDEN(_),
         gs_client:graph_request(Client2, #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, delete)
@@ -378,11 +378,11 @@ batch_req_test_base(Config, ProtoVersion) ->
 
     ?assertMatch(
         {ok, #gs_resp_batch{responses = [
-            #gs_resp{subtype = graph, id = <<"1">>, error = ?ERROR_FORBIDDEN},
+            #gs_resp{subtype = graph, id = <<"1">>, error = ?ERR_FORBIDDEN},
             #gs_resp{subtype = graph, id = <<"2">>, response = #gs_resp_graph{
                 data_format = resource, data = User2Data
             }},
-            #gs_resp{subtype = graph, id = <<"3">>, error = ?ERROR_FORBIDDEN}
+            #gs_resp{subtype = graph, id = <<"3">>, error = ?ERR_FORBIDDEN}
         ]}},
         gs_client:batch_request(Client2, [
             #gs_req{subtype = graph, id = <<"1">>, request = #gs_req_graph{
@@ -404,16 +404,16 @@ batch_req_test_base(Config, ProtoVersion) ->
     RpcArgs = #{<<"x">> => 13},
     ?assertMatch(
         {ok, #gs_resp_batch{responses = [
-            #gs_resp{subtype = graph, id = <<"1">>, error = ?ERROR_FORBIDDEN},
+            #gs_resp{subtype = graph, id = <<"1">>, error = ?ERR_FORBIDDEN},
             #gs_resp{subtype = batch, id = <<"2">>, response = #gs_resp_batch{responses = [
                 #gs_resp{id = <<"2.1">>, response = #gs_resp_unsub{}},
                 #gs_resp{subtype = batch, id = <<"2.2">>, response = #gs_resp_batch{responses = [
                     #gs_resp{subtype = graph, id = <<"2.2.1">>, response = #gs_resp_graph{
                         data_format = resource, data = User2Data
                     }},
-                    #gs_resp{subtype = rpc, id = <<"2.2.2">>, error = ?ERROR_FORBIDDEN}
+                    #gs_resp{subtype = rpc, id = <<"2.2.2">>, error = ?ERR_FORBIDDEN}
                 ]}},
-                #gs_resp{subtype = graph, id = <<"2.3">>, error = ?ERROR_FORBIDDEN}
+                #gs_resp{subtype = graph, id = <<"2.3">>, error = ?ERR_FORBIDDEN}
             ]}},
             #gs_resp{subtype = rpc, id = <<"3">>, response = #gs_resp_rpc{result = RpcArgs}}
         ]}},
@@ -720,7 +720,7 @@ nosub_test_base(Config, ProtoVersion) ->
     end),
 
     ?assertMatch(
-        ?ERROR_FORBIDDEN,
+        ?ERR_FORBIDDEN(_),
         gs_client:graph_request(Client1, #gri{
             type = od_user, id = ?USER_2, aspect = instance
         }, get, #{}, true)
@@ -840,7 +840,7 @@ auth_override_test_base(Config, ProtoVersion) ->
 
     % Auth override is allowed only for providers
     ?assertMatch(
-        ?ERROR_FORBIDDEN,
+        ?ERR_FORBIDDEN(_),
         gs_client:sync_request(UserClient, GetUserReq)
     ),
 
@@ -893,13 +893,13 @@ auth_override_test_base(Config, ProtoVersion) ->
         false ->
             ok;
         true ->
-            ?assertMatch(?ERROR_UNAUTHORIZED, gs_client:sync_request(ProviderClient, ReqWithOverrideData(
+            ?assertMatch(?ERR_UNAUTHORIZED(_), gs_client:sync_request(ProviderClient, ReqWithOverrideData(
                 ?BLACKLISTED_IP, ?WHITELISTED_INTERFACE, ?WHITELISTED_CONSUMER_TOKEN
             ))),
-            ?assertMatch(?ERROR_UNAUTHORIZED, gs_client:sync_request(ProviderClient, ReqWithOverrideData(
+            ?assertMatch(?ERR_UNAUTHORIZED(_), gs_client:sync_request(ProviderClient, ReqWithOverrideData(
                 ?WHITELISTED_IP, ?BLACKLISTED_INTERFACE, ?WHITELISTED_CONSUMER_TOKEN
             ))),
-            ?assertMatch(?ERROR_UNAUTHORIZED, gs_client:sync_request(ProviderClient, ReqWithOverrideData(
+            ?assertMatch(?ERR_UNAUTHORIZED(_), gs_client:sync_request(ProviderClient, ReqWithOverrideData(
                 ?WHITELISTED_IP, ?WHITELISTED_INTERFACE, ?BLACKLISTED_CONSUMER_TOKEN
             )))
     end.
@@ -970,12 +970,12 @@ auto_scope_test_base(Config, ProtoVersion) ->
     HsGRIAutoStr = gri:serialize(HsGRIAuto),
 
     ?assertEqual(
-        ?ERROR_FORBIDDEN,
+        ?ERR_FORBIDDEN(undefined),
         gs_client:graph_request(Client1, HsGRI#gri{scope = auto}, get, #{}, true)
     ),
 
     ?assertEqual(
-        ?ERROR_FORBIDDEN,
+        ?ERR_FORBIDDEN(undefined),
         gs_client:graph_request(Client2, HsGRI#gri{scope = shared}, get, #{}, true)
     ),
 
@@ -1096,7 +1096,7 @@ bad_entity_type_test_base(Config, ProtoVersion) ->
     Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
 
     ?assertMatch(
-        ?ERROR_BAD_GRI,
+        ?ERR_BAD_GRI,
         % op_file entity type is not supported (as per gs_logic_plugin)
         gs_client:graph_request(Client1, #gri{
             type = op_file, id = <<"123">>, aspect = instance
@@ -1325,7 +1325,7 @@ service_availability_rpc_test(Config, ProtoVersion) ->
 
     graph_sync_mocks:simulate_service_availability(Nodes, false),
     ?assertMatch(
-        ?ERROR_SERVICE_UNAVAILABLE,
+        ?ERR_SERVICE_UNAVAILABLE,
         gs_client:rpc_request(Client1, <<"user1Fun">>, RpcArgs)
     ),
 
@@ -1357,7 +1357,7 @@ service_availability_graph_test(Config, ProtoVersion) ->
 
     graph_sync_mocks:simulate_service_availability(Nodes, false),
     ?assertMatch(
-        ?ERROR_SERVICE_UNAVAILABLE,
+        ?ERR_SERVICE_UNAVAILABLE,
         gs_client:graph_request(Client1, #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, get)
@@ -1383,7 +1383,7 @@ service_availability_handshake_test(Config, ProtoVersion) ->
 
     graph_sync_mocks:simulate_service_availability(Nodes, false),
 
-    spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?ERROR_SERVICE_UNAVAILABLE),
+    spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?ERR_SERVICE_UNAVAILABLE),
 
     graph_sync_mocks:simulate_service_availability(Nodes, true),
     spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)).
@@ -1447,7 +1447,7 @@ spawn_client(Config, ProtoVersions, Auth, ExpResult, PushCallback) ->
     ),
     case ExpResult of
         {error, _} ->
-            ?assertMatch(ExpResult, Result),
+            ?assertEqual(ExpResult, Result),
             connection_error;
         ExpIdentity ->
             ?assertMatch({ok, _, #gs_resp_handshake{identity = ExpIdentity}}, Result),

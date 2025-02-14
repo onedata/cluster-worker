@@ -1302,14 +1302,14 @@ time_series_test(Config) ->
 
         % Test errors when wrong time series or metric is given in the consume spec
         ?assertEqual(
-            ?ERROR_TSC_MISSING_LAYOUT(#{<<"TS2">> => [?ALL_METRICS]}),
+            ?ERR_TSC_MISSING_LAYOUT(#{<<"TS2">> => [?ALL_METRICS]}),
             rpc:call(Worker, Model, time_series_collection_consume_measurements, [
                 Id, #{<<"TS2">> => #{?ALL_METRICS => [{1, 1}]}}
             ])
         ),
 
         ?assertEqual(
-            ?ERROR_TSC_MISSING_LAYOUT(#{<<"TS1">> => [<<"M10">>]}),
+            ?ERR_TSC_MISSING_LAYOUT(#{<<"TS1">> => [<<"M10">>]}),
             rpc:call(Worker, Model, time_series_collection_consume_measurements, [
                 Id, #{<<"TS1">> => #{<<"M10">> => [{1, 1}]}}
             ])

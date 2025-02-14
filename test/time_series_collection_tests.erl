@@ -98,25 +98,25 @@ empty_collection_creation() ->
 metric_config_sanitization() ->
     VeryLongName = ?TOO_LONG_NAME,
     TestCases = [{
-        ?ERROR_BAD_VALUE_NAME(<<"timeSeriesName">>),
+        ?ERR_BAD_VALUE_NAME(<<"timeSeriesName">>),
         #{<<1, 2, 3>> => #{<<"M1">> => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = avg}}}
     }, {
-        ?ERROR_BAD_VALUE_NAME(<<"metricName">>),
+        ?ERR_BAD_VALUE_NAME(<<"metricName">>),
         #{<<"TS1">> => #{VeryLongName => #metric_config{retention = 1, resolution = ?MINUTE_RESOLUTION, aggregator = avg}}}
     }, {
-        ?ERROR_BAD_VALUE_NOT_IN_RANGE(<<"retention">>, 1, 1000000),
+        ?ERR_BAD_VALUE_NOT_IN_RANGE(<<"retention">>, 1, 1000000),
         #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 0, resolution = ?MINUTE_RESOLUTION, aggregator = avg}}}
     }, {
-        ?ERROR_BAD_VALUE_NOT_IN_RANGE(<<"retention">>, 1, 1000000),
+        ?ERR_BAD_VALUE_NOT_IN_RANGE(<<"retention">>, 1, 1000000),
         #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 999999999, resolution = ?MINUTE_RESOLUTION, aggregator = max}}}
     }, {
-        ?ERROR_BAD_DATA(<<"retention">>, <<"Retention must be set to 1 if resolution is set to 0 (infinite window resolution)">>),
+        ?ERR_BAD_DATA(<<"retention">>, <<"Retention must be set to 1 if resolution is set to 0 (infinite window resolution)">>),
         #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = ?INFINITY_RESOLUTION, aggregator = min}}}
     }, {
-        ?ERROR_BAD_VALUE_NOT_ALLOWED(<<"resolution">>, ?ALLOWED_METRIC_RESOLUTIONS),
+        ?ERR_BAD_VALUE_NOT_ALLOWED(<<"resolution">>, ?ALLOWED_METRIC_RESOLUTIONS),
         #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = -1, aggregator = max}}}
     }, {
-        ?ERROR_BAD_VALUE_NOT_ALLOWED(<<"aggregator">>, ?ALLOWED_METRIC_AGGREGATORS),
+        ?ERR_BAD_VALUE_NOT_ALLOWED(<<"aggregator">>, ?ALLOWED_METRIC_AGGREGATORS),
         #{<<"TS1">> => #{<<"M1">> => #metric_config{retention = 10, resolution = 60, aggregator = bad}}}
     }],
     lists:foreach(fun({ExpError, Config}) ->
@@ -150,7 +150,7 @@ invalid_incorporate_config_request_with_conflicting_metric_config() ->
                 <<"M2">> => #metric_config{resolution = ?YEAR_RESOLUTION, retention = 10, aggregator = max}
             }
         }),
-        ?ERROR_BAD_VALUE_TSC_CONFLICTING_METRIC_CONFIG(<<"TS2">>, <<"M2">>,
+        ?ERR_BAD_VALUE_TSC_CONFLICTING_METRIC_CONFIG(<<"TS2">>, <<"M2">>,
             #metric_config{resolution = ?MINUTE_RESOLUTION, retention = 1, aggregator = last},
             #metric_config{resolution = ?YEAR_RESOLUTION, retention = 10, aggregator = max}
         )
@@ -182,7 +182,7 @@ invalid_consume_measurements_request() ->
             <<"TS3">> => #{},
             <<"TS4">> => #{<<"M4">> => []}
         }),
-        ?ERROR_TSC_MISSING_LAYOUT(#{
+        ?ERR_TSC_MISSING_LAYOUT(#{
             <<"TS1">> => [<<"M4">>],
             <<"TS2">> => [?ALL_METRICS],
             <<"TS3">> => [],
@@ -195,7 +195,7 @@ invalid_consume_measurements_request() ->
                 <<"M3">> => [{1, 2}]
             }
         }),
-        ?ERROR_TSC_MISSING_LAYOUT(#{
+        ?ERR_TSC_MISSING_LAYOUT(#{
             <<"TSX">> => [<<"M3">>]
         })
     ).
@@ -218,7 +218,7 @@ invalid_get_slice_request() ->
             <<"TS3">> => [],
             <<"TS4">> => [?ALL_METRICS]
         }),
-        ?ERROR_TSC_MISSING_LAYOUT(#{
+        ?ERR_TSC_MISSING_LAYOUT(#{
             <<"TS1">> => [<<"M1.X">>],
             <<"TS2">> => [<<"M3">>],
             <<"TS3">> => [],
@@ -229,7 +229,7 @@ invalid_get_slice_request() ->
         call_get_slice(#{
             ?ALL_TIME_SERIES => [<<"M2">>]
         }),
-        ?ERROR_TSC_MISSING_LAYOUT(#{
+        ?ERR_TSC_MISSING_LAYOUT(#{
             <<"TS1">> => [<<"M2">>]
         })
     ).

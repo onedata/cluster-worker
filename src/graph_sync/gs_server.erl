@@ -77,7 +77,7 @@ handshake_internal(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = 
     ServerVersions = gs_protocol:supported_versions(),
     case gs_protocol:greatest_common_version(AuthVersions, ServerVersions) of
         false ->
-            ?ERROR_BAD_VERSION(ServerVersions);
+            ?ERR_BAD_VERSION(?err_ctx(), ServerVersions);
         {true, Version} ->
             case ?GS_LOGIC_PLUGIN:verify_handshake_auth(ClientAuth, PeerIp, Cookies) of
                 {error, _} = Error ->
@@ -250,12 +250,12 @@ handle_request_internal(SessionData = #gs_session{auth = ?PROVIDER = Auth}, #gs_
     end;
 handle_request_internal(#gs_session{auth = _Auth}, #gs_req{auth_override = _AuthOverride}) ->
     % Non-provider auth, disallow auth overrides
-    ?ERROR_FORBIDDEN;
+    ?ERR_FORBIDDEN(?err_ctx());
 
 
 handle_request_internal(_Session, #gs_req_handshake{}) ->
     % Handshake is done in handshake/4 function
-    ?ERROR_HANDSHAKE_ALREADY_DONE;
+    ?ERR_HANDSHAKE_ALREADY_DONE(?err_ctx());
 
 handle_request_internal(SessionData, #gs_req_rpc{} = Req) ->
     #gs_session{auth = Auth, protocol_version = ProtoVer} = SessionData,
@@ -288,7 +288,7 @@ handle_request_internal(SessionData, #gs_req_graph{auth_hint = AuthHint = {_, ?S
         {?THROUGH_PROVIDER(?SELF), ?SUB(?ONEPROVIDER, ProviderId)} ->
             handle_request_internal(SessionData, Req#gs_req_graph{auth_hint = ?THROUGH_PROVIDER(ProviderId)});
         _ ->
-            ?ERROR_FORBIDDEN
+            ?ERR_FORBIDDEN(?err_ctx())
     end;
 
 handle_request_internal(SessionData, #gs_req_graph{} = Req) ->
@@ -303,12 +303,12 @@ handle_request_internal(SessionData, #gs_req_graph{} = Req) ->
         auth_hint = AuthHint,
         subscribe = Subscribe
     } = Req,
-    ?GS_LOGIC_PLUGIN:is_type_supported(RequestedGRI) orelse throw(?ERROR_BAD_GRI),
+    ?GS_LOGIC_PLUGIN:is_type_supported(RequestedGRI) orelse throw(?ERR_BAD_GRI(?err_ctx())),
     case Subscribe of
         true ->
             case is_subscribable(Operation, RequestedGRI) of
                 true -> ok;
-                false -> throw(?ERROR_NOT_SUBSCRIBABLE)
+                false -> throw(?ERR_NOT_SUBSCRIBABLE(?err_ctx()))
             end;
         false ->
             ok
@@ -368,7 +368,7 @@ handle_request_internal(SessionData, #gs_req_graph{} = Req) ->
     end,
     case {Subscribe, NewAuthHint, NewGRI} of
         {true, _, not_subscribable} ->
-            throw(?ERROR_NOT_SUBSCRIBABLE);
+            throw(?ERR_NOT_SUBSCRIBABLE(?err_ctx()));
         {true, _, _} ->
             gs_persistence:subscribe(SessionId, NewGRI, Auth, NewAuthHint);
         {false, _, _} ->
