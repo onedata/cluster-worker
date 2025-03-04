@@ -249,19 +249,19 @@ single_executor_lifecycle_async_mode(_Config) ->
 
 preventing_sync_mode_deadlocks(_Config) ->
     ?assertEqual({ok, test_ans}, pes:call(pes_minimal_executor, <<"exemplary_key">>, exemplary_request)),
-    ?assertEqual(?ERROR_INTERNAL_SERVER_ERROR, pes:call(pes_minimal_executor, <<"exemplary_key2">>,
+    ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined), pes:call(pes_minimal_executor, <<"exemplary_key2">>,
         {perform_internal_call_with_key, pes_minimal_executor, <<"exemplary_key">>})),
-    ?assertEqual(?ERROR_INTERNAL_SERVER_ERROR, pes:call(pes_minimal_executor, <<"exemplary_key2">>,
+    ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined), pes:call(pes_minimal_executor, <<"exemplary_key2">>,
         {perform_internal_submit_with_key, pes_minimal_executor, <<"exemplary_key">>, self()})),
-    ?assertEqual(?ERROR_INTERNAL_SERVER_ERROR,
+    ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined),
         pes:call(pes_minimal_executor, <<"exemplary_key2">>, {perform_internal_await, ?EXEMPLARY_PROMISE})).
 
 
 preventing_self_call(_Config) ->
     ?assertEqual({ok, test_ans}, pes:call(pes_minimal_executor, <<"exemplary_key">>, exemplary_request)),
-    ?assertEqual(?ERROR_INTERNAL_SERVER_ERROR, pes:call(pes_minimal_executor, <<"exemplary_key">>,
+    ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined), pes:call(pes_minimal_executor, <<"exemplary_key">>,
         {perform_internal_call_with_key, pes_minimal_executor, <<"exemplary_key">>})),
-    ?assertEqual(?ERROR_INTERNAL_SERVER_ERROR, pes:call(pes_minimal_executor, <<"exemplary_key">>,
+    ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined), pes:call(pes_minimal_executor, <<"exemplary_key">>,
         {perform_internal_submit_with_key, pes_minimal_executor, <<"exemplary_key">>, self()})).
 
 
@@ -269,7 +269,7 @@ preventing_deadlock_from_slave(_Config) ->
     ?assertEqual({ok, test_ans}, pes:submit_and_await(pes_async_executor, <<"exemplary_key">>, exemplary_request)),
     ?assertEqual(?ERROR_NOT_SUPPORTED, pes:submit_and_await(pes_async_executor, <<"exemplary_key2">>,
         {perform_internal_call_with_key, pes_async_executor, <<"exemplary_key">>})),
-    ?assertEqual(?ERROR_INTERNAL_SERVER_ERROR,
+    ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined),
         pes:submit_and_await(pes_async_executor, <<"exemplary_key2">>, {perform_internal_await, ?EXEMPLARY_PROMISE})).
 
 
@@ -346,13 +346,13 @@ long_lasting_submit(_Config) ->
 
 call_crash(_Config) ->
     ?assertEqual(ok, pes:call(pes_minimal_executor, <<"exemplary_key">>, increment_value)),
-    ?assertEqual(?ERROR_INTERNAL_SERVER_ERROR,
+    ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined),
         pes:call(pes_minimal_executor, <<"exemplary_key">>, {crash_with, throw, call_error})),
     pes_executor_mock:verify_state(pes_minimal_executor, <<"exemplary_key">>, 1).
 
 
 not_implemented_call_callback_crash(_Config) ->
-    ?assertEqual(?ERROR_INTERNAL_SERVER_ERROR, pes:call(pes_sync_executor, 10, exemplary_request)),
+    ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined), pes:call(pes_sync_executor, 10, exemplary_request)),
     pes_executor_mock:verify_state(pes_sync_executor, 10, 0).
 
 
@@ -362,7 +362,7 @@ cast_crash_sync_mode(_Config) ->
 
 submit_crash(_Config) ->
     ?assertEqual(ok, pes:submit_and_await(pes_async_executor,<<"exemplary_key">>, increment_value)),
-    ?assertEqual(?ERROR_INTERNAL_SERVER_ERROR,
+    ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined),
         pes:submit_and_await(pes_async_executor,<<"exemplary_key">>, {crash_with, throw, call_error})),
     pes_executor_mock:verify_state(pes_async_executor, <<"exemplary_key">>, 1).
 
@@ -451,7 +451,7 @@ cast_crash(Executor) ->
 
 init_crash(Executor, Function) ->
     pes_executor_mock:set_initial_crash(true),
-    ?assertEqual(?ERROR_INTERNAL_SERVER_ERROR, pes:Function(Executor, <<"exemplary_key">>, exemplary_request)),
+    ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined), pes:Function(Executor, <<"exemplary_key">>, exemplary_request)),
     ?assertEqual(0, proplists:get_value(active, supervisor:count_children(?SUPERVISOR_NAME))),
     ?assertEqual(0, ets:info(?SUPERVISOR_NAME, size)),
 
