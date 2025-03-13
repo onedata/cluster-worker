@@ -63,7 +63,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([init_pool/5, init_pool_service/5, restart_tasks/3, stop_pool/1, stop_pool_service/1,
+-export([init_pool/5, is_pool_started/1, init_pool_service/5, restart_tasks/3, stop_pool/1, stop_pool_service/1,
     run/3, run/4, cancel/2, cancel/3, on_task_change/2, on_job_change/5]).
 %% Functions executed on pools
 -export([execute_master_job/10, execute_slave_job/5, is_job_cancelled/1]).
@@ -155,7 +155,7 @@
 
 -export_type([pool/0, id/0, task/0, group/0, master_job_mode/0, task_execution_info/0, job/0, job_id/0, job_status/0,
     environment_id/0, description/0, status/0, additional_data/0, master_job_extended_args/0, timestamp/0,
-    sync_info/0, master_job_map/0, callback_module/0, node_crash_policy/0]).
+    sync_info/0, master_job_map/0, callback_module/0, node_crash_policy/0, pool_options/0, run_options/0]).
 
 -define(MASTER_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_master">>, utf8)).
 -define(SLAVE_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_slave">>, utf8)).
@@ -198,6 +198,13 @@ init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Options) -
         stop_function_args => [PoolName]
     },
     internal_services_manager:start_service(?MODULE, PoolName, ServiceOptions).
+
+
+-spec is_pool_started(pool()) -> boolean().
+is_pool_started(PoolName) ->
+    AllPools = lists:map(fun([{pool, PoolName} | _]) -> PoolName end, worker_pool:stats()),
+    lists:member(?MASTER_POOL_NAME(PoolName), AllPools) andalso lists:member(?SLAVE_POOL_NAME(PoolName), AllPools).
+
 
 %%--------------------------------------------------------------------
 %% @doc
