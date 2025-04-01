@@ -126,28 +126,14 @@ websocket_handle({text, Data}, #pre_handshake_state{
     {reply, {text, json_utils:encode(JSONMap)}, NewState};
 
 websocket_handle({text, Data}, SessionData = #gs_session{protocol_version = ProtoVersion}) ->
-    Result = try
-        case decode_body(ProtoVersion, Data) of
-            {ok, Request} ->
-                % process_request_async should not crash, but if it does,
-                % cowboy will log the error.
-                process_request_async(SessionData, Request),
-                {ok, SessionData};
-            {error, _} = Error1 ->
-                Error1
-        end
-    catch Class:Reason:Stacktrace ->
-        ?examine_exception(Class, Reason, Stacktrace)
+    ResponseMsg = case decode_body(ProtoVersion, Data) of
+        {ok, Request} ->
+            process_request(SessionData, Request);
+        {error, _} = Error ->
+            gs_protocol:generate_error_push_message(Error)
     end,
-
-    case Result of
-        {ok, _} ->
-            Result;
-        {error, _} = Error2 ->
-            ErrorMsg = gs_protocol:generate_error_push_message(Error2),
-            {ok, ErrorJSONMap} = gs_protocol:encode(ProtoVersion, ErrorMsg),
-            {reply, {text, json_utils:encode(ErrorJSONMap)}, SessionData}
-    end;
+    {ok, JSONMap} = gs_protocol:encode(ProtoVersion, ResponseMsg),
+    {reply, {text, json_utils:encode(JSONMap)}, SessionData};
 
 websocket_handle(ping, State) ->
     {ok, State};
@@ -280,24 +266,13 @@ decode_body(ProtocolVersion, Data) ->
 
 
 %% @private
--spec process_request_async(gs_session:data(), gs_protocol:req_wrapper()) -> pid().
-process_request_async(SessionData, Request) ->
-    WebsocketPid = self(),
-    % TODO VFS-12568 currently, for every request, there is a new process spawned,
-    % it would be better to have a worker pool of processes for throttling and load balancing
-    spawn(fun() ->
-        Response = handle_request(SessionData, Request),
-        push(WebsocketPid, Response)
-    end).
-
-
-%% @private
--spec handle_request(gs_session:data(), gs_protocol:req_wrapper()) -> gs_protocol:resp_wrapper().
-handle_request(SessionData, #gs_req{request = #gs_req_batch{requests = Requests}} = BatchRequest) ->
+% TODO VFS-12568 consider processing all GS requests on pool of processes, common for all clients
+-spec process_request(gs_session:data(), gs_protocol:req_wrapper()) -> gs_protocol:resp_wrapper().
+process_request(SessionData, #gs_req{request = #gs_req_batch{requests = Requests}} = BatchRequest) ->
     Result = ?catch_exceptions(
+        % TODO VFS-12568 run this on a pool of processes, common for all clients
         {ok, lists_utils:pmap(fun(Request) ->
-            % TODO VFS-12568 run this on the pool of processes - see process_request_async/2
-            handle_request(SessionData, Request)
+            process_request(SessionData, Request)
         end, Requests, ?BATCH_PARALLELISM)}
     ),
     case Result of
@@ -306,7 +281,7 @@ handle_request(SessionData, #gs_req{request = #gs_req_batch{requests = Requests}
         {error, _} = Error ->
             gs_protocol:generate_error_response(BatchRequest, Error)
     end;
-handle_request(SessionData, Request) ->
+process_request(SessionData, Request) ->
     case gs_server:handle_request(SessionData, Request) of
         {ok, Resp} ->
             gs_protocol:generate_success_response(Request, Resp);

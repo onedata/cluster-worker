@@ -38,6 +38,7 @@
     graph_req_test/1,
     batch_req_test/1,
     subscribe_test/1,
+    parallel_requests_test/1,
     unsubscribe_test/1,
     nosub_test/1,
     auth_override_test/1,
@@ -60,6 +61,7 @@
     graph_req_test,
     batch_req_test,
     subscribe_test,
+    parallel_requests_test,
     unsubscribe_test,
     nosub_test,
     auth_override_test,
@@ -612,6 +614,40 @@ subscribe_test_base(Config, ProtoVersion) ->
     end)),
 
     disconnect_client([Client1, Client2]),
+
+    ok.
+
+
+parallel_requests_test(Config) ->
+    [parallel_requests_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+parallel_requests_test_base(Config, ProtoVersion) ->
+    RequestCount = 1000,
+
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+
+    Stopwatch = stopwatch:start(),
+    lists_utils:pmap(fun(_) ->
+        RequestId = gs_client:async_request(Client1, #gs_req{
+            subtype = graph,
+            request = #gs_req_graph{
+                gri = #gri{type = od_user, id = ?USER_1, aspect = instance},
+                operation = get,
+                subscribe = true
+            }
+        }),
+        receive
+            {response, RequestId, Response} ->
+                ?assertMatch({ok, _}, Response)
+        after
+            timer:seconds(60) ->
+                error(gather_timeout)
+        end
+    end, lists:seq(1, RequestCount)),
+
+    ct:pal("~B parallel requests finished in ~B milliseconds", [RequestCount, stopwatch:read_millis(Stopwatch)]),
+
+    disconnect_client([Client1]),
 
     ok.
 
