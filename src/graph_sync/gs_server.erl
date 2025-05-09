@@ -38,6 +38,7 @@
 -export([report_heartbeat/1]).
 -export([cleanup_session/1, terminate_connection/1]).
 -export([updated/3, deleted/2]).
+-export([verify_auth_override/2]).
 -export([handle_request/2]).
 % Functions returning plugin module names
 -export([gs_logic_plugin_module/0]).
@@ -53,9 +54,11 @@
 gs_logic_plugin_module() ->
     gs_logic_plugin.
 
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -63,17 +66,19 @@ gs_logic_plugin_module() ->
 %% Returns success or error handshake response depending on the outcome.
 %% @end
 %%--------------------------------------------------------------------
--spec handshake(conn_ref(), translator(), gs_protocol:req_wrapper(), ip_utils:ip(), gs_protocol:cookies()) ->
+-spec handshake(conn_ref(), translator(), ip_utils:ip(), gs_protocol:cookies(), gs_protocol:handshake_req()) ->
     {ok, gs_session:data(), gs_protocol:handshake_resp()} | errors:error().
-handshake(ConnRef, Translator, Req, PeerIp, Cookies) ->
-    ?catch_exceptions(handshake_internal(ConnRef, Translator, Req, PeerIp, Cookies)).
+handshake(ConnRef, Translator, PeerIp, Cookies, HandshakeReq) ->
+    ?catch_exceptions(handshake_internal(ConnRef, Translator, PeerIp, Cookies, HandshakeReq)).
 
 %% @private
--spec handshake_internal(conn_ref(), translator(), gs_protocol:req_wrapper(), ip_utils:ip(), gs_protocol:cookies()) ->
+-spec handshake_internal(conn_ref(), translator(), ip_utils:ip(), gs_protocol:cookies(), gs_protocol:handshake_req()) ->
     {ok, gs_session:data(), gs_protocol:handshake_resp()} | errors:error().
-handshake_internal(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq}, PeerIp, Cookies) ->
+handshake_internal(ConnRef, Translator, PeerIp, Cookies, #gs_req_handshake{
+    supported_versions = AuthVersions,
+    auth = ClientAuth
+}) ->
     ?GS_LOGIC_PLUGIN:assert_service_available(),
-    #gs_req_handshake{supported_versions = AuthVersions, auth = ClientAuth} = HReq,
     ServerVersions = gs_protocol:supported_versions(),
     case gs_protocol:greatest_common_version(AuthVersions, ServerVersions) of
         false ->
@@ -213,6 +218,23 @@ deleted(EntityType, EntityId) ->
     ok.
 
 
+-spec verify_auth_override(aai:auth(), gs_protocol:auth_override()) ->
+    false | {true, aai:auth()} | errors:error().
+verify_auth_override(_Auth, undefined) ->
+    false;
+verify_auth_override(?PROVIDER = Auth, AuthOverride) ->
+    % overriding auth is allowed only for op-worker and op-panel (?PROVIDER auth)
+    case ?catch_exceptions(?GS_LOGIC_PLUGIN:verify_auth_override(Auth, AuthOverride)) of
+        {ok, OverriddenAuth} ->
+            {true, OverriddenAuth};
+        {error, _} = Error ->
+            Error
+    end;
+verify_auth_override(_Auth, _AuthOverride) ->
+    % non-provider auth, disallow auth overrides
+    ?ERR_FORBIDDEN(?err_ctx()).
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Handles a request expressed by #gs_req{} record. Calls back to
@@ -229,31 +251,9 @@ handle_request(SessionData, Req) ->
 
 
 %% @private
--spec handle_request_internal(gs_session:data(), gs_protocol:req_wrapper() | gs_protocol:req()) ->
+-spec handle_request_internal(gs_session:data(), gs_protocol:req()) ->
     {ok, gs_protocol:resp()} | errors:error().
-% No authorization override - unpack the gs_req record as it's context is
-% no longer important.
-handle_request_internal(SessionData, #gs_req{auth_override = undefined, request = Req}) ->
-    handle_request_internal(SessionData, Req);
-
-% This request has the authorization field specified, override the default
-% authorization - but only allow this for op-worker and op-panel (?PROVIDER auth).
-handle_request_internal(SessionData = #gs_session{auth = ?PROVIDER = Auth}, #gs_req{auth_override = AuthOverride} = Req) ->
-    case ?GS_LOGIC_PLUGIN:verify_auth_override(Auth, AuthOverride) of
-        {ok, OverridenAuth} ->
-            handle_request_internal(
-                SessionData#gs_session{auth = OverridenAuth},
-                Req#gs_req{auth_override = undefined}
-            );
-        {error, _} = Error ->
-            Error
-    end;
-handle_request_internal(#gs_session{auth = _Auth}, #gs_req{auth_override = _AuthOverride}) ->
-    % Non-provider auth, disallow auth overrides
-    ?ERR_FORBIDDEN(?err_ctx());
-
-
-handle_request_internal(_Session, #gs_req_handshake{}) ->
+handle_request_internal(_SessionData, #gs_req_handshake{}) ->
     % Handshake is done in handshake/4 function
     ?ERR_HANDSHAKE_ALREADY_DONE(?err_ctx());
 

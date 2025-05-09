@@ -44,7 +44,13 @@
     auth_override_test/1,
     nobody_auth_override_test/1,
     auto_scope_test/1,
+
     bad_entity_type_test/1,
+    bad_message_test/1,
+    timed_out_request_test/1,
+    crashed_request_test/1,
+    stale_request_pruning_test/1,
+
     session_persistence_test/1,
     subscriptions_persistence_test/1,
     gs_server_session_clearing_test_api_level/1,
@@ -67,7 +73,13 @@
     auth_override_test,
     nobody_auth_override_test,
     auto_scope_test,
+
     bad_entity_type_test,
+    bad_message_test,
+    timed_out_request_test,
+    crashed_request_test,
+    stale_request_pruning_test,
+
     session_persistence_test,
     subscriptions_persistence_test,
     gs_server_session_clearing_test_api_level,
@@ -86,10 +98,13 @@
 -define(DUMMY_IP, {13, 190, 241, 56}).
 
 -define(wait_until_true(Term), ?assertEqual(true, Term, 50)).
+-define(ATTEMPTS, 20).
+
 
 %%%===================================================================
 %%% API functions
 %%%===================================================================
+
 
 all() ->
     ?ALL(?TEST_CASES).
@@ -100,16 +115,16 @@ handshake_test(Config) ->
 
 handshake_test_base(Config, ProtoVersion) ->
     % Try to connect with no cookie - should be treated as anonymous
-    Client1 = spawn_client(Config, ProtoVersion, undefined, ?SUB(nobody)),
+    spawn_client(Config, ProtoVersion, undefined, ?SUB(nobody)),
 
     % Try to connect with user 1 token
-    Client2 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+    spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
 
     % Try to connect with user 2 token
-    Client3 = spawn_client(Config, ProtoVersion, {token, ?USER_2_TOKEN}, ?SUB(user, ?USER_2)),
+    spawn_client(Config, ProtoVersion, {token, ?USER_2_TOKEN}, ?SUB(user, ?USER_2)),
 
     % Try to connect with user 1 token requiring session cookies...
-    Client4 = spawn_client(
+    spawn_client(
         Config, ProtoVersion, {with_http_cookies, {token, ?USER_1_TOKEN_REQUIRING_COOKIES}, ?DUMMY_COOKIES},
         ?SUB(user, ?USER_1)
     ),
@@ -127,15 +142,11 @@ handshake_test_base(Config, ProtoVersion) ->
     spawn_client(Config, ProtoVersion, {token, <<"bkkwksdf">>}, ?ERR_UNAUTHORIZED(undefined)),
 
     % Try to connect with provider token
-    Client5 = spawn_client(Config, ProtoVersion, {token, ?PROVIDER_1_TOKEN}, ?SUB(?ONEPROVIDER, ?PROVIDER_1)),
+    spawn_client(Config, ProtoVersion, {token, ?PROVIDER_1_TOKEN}, ?SUB(?ONEPROVIDER, ?PROVIDER_1)),
 
     % Try to connect with bad protocol version
     SuppVersions = gs_protocol:supported_versions(),
-    spawn_client(Config, [lists:max(SuppVersions) + 1], undefined, ?ERR_BAD_VERSION(SuppVersions)),
-
-    disconnect_client([Client1, Client2, Client3, Client4, Client5]),
-
-    ok.
+    spawn_client(Config, [lists:max(SuppVersions) + 1], undefined, ?ERR_BAD_VERSION(SuppVersions)).
 
 
 rpc_req_test(Config) ->
@@ -164,11 +175,7 @@ rpc_req_test_base(Config, ProtoVersion) ->
     ?assertMatch(
         ?ERR_RPC_UNDEFINED,
         gs_client:rpc_request(Client1, <<"nonExistentFun">>, #{<<"a">> => <<"b">>})
-    ),
-
-    disconnect_client([Client1, Client2]),
-
-    ok.
+    ).
 
 
 async_req_test(Config) ->
@@ -177,30 +184,10 @@ async_req_test(Config) ->
 async_req_test_base(Config, ProtoVersion) ->
     Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
 
-    Id = gs_client:async_request(Client1, #gs_req{
-        subtype = rpc,
-        request = #gs_req_rpc{
-            function = <<"veryLongOperation">>,
-            args = #{<<"someDummy">> => <<"arguments127">>}
-        }
-    }),
-
-    AsyncResponse = receive
-        {response, Id, Resp} ->
-            Resp
-    after
-        timer:seconds(60) ->
-            {error, timeout}
-    end,
-
     ?assertEqual(
         {ok, #gs_resp_rpc{result = #{<<"someDummy">> => <<"arguments127">>}}},
-        AsyncResponse
-    ),
-
-    disconnect_client([Client1]),
-
-    ok.
+        await_response(async_request_long_operation(Client1))
+    ).
 
 
 graph_req_test(Config) ->
@@ -327,11 +314,7 @@ graph_req_test_base(Config, ProtoVersion) ->
         gs_client:graph_request(Client1, #gri{
             type = od_group, id = ?GROUP_1, aspect = int_value
         }, create, #{<<"value">> => integer_to_binary(Value)})
-    ),
-
-    disconnect_client([Client1, Client2]),
-
-    ok.
+    ).
 
 
 batch_req_test(Config) ->
@@ -406,7 +389,6 @@ batch_req_test_base(Config, ProtoVersion) ->
     RpcArgs = #{<<"x">> => 13},
     ?assertMatch(
         {ok, #gs_resp_batch{responses = [
-            #gs_resp{subtype = graph, id = <<"1">>, error = ?ERR_FORBIDDEN},
             #gs_resp{subtype = batch, id = <<"2">>, response = #gs_resp_batch{responses = [
                 #gs_resp{id = <<"2.1">>, response = #gs_resp_unsub{}},
                 #gs_resp{subtype = batch, id = <<"2.2">>, response = #gs_resp_batch{responses = [
@@ -417,13 +399,10 @@ batch_req_test_base(Config, ProtoVersion) ->
                 ]}},
                 #gs_resp{subtype = graph, id = <<"2.3">>, error = ?ERR_FORBIDDEN}
             ]}},
+            #gs_resp{subtype = graph, id = <<"1">>, error = ?ERR_FORBIDDEN},
             #gs_resp{subtype = rpc, id = <<"3">>, response = #gs_resp_rpc{result = RpcArgs}}
         ]}},
         gs_client:batch_request(Client2, [
-            #gs_req{subtype = graph, id = <<"1">>, request = #gs_req_graph{
-                gri = #gri{type = od_user, id = ?USER_1, aspect = instance},
-                operation = get
-            }},
             #gs_req{subtype = batch, id = <<"2">>, request = #gs_req_batch{
                 requests = [
                     % Client2 has subscribed for that record in the previous request
@@ -447,6 +426,10 @@ batch_req_test_base(Config, ProtoVersion) ->
                         operation = get
                     }}
                 ]
+            }},
+            #gs_req{subtype = graph, id = <<"1">>, request = #gs_req_graph{
+                gri = #gri{type = od_user, id = ?USER_1, aspect = instance},
+                operation = get
             }},
             #gs_req{subtype = rpc, id = <<"3">>, request = #gs_req_rpc{
                 function = <<"user2Fun">>,
@@ -611,45 +594,51 @@ subscribe_test_base(Config, ProtoVersion) ->
             _ ->
                 false
         end
-    end)),
-
-    disconnect_client([Client1, Client2]),
-
-    ok.
+    end)).
 
 
 parallel_requests_test(Config) ->
     [parallel_requests_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
 
 parallel_requests_test_base(Config, ProtoVersion) ->
-    RequestCount = 1000,
+    ClientCount = 20,
+    RequestCountPerClient = 1000,
 
-    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+    Clients = lists_utils:generate(fun(_) ->
+        spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1))
+    end, ClientCount),
 
-    Stopwatch = stopwatch:start(),
-    lists_utils:pmap(fun(_) ->
-        RequestId = gs_client:async_request(Client1, #gs_req{
-            subtype = graph,
-            request = #gs_req_graph{
-                gri = #gri{type = od_user, id = ?USER_1, aspect = instance},
-                operation = get,
-                subscribe = true
-            }
-        }),
-        receive
-            {response, RequestId, Response} ->
-                ?assertMatch({ok, _}, Response)
-        after
-            timer:seconds(60) ->
-                error(gather_timeout)
-        end
-    end, lists:seq(1, RequestCount)),
+    MeasurementsMillis = lists:map(fun(Client) ->
+        Stopwatch = stopwatch:start(),
+        lists_utils:pmap(fun(_) ->
+            RequestId = gs_client:async_request(Client, #gs_req{
+                subtype = graph,
+                request = #gs_req_graph{
+                    gri = #gri{type = od_user, id = ?USER_1, aspect = instance},
+                    operation = get,
+                    subscribe = true
+                }
+            }),
+            receive
+                {response, RequestId, Response} ->
+                    ?assertMatch({ok, _}, Response)
+            after
+                timer:seconds(60) ->
+                    error(gather_timeout)
+            end
+        end, lists:seq(1, RequestCountPerClient), 100),
+        stopwatch:read_millis(Stopwatch)
+    end, Clients),
 
-    ct:pal("~B parallel requests finished in ~B milliseconds", [RequestCount, stopwatch:read_millis(Stopwatch)]),
-
-    disconnect_client([Client1]),
-
-    ok.
+    MeasurementDump = str_utils:join_binary([<<"">>] ++ lists:map(fun({Ordinal, Millis}) ->
+        str_utils:format_bin("#~2..0b -> ~B millis", [Ordinal, Millis])
+    end, lists:enumerate(MeasurementsMillis)), <<"\n">>),
+    ct:pal("Parallel requests: ~B clients, ~B requests each, (avg: ~tp millis):~ts", [
+        ClientCount,
+        RequestCountPerClient,
+        lists:sum(MeasurementsMillis) div length(MeasurementsMillis),
+        MeasurementDump
+    ]).
 
 
 unsubscribe_test(Config) ->
@@ -727,11 +716,7 @@ unsubscribe_test_base(Config, ProtoVersion) ->
             _ ->
                 false
         end
-    end, 20)),
-
-    disconnect_client([Client1]),
-
-    ok.
+    end, 20)).
 
 
 nosub_test(Config) ->
@@ -824,11 +809,7 @@ nosub_test_base(Config, ProtoVersion) ->
             _ ->
                 false
         end
-    end, 20)),
-
-    disconnect_client([Client1, Client2]),
-
-    ok.
+    end, 20)).
 
 
 auth_override_test(Config) ->
@@ -975,9 +956,7 @@ nobody_auth_override_test_base(Config, ProtoVersion) ->
                 operation = get
             }
         })
-    ),
-
-    disconnect_client([Client1]).
+    ).
 
 
 auto_scope_test(Config) ->
@@ -1120,9 +1099,7 @@ auto_scope_test_base(Config, ProtoVersion) ->
             _ ->
                 false
         end
-    end)),
-
-    disconnect_client([Client1, Client2]).
+    end)).
 
 
 bad_entity_type_test(Config) ->
@@ -1137,9 +1114,111 @@ bad_entity_type_test_base(Config, ProtoVersion) ->
         gs_client:graph_request(Client1, #gri{
             type = op_file, id = <<"123">>, aspect = instance
         }, get, #{}, false)
-    ),
+    ).
 
-    disconnect_client([Client1]).
+
+bad_message_test(Config) ->
+    [bad_message_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+bad_message_test_base(Config, ProtoVersion) ->
+    GathererPid = spawn(fun() ->
+        gatherer_loop(#{})
+    end),
+
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1), fun(Push) ->
+        GathererPid ! {gather_message, client1, Push}
+    end),
+
+    BadMessageData = <<"nonsense">>,
+    % uses the internals of the gs_client to send data directly to the server
+    Client1 ! {push, BadMessageData},
+
+    ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
+        case Msg of
+            #gs_push_error{error = ?ERR_BAD_MESSAGE(BadMessageData)} ->
+                true;
+            _ ->
+                false
+        end
+    end)).
+
+
+timed_out_request_test(Config) ->
+    [timed_out_request_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+timed_out_request_test_base(Config, ProtoVersion) ->
+    Nodes = ?config(cluster_worker_nodes, Config),
+    % set a very low threshold - the long lasting operation in graph_sync_mocks takes 20 seconds
+    test_utils:set_env(Nodes, cluster_worker, graph_sync_request_processing_timeout_sec, 5),
+
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+
+    ?assertEqual(?ERROR_TIMEOUT, await_response(async_request_long_operation(Client1))).
+
+
+crashed_request_test(Config) ->
+    [crashed_request_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+crashed_request_test_base(Config, ProtoVersion) ->
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+
+    ?assertMatch(
+        ?ERR_INTERNAL_SERVER_ERROR(_),
+        gs_client:rpc_request(Client1, <<"crashingOperation">>, #{})
+    ).
+
+
+stale_request_pruning_test(Config) ->
+    [stale_request_pruning_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+stale_request_pruning_test_base(Config, ProtoVersion) ->
+    Nodes = ?config(cluster_worker_nodes, Config),
+    % pruning is done on heartbeats
+    test_utils:set_env(Nodes, cluster_worker, graph_sync_websocket_keepalive, timer:seconds(5)),
+    % set a very low threshold - the long lasting operation in graph_sync_mocks takes 20 seconds
+    test_utils:set_env(Nodes, cluster_worker, graph_sync_stale_request_threshold_sec, 5),
+    % test that identity filtering does not cause any errors
+    test_utils:set_env(Nodes, cluster_worker, graph_sync_verbose_logs_identity_filter, [
+        <<"usr-", (?USER_1)/binary>>
+    ]),
+
+    NumberOfRequestsOfEachType = 10,
+
+    % this test need a larger worker pool, otherwise it becomes saturated with the
+    % long lasting requests and all the requests are treated as stale
+    {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, stop, []),
+    {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, init, [2 * NumberOfRequestsOfEachType]),
+
+    Client = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+    User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"revision">> => 1
+    },
+
+    LongRequests = lists_utils:generate(fun(_) ->
+        async_request_long_operation(Client)
+    end, NumberOfRequestsOfEachType),
+
+    GraphRequests = lists_utils:generate(fun(_) ->
+        gs_client:async_request(Client, #gs_req{subtype = graph, request = #gs_req_graph{
+            operation = get,
+            gri = #gri{type = od_user, id = ?USER_1, aspect = instance}
+        }})
+    end, NumberOfRequestsOfEachType),
+
+    % stale requests should be pruned and the ERROR_TIMEOUT error should be returned
+    lists:foreach(fun(LongReqId) ->
+        ?assertEqual(?ERROR_TIMEOUT, await_response(LongReqId))
+    end, LongRequests),
+
+    % regular (quick) graph requests should not be affected
+    lists:foreach(fun(GraphReqId) ->
+        ?assertMatch(
+            {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
+            await_response(GraphReqId)
+        )
+    end, GraphRequests).
+
 
 
 session_persistence_test(Config) ->
@@ -1258,15 +1337,15 @@ gs_server_session_clearing_test_api_level(Config) ->
     Auth = {token, ?USER_1_TOKEN},
     ConnRef = self(),
     Translator = ?GS_EXAMPLE_TRANSLATOR,
-    HandshakeReq = #gs_req{request = #gs_req_handshake{
+    HandshakeReq = #gs_req_handshake{
         auth = Auth,
         supported_versions = gs_protocol:supported_versions()
-    }},
+    },
     {ok, SessionData, #gs_resp_handshake{
         identity = ?SUB(user, ?USER_1)
     }} = ?assertMatch(
         {ok, _, _},
-        rpc:call(Node, gs_server, handshake, [ConnRef, Translator, HandshakeReq, ?DUMMY_IP, _Cookies = []])
+        rpc:call(Node, gs_server, handshake, [ConnRef, Translator, ?DUMMY_IP, _Cookies = [], HandshakeReq])
     ),
 
     GRI1 = #gri{type = od_user, id = ?USER_1, aspect = instance},
@@ -1274,11 +1353,11 @@ gs_server_session_clearing_test_api_level(Config) ->
     ?assertMatch(ok, rpc:call(Node, gs_persistence, remove_all_subscribers, [GRI1])),
     ?assertMatch(
         {ok, _},
-        rpc:call(Node, gs_server, handle_request, [SessionData, #gs_req{request = #gs_req_graph{
+        rpc:call(Node, gs_server, handle_request, [SessionData, #gs_req_graph{
             gri = GRI1,
             operation = get,
             subscribe = true
-        }}])
+        }])
     ),
 
     GRI2 = #gri{type = od_user, id = ?USER_2, aspect = instance},
@@ -1286,12 +1365,12 @@ gs_server_session_clearing_test_api_level(Config) ->
     ?assertMatch(ok, rpc:call(Node, gs_persistence, remove_all_subscribers, [GRI2])),
     ?assertMatch(
         {ok, _},
-        rpc:call(Node, gs_server, handle_request, [SessionData, #gs_req{request = #gs_req_graph{
+        rpc:call(Node, gs_server, handle_request, [SessionData, #gs_req_graph{
             gri = GRI2,
             operation = get,
             auth_hint = ?THROUGH_SPACE(?SPACE_1),
             subscribe = true
-        }}])
+        }])
     ),
 
     % Make sure that client disconnect removes all subscriptions
@@ -1335,10 +1414,11 @@ gs_server_session_clearing_test_connection_level_base(Config, ProtoVersion) ->
         }, get, #{}, true, ?THROUGH_SPACE(?SPACE_1))
     ),
 
-    disconnect_client(Client1),
-    ?assertMatch([], rpc:call(Node, gs_subscriber, get_subscriptions, [SessionId])),
-    ?assertEqual(#{}, rpc:call(Node, gs_subscription, get_entity_subscribers, [od_user, ?USER_1])),
-    ?assertEqual(#{}, rpc:call(Node, gs_subscription, get_entity_subscribers, [od_user, ?USER_2])).
+    process_flag(trap_exit, true),
+    exit(Client1, kill),
+    ?assertMatch([], rpc:call(Node, gs_subscriber, get_subscriptions, [SessionId]), ?ATTEMPTS),
+    ?assertEqual(#{}, rpc:call(Node, gs_subscription, get_entity_subscribers, [od_user, ?USER_1]), ?ATTEMPTS),
+    ?assertEqual(#{}, rpc:call(Node, gs_subscription, get_entity_subscribers, [od_user, ?USER_2]), ?ATTEMPTS).
 
 
 service_availability_rpc_test(Config) ->
@@ -1488,26 +1568,49 @@ spawn_client(Config, ProtoVersions, Auth, ExpResult, PushCallback) ->
         ExpIdentity ->
             ?assertMatch({ok, _, #gs_resp_handshake{identity = ExpIdentity}}, Result),
             {ok, Client, _} = Result,
+            store_client(Client),
             Client
     end.
 
 
+store_client(Client) ->
+    node_cache:update(clients, fun(Clients) -> {ok, [Client | Clients], infinity} end, []).
+
+
+kill_and_clear_clients() ->
+    Clients = node_cache:get(clients, []),
+    % clients spawned in the test are linked to this process
+    process_flag(trap_exit, true),
+    lists:foreach(fun(Client) ->
+        exit(Client, kill)
+    end, Clients),
+    node_cache:put(clients, []).
+
+
+async_request_long_operation(Client) ->
+    gs_client:async_request(Client, #gs_req{
+        subtype = rpc,
+        request = #gs_req_rpc{
+            function = <<"veryLongOperation">>,
+            args = #{<<"someDummy">> => <<"arguments127">>}
+        }
+    }).
+
+
+await_response(Id) ->
+    receive
+        {response, Id, Resp} ->
+            Resp
+    after
+        timer:seconds(60) ->
+            error(receive_timeout)
+    end.
+
+
 get_gs_ws_url(Config) ->
-    [Node | _] = ?config(cluster_worker_nodes, Config),
+    Node = ?RAND_ELEMENT(?config(cluster_worker_nodes, Config)),
     NodeIP = test_utils:get_docker_ip(Node),
     str_utils:format_bin("wss://~ts:~B/", [NodeIP, ?GS_PORT]).
-
-
-disconnect_client([]) ->
-    % Allow some time for cleanup
-    timer:sleep(5000),
-    process_flag(trap_exit, false);
-disconnect_client([Client | Rest]) ->
-    process_flag(trap_exit, true),
-    exit(Client, kill),
-    disconnect_client(Rest);
-disconnect_client(Client) ->
-    disconnect_client([Client]).
 
 
 start_gs_listener(Node) ->
@@ -1532,28 +1635,52 @@ get_trusted_cacerts(Config) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Node, cert_utils, load_ders, [?TRUSTED_CACERTS_FILE]).
 
+
 %%%===================================================================
 %%% Setup/teardown functions
 %%%===================================================================
 
 init_per_suite(Config) ->
     ssl:start(),
-    [{?LOAD_MODULES, [graph_sync_mocks]} | Config].
+
+    PostHook = fun(UpdatedConfig) ->
+        Nodes = ?config(cluster_worker_nodes, UpdatedConfig),
+        [start_gs_listener(N) || N <- Nodes],
+        graph_sync_mocks:mock_callbacks(UpdatedConfig),
+
+        test_utils:set_env(Nodes, cluster_worker, graph_sync_verbose_logs_severity, regular),
+        test_utils:set_env(Nodes, cluster_worker, graph_sync_verbose_logs_print_credentials, true),
+        test_utils:set_env(Nodes, cluster_worker, graph_sync_verbose_logs_print_errors, true),
+        test_utils:set_env(Nodes, cluster_worker, graph_sync_verbose_logs_print_data, true),
+
+        UpdatedConfig
+    end,
+    [{?LOAD_MODULES, [graph_sync_mocks]}, {?ENV_UP_POSTHOOK, PostHook} | Config].
 
 
 init_per_testcase(_, Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
-    [start_gs_listener(N) || N <- Nodes],
-    graph_sync_mocks:mock_callbacks(Config),
+    % set the defaults (some tests manipulate this config)
+    test_utils:set_env(Nodes, cluster_worker, graph_sync_stale_request_threshold_sec, 120),
+    test_utils:set_env(Nodes, cluster_worker, graph_sync_websocket_keepalive, timer:seconds(15)),
+    test_utils:set_env(Nodes, cluster_worker, graph_sync_request_processing_timeout_sec, 60),
+    test_utils:set_env(Nodes, cluster_worker, graph_sync_verbose_logs_identity_filter, undefined),
+
+    {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, init, [5]),
+
     Config.
 
 
 end_per_testcase(_, Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
-    [stop_gs_listener(N) || N <- Nodes],
-    graph_sync_mocks:unmock_callbacks(Config).
+    kill_and_clear_clients(),
+    {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, stop, []),
+    ok.
 
 
-end_per_suite(_Config) ->
+end_per_suite(Config) ->
     ssl:stop(),
+    Nodes = ?config(cluster_worker_nodes, Config),
+    [stop_gs_listener(N) || N <- Nodes],
+    graph_sync_mocks:unmock_callbacks(Config),
     ok.

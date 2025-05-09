@@ -13,7 +13,19 @@
 -module(worker_pool).
 -author("Jakub Kudzia").
 
-%% Types
+-include_lib("ctool/include/logging.hrl").
+
+%% API
+-export([
+    start_sup_pool/2, stop_sup_pool/1,
+    call/2, call/3, call/4,
+    cast/2, cast/3,
+    stats/0, stats/1,
+    broadcast/2,
+    default_strategy/0
+]).
+
+
 -type name() :: wpool:name().
 -type option() :: wpool:option().
 -type strategy() :: wpool:strategy().
@@ -23,48 +35,11 @@
 
 -export_type([name/0, option/0, strategy/0, request/0, response/0, stats/0]).
 
-%% API
--export([
-    start_pool/1, start_pool/2, start_sup_pool/2, stop_pool/1, stop_sup_pool/1,
-    call/2, call/3, call/4,
-    cast/2, cast/3,
-    stats/0, stats/1,
-    broadcast/2,
-    default_strategy/0
-]).
 
+%%%===================================================================
+%%% API
+%%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @equiv wpool:start_pool(PoolName).
-%% @end
-%%--------------------------------------------------------------------
--spec start_pool(name()) -> {ok, pid()} | {error, {already_started, pid()} | term()}.
-start_pool(PoolName) ->
-    wpool:start_pool(PoolName).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts (and links) a pool of N wpool_processes.
-%% The result pid belongs to a supervisor (in case you want to add
-%% it to a supervisor tree).
-%% All options are described on
-%% http://inaka.github.io/worker_pool/worker_pool/wpool.html
-%% The most important are:
-%%      *  {workers, integer() >= 1} - specify no. of workers
-%%      *  {worker_type, gen_fsm | gen_server} - specify type of worker
-%%      *  {worker, {Module :: atom(), InitArg :: term()}}
-%%          - specify worker's module
-%%          - by default it's wpool_worker/wpool_worker_fsn
-%%      *  {workers, integer() >= 1} - specify no. of workers
-%%      *  {workers, integer() >= 1} - specify no. of workers
-%% @equiv wpool:start_pool(PoolName, Options).
-%% @end
-%%--------------------------------------------------------------------
--spec start_pool(name(), [option()]) ->
-    {ok, pid()} | {error, {already_started, pid()} | term()}.
-start_pool(PoolName, Options) ->
-    wpool:start_pool(PoolName, Options).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -77,25 +52,15 @@ start_pool(PoolName, Options) ->
 %%      *  {worker, {Module :: atom(), InitArg :: term()}}
 %%          - specify worker's module
 %%          - by default it's wpool_worker/wpool_worker_fsn
-%%      *  {workers, integer() >= 1} - specify no. of workers
-%%      *  {workers, integer() >= 1} - specify no. of workers
-%% @equiv wpool:start_pool(PoolName, Options).
 %% @end
 %%--------------------------------------------------------------------
 -spec start_sup_pool(name(), [option()]) ->
     {ok, pid()} | {error, {already_started, pid()} | term()}.
 start_sup_pool(PoolName, Options) ->
+    Size = proplists:get_value(workers, Options, 100),  % the default in wpool
+    ?info("Starting worker pool: '~ts' (size: ~B)", [PoolName, Size]),
     wpool:start_sup_pool(PoolName, Options).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Stops the pool.
-%% @equiv wpool:stop_pool(PoolName).
-%% @end
-%%--------------------------------------------------------------------
--spec stop_pool(name()) -> true.
-stop_pool(PoolName) ->
-    wpool:stop_pool(PoolName).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -105,7 +70,9 @@ stop_pool(PoolName) ->
 %%--------------------------------------------------------------------
 -spec stop_sup_pool(name()) -> ok.
 stop_sup_pool(PoolName) ->
+    ?info("Stopping worker pool: '~ts'", [PoolName]),
     wpool:stop_sup_pool(PoolName).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -129,6 +96,7 @@ call(PoolName, Call) ->
 call(PoolName, Call, Strategy) ->
     wpool:call(PoolName, Call, Strategy).
 
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Performs call to worker from the pool.
@@ -138,6 +106,7 @@ call(PoolName, Call, Strategy) ->
 -spec call(name(), request(), strategy(), timeout()) -> response().
 call(PoolName, Call, Strategy, Timeout) ->
     wpool:call(PoolName, Call, Strategy, Timeout).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -172,6 +141,7 @@ cast(PoolName, Call, Strategy) ->
 stats() ->
     wpool:stats().
 
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Retrieves a snapshot of a given pool stats
@@ -182,6 +152,7 @@ stats() ->
 stats(PoolName) ->
     wpool:stats(PoolName).
 
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Casts a message to all the workers within the given pool.
@@ -191,6 +162,7 @@ stats(PoolName) ->
 -spec broadcast(name(), request()) -> response().
 broadcast(PoolName, Cast) ->
     wpool:broadcast(PoolName, Cast).
+
 
 %%--------------------------------------------------------------------
 %% @doc
