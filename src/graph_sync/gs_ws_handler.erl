@@ -17,6 +17,7 @@
 
 -include("global_definitions.hrl").
 -include("graph_sync/graph_sync.hrl").
+-include("modules/datastore/datastore_models.hrl").
 -include_lib("ctool/include/errors.hrl").
 -include_lib("ctool/include/logging.hrl").
 

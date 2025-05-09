@@ -34,8 +34,10 @@
 -module(gs_worker_pool).
 -author("Lukasz Opiola").
 
--include_lib("ctool/include/logging.hrl").
+
+-include("modules/datastore/datastore_models.hrl").
 -include("graph_sync/graph_sync.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 
 %% Pool management API

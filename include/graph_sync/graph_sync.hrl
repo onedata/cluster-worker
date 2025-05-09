@@ -13,9 +13,8 @@
 -ifndef(GRAPH_SYNC_CW_HRL).
 -define(GRAPH_SYNC_CW_HRL, 1).
 
--include("modules/datastore/datastore_models.hrl").
+
 -include_lib("ctool/include/graph_sync/gri.hrl").
--include_lib("ctool/include/logging.hrl").
 
 
 % Protocol version used for structures that may not change over time.
