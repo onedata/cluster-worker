@@ -17,7 +17,7 @@
 %%% are treated as different tenants). All tenants share the common
 %%% processing resources of the pool.
 %%%
-%%% This module also handles throttling of clients that post too many
+%%% This module also handles throttling of connections that post too many
 %%% concurrent requests, in two ways:
 %%%
 %%%   * Gives throttling_recommendation() to the WebSocket handler
@@ -65,7 +65,7 @@
 
 % see the module doc
 -record(tenant, {
-    previous_throttling_recommendation = resume_processing :: throttling_recommendation(),
+    current_throttling_recommendation = resume_processing :: throttling_recommendation(),
     pending_requests = #{} :: #{gs_protocol:message_id() => #pending_request{}}
 }).
 -type tenant() :: #tenant{}.
@@ -192,7 +192,7 @@ process_outcome(
         {ok, #pending_request{job_posted_stopwatch = S}} ->
             S
     end,
-    gs_verbose_logger:report_reply_sent(SessionData, RequestId, ResponseMessage, Stopwatch),
+    gs_verbose_logger:report_sending_reply(SessionData, RequestId, ResponseMessage, Stopwatch),
 
     {ResponseMessage, calculate_throttling_recommendation(Tenant#tenant{
         pending_requests = maps:remove(RequestId, PendingRequests)
@@ -257,52 +257,52 @@ handle_request(SessionData, RequestWrapper = #gs_req{request = Request}) ->
 -spec calculate_throttling_recommendation(tenant(), gs_session:data()) ->
     {throttling_recommendation(), tenant()}.
 calculate_throttling_recommendation(#tenant{
-    previous_throttling_recommendation = resume_processing
+    current_throttling_recommendation = resume_processing
 } = Tenant, SessionData) ->
     QueueSize = maps:size(Tenant#tenant.pending_requests),
     NewRecommendation = case QueueSize > ?MAX_CONCURRENT_REQUESTS of
         true ->
-            gs_verbose_logger:report_throttling_applied(SessionData, QueueSize),
+            gs_verbose_logger:report_throttling_triggered(SessionData, QueueSize),
             start_throttling;
         false ->
             resume_processing
     end,
-    {NewRecommendation, Tenant#tenant{previous_throttling_recommendation = NewRecommendation}};
+    {NewRecommendation, Tenant#tenant{current_throttling_recommendation = NewRecommendation}};
 
 calculate_throttling_recommendation(#tenant{
-    previous_throttling_recommendation = start_throttling
+    current_throttling_recommendation = start_throttling
 } = Tenant, SessionData) ->
     QueueSize = maps:size(Tenant#tenant.pending_requests),
     MaxConRequests = ?MAX_CONCURRENT_REQUESTS,
     NewRecommendation = case QueueSize =< MaxConRequests div 2 of
         true ->
-            gs_verbose_logger:report_throttling_ceased(SessionData, QueueSize),
+            gs_verbose_logger:report_throttling_stopped(SessionData, QueueSize),
             resume_processing;
         false ->
             % If there are many WS messages in the buffer, it's possible that
             % the queue will keep rising, despite the throttling. Log from time
             % to time (with exponential growth).
             QueueSize rem MaxConRequests == 0 andalso is_power_of_two(QueueSize div MaxConRequests) andalso
-                gs_verbose_logger:report_throttling_applied(SessionData, QueueSize),
+                gs_verbose_logger:report_throttling_triggered(SessionData, QueueSize),
             start_throttling
     end,
-    {NewRecommendation, Tenant#tenant{previous_throttling_recommendation = NewRecommendation}}.
+    {NewRecommendation, Tenant#tenant{current_throttling_recommendation = NewRecommendation}}.
 
 
 %% @private
 -spec enforce_throttling_delay(tenant(), gs_session:data()) -> ok.
 enforce_throttling_delay(#tenant{
-    previous_throttling_recommendation = resume_processing
+    current_throttling_recommendation = resume_processing
 }, _SessionData) ->
     ok;
 enforce_throttling_delay(#tenant{
-    previous_throttling_recommendation = start_throttling
+    current_throttling_recommendation = start_throttling
 } = Tenant, SessionData) ->
     QueueSize = maps:size(Tenant#tenant.pending_requests),
     case QueueSize > ?MAX_CONCURRENT_REQUESTS of
         true ->
             Delay = ?THROTTLING_FACTOR * QueueSize div ?MAX_CONCURRENT_REQUESTS,
-            gs_verbose_logger:report_throttling_delay_enforced(SessionData, QueueSize, Delay),
+            gs_verbose_logger:report_request_throttled(SessionData, QueueSize, Delay),
             timer:sleep(Delay);
         false ->
             ok

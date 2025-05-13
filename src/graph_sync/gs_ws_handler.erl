@@ -40,7 +40,8 @@
 
 
 -record(pre_handshake_state, {
-    conn_ref :: gs_server:conn_ref(),
+    % undefined before websocket_init/1 is called
+    conn_ref :: undefined | gs_server:conn_ref(),
     peer_ip :: ip_utils:ip(),
     cookies :: gs_protocol:cookies(),
     translator :: gs_server:translator()
@@ -105,9 +106,8 @@ init(Req, [Translator]) ->
     {PeerIp, _} = cowboy_req:peer(Req),
     Cookies = cowboy_req:parse_cookies(Req),
     {cowboy_websocket, Req, #pre_handshake_state{
-        % best effort; this is before the connection is upgraded to WS
-        % and the actual PID is not yet spawned
-        conn_ref = self(),
+        % this is before the connection is upgraded to WS and the actual PID is not yet spawned
+        conn_ref = undefined,
         peer_ip = PeerIp,
         cookies = Cookies,
         translator = Translator
@@ -123,7 +123,7 @@ init(Req, [Translator]) ->
 websocket_init(State) ->
     erlang:send_after(?KEEPALIVE_INTERVAL_MILLIS, self(), keepalive),
     {ok, State#pre_handshake_state{
-        % update the connection PID to the actual one of the WS connection
+        % sets the connection PID to the actual one of the WS connection
         conn_ref = self()
     }}.
 
@@ -332,7 +332,7 @@ protocol_version(#state{session_data = #gs_session{protocol_version = ProtocolVe
 
 
 %% @private
--spec conn_ref(state()) -> gs_server:conn_ref().
+-spec conn_ref(state()) -> gs_server:conn_ref() | undefined.
 conn_ref(#pre_handshake_state{conn_ref = ConnRef}) ->
     ConnRef;
 conn_ref(#state{session_data = #gs_session{conn_ref = ConnRef}}) ->

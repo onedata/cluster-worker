@@ -21,8 +21,8 @@
 
 
 %% API
--export([call_apply_before_listeners_start_procedures/0]).
--export([call_start_listeners/0]).
+-export([apply_before_listeners_start_procedures/0]).
+-export([start_listeners/0]).
 
 
 %% worker_plugin_behaviour callbacks
@@ -36,14 +36,14 @@
 %%%===================================================================
 
 
--spec call_apply_before_listeners_start_procedures() -> ok.
-call_apply_before_listeners_start_procedures() ->
-    worker_proxy:call(?MODULE, {apply, fun apply_before_listeners_start_procedures/0}).
+-spec apply_before_listeners_start_procedures() -> ok.
+apply_before_listeners_start_procedures() ->
+    worker_proxy:call(?MODULE, {apply, fun apply_before_listeners_start_procedures_internal/0}).
 
 
--spec call_start_listeners() -> ok.
-call_start_listeners() ->
-    worker_proxy:call(?MODULE, {apply, fun start_listeners/0}).
+-spec start_listeners() -> ok.
+start_listeners() ->
+    worker_proxy:call(?MODULE, {apply, fun start_listeners_internal/0}).
 
 
 %%%===================================================================
@@ -98,8 +98,8 @@ cleanup() ->
 
 
 %% @private
--spec start_listeners() -> ok.
-start_listeners() ->
+-spec start_listeners_internal() -> ok.
+start_listeners_internal() ->
     ?info("Starting listeners..."),
     lists:foreach(fun(Module) ->
         ok = erlang:apply(Module, start, [])
@@ -110,8 +110,8 @@ start_listeners() ->
 %% @doc callback called by listener_manager_worker
 %% NOTE: these procedures are run on all cluster nodes and are awaited
 %%       for before cluster setup proceeds
--spec apply_before_listeners_start_procedures() -> ok | no_return().
-apply_before_listeners_start_procedures() ->
+-spec apply_before_listeners_start_procedures_internal() -> ok | no_return().
+apply_before_listeners_start_procedures_internal() ->
     ?info("Executing 'before_listeners_start' procedures..."),
     try
         ok = ?CALL_PLUGIN(before_listeners_start, []),

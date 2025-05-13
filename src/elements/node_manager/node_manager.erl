@@ -781,7 +781,7 @@ cluster_init_step(?PREPARE_FOR_LISTENERS_START) ->
     spawn(fun() ->
         Result = try
             init_workers([?LISTENER_MANAGER_WORKER_SPEC()]),
-            ok = listener_manager_worker:call_apply_before_listeners_start_procedures(),
+            ok = listener_manager_worker:apply_before_listeners_start_procedures(),
             success
         catch Class:Reason:Stacktrace ->
             ?error_exception("Failed to prepare for listeners start", Class, Reason, Stacktrace),
@@ -796,7 +796,7 @@ cluster_init_step(?START_LISTENERS) ->
     % this step internally requires calls to node manager, hence it is processed asynchronously
     spawn(fun() ->
         Result = try
-            ok = listener_manager_worker:call_start_listeners(),
+            ok = listener_manager_worker:start_listeners(),
             success
         catch Class:Reason:Stacktrace ->
             ?error_exception("Failed to start listeners", Class, Reason, Stacktrace),

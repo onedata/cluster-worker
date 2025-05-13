@@ -302,25 +302,28 @@
             {graph_sync_batch_parallelism, 10},
             % How many requests can be posted simultaneously by one GS connection.
             {graph_sync_max_concurrent_requests, 4},
-            % Clients that post a lot of requests are throttled using a simple
-            % mechanism; if their queue exceeds the graph_sync_max_concurrent_requests,
-            % an artificial delay is applied for every request. The delay follows this
-            % formula: throttling_factor * queue_size / graph_sync_max_concurrent_requests [ms].
+            % Clients that post a lot of requests are throttled using a simple mechanism;
+            % if their queue exceeds the graph_sync_max_concurrent_requests, an artificial
+            % delay is applied for every request, before the request is placed in the
+            % global queue. The delay follows this formula:
+            %   throttling_factor * queue_size // graph_sync_max_concurrent_requests [ms].
+            %   (where // means floor division a.k.a. the 'div' operator)
             % For example, in this case:
             %   * throttling_factor: 2
             %   * queue_size: 8
             %   * graph_sync_max_concurrent_requests: 4
             % the delay would be 4ms, applied to every request until the queue size changes.
             {graph_sync_throttling_factor, 2},
-            % How long until a request that was received from the client is treated
-            % as timed out.
+            % The maximum time allowed for handling a request received from the client.
+            % This includes the time spent in the queue and during actual processing.
+            % If this time is exceeded, the request is considered timed out.
             {graph_sync_request_processing_timeout_sec, 60},
-            % How long until a request that was received from the client but not yet
-            % processed nor timed out is considered stale and pruned. In such a case,
-            % a timeout error is sent to the client.
-            % This mechanism is applied only when the regular timeout detection fails,
-            % which generally should not happen.
-            % NOTE: MUST BE set to a larger value than the processing timeout env (above).
+            % The time after which a request received from the client — but not yet processed
+            % or marked as timed out — is considered stale and removed.
+            % In such cases, a timeout error is sent to the client.
+            % This mechanism acts as a fallback and is only triggered if the regular timeout
+            % detection fails, which should generally not occur.
+            % NOTE: This value MUST be greater than the processing timeout defined above.
             {graph_sync_stale_request_threshold_sec, 120},
 
             % Toggles the verbose logging and sets the severity with which it's performed.
