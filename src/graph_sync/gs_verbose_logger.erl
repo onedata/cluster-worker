@@ -36,7 +36,6 @@
 -export([report_auth_override_success/5, report_auth_override_error/5]).
 
 
-
 % severities of logs that can occur in this module; subject
 % to env variables that may apply a mask (or disable them completely)
 -type severity() :: info | notice | warning | error.
@@ -326,22 +325,16 @@ report_auth_override_error(SessionData, RequestId, AuthOverride, Error, Stopwatc
 dispatch_log(Severity, #gs_session{auth = #auth{subject = Identity}}, LogFun) ->
     dispatch_log(Severity, Identity, LogFun);
 dispatch_log(Severity, Identity, LogFun) ->
-    case ?SEVERITY_MASK of
-        none ->
+    SeverityMask = ?SEVERITY_MASK,
+    case SeverityMask /= none andalso identity_matches_filter(Identity) of
+        false ->
             ok;
-        SeverityMask ->
-            case identity_matches_filter(Identity) of
-                false ->
-                    ok;
-                true ->
-                    case {SeverityMask, Severity} of
-                        {debug, _} -> ?debug(LogFun());
-                        {regular, info} -> ?info(LogFun());
-                        {regular, notice} -> ?notice(LogFun());
-                        {regular, warning} -> ?warning(LogFun());
-                        {regular, error} -> ?error(LogFun())
-                    end
-            end
+        true ->
+            LogLevel = case SeverityMask of
+                debug -> debug;
+                regular -> Severity
+            end,
+            ?log(onedata_logger:loglevel_atom_to_int(LogLevel), LogFun(), [])
     end.
 
 
@@ -376,7 +369,7 @@ format_identity(Identity) ->
 %% @private
 -spec format_session_id(gs_protocol:session_id()) -> binary().
 format_session_id(SessionId) ->
-    str_utils:format_bin("sid:~ts", [SessionId]).
+    str_utils:format_bin("sessId:~ts", [SessionId]).
 
 
 %% @private
@@ -431,7 +424,7 @@ format_conn_ref(ConnRef) ->
 %% @private
 -spec format_request_id(gs_protocol:message_id()) -> binary().
 format_request_id(RequestId) ->
-    str_utils:format_bin("rid:~ts", [RequestId]).
+    str_utils:format_bin("reqId:~ts", [RequestId]).
 
 
 %% @private
@@ -598,7 +591,7 @@ format_push_message(#gs_push{message = #gs_push_nosub{gri = Gri, reason = Reason
 %% @private
 -spec format_auth_override(gs_protocol:auth_override()) -> binary().
 format_auth_override(AuthOverride) ->
-    str_utils:format_bin("[~ts] [int:~ts] [dac-policy:~ts] [~ts] [~ts]", [
+    str_utils:format_bin("[~ts] [interface:~ts] [dataAccessCaveatsPolicy:~ts] [~ts] [~ts]", [
         format_ip(AuthOverride#auth_override.peer_ip),
         AuthOverride#auth_override.interface,
         case AuthOverride#auth_override.data_access_caveats_policy of
@@ -606,7 +599,7 @@ format_auth_override(AuthOverride) ->
             disallow_data_access_caveats -> <<"disallow">>
         end,
         format_client_auth(AuthOverride#auth_override.client_auth),
-        format_token(<<"consumer-token">>, AuthOverride#auth_override.consumer_token)
+        format_token(<<"consumerToken">>, AuthOverride#auth_override.consumer_token)
     ]).
 
 

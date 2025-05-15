@@ -224,14 +224,14 @@ websocket_info(?GS_WORKER_POOL_JOB_OUTCOME(_) = Outcome, #state{
     {ResponseMessage, {ThrottlingRecommendation, UpdatedWorkerPoolTenant}} = gs_worker_pool:process_outcome(
         WorkerPoolTenant, SessionData, Outcome
     ),
-    ReplyCommand = [{text, encode_message(State, ResponseMessage)}],
+    ReplyCommands = [{text, encode_message(State, ResponseMessage)}],
 
-    ActiveCommand = case ThrottlingRecommendation of
-        resume_processing -> [{active, true}];
-        start_throttling -> []
+    CommandsWithActive = case ThrottlingRecommendation of
+        resume_processing -> [{active, true} | ReplyCommands];
+        start_throttling -> ReplyCommands
     end,
 
-    {ActiveCommand ++ ReplyCommand, State#state{worker_pool_tenant = UpdatedWorkerPoolTenant}};
+    {CommandsWithActive, State#state{worker_pool_tenant = UpdatedWorkerPoolTenant}};
 
 websocket_info(keepalive, #state{session_data = SessionData, worker_pool_tenant = WPTenant} = State) ->
     % the keepalive timer is also used to periodically check for stale requests
@@ -242,13 +242,13 @@ websocket_info(keepalive, #state{session_data = SessionData, worker_pool_tenant 
         {text, encode_message(State, ResponseMessage)}
     end, ResponseMessages),
 
-    ActiveCommand = case ThrottlingRecommendation of
-        resume_processing -> [{active, true}];
-        start_throttling -> []
+    CommandsWithActiveAndPing = case ThrottlingRecommendation of
+        resume_processing -> [{active, true}, ping | ReplyCommands];
+        start_throttling -> [ping | ReplyCommands]
     end,
 
     erlang:send_after(?KEEPALIVE_INTERVAL_MILLIS, self(), keepalive),
-    {ActiveCommand ++ ReplyCommands ++ [ping], State#state{worker_pool_tenant = UpdatedWPTenant}};
+    {CommandsWithActiveAndPing, State#state{worker_pool_tenant = UpdatedWPTenant}};
 
 websocket_info({push, Msg}, State) ->
     gs_verbose_logger:report_message_pushed(State#state.session_data, Msg),
