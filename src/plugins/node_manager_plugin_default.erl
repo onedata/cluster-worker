@@ -180,7 +180,8 @@ upgrade_cluster(CurrentGeneration) ->
 %% NOTE: this callback blocks the application supervisor and must not be used to
 %% interact with the main supervision tree.
 %%
-%% This callback is executed on all cluster nodes.
+%% NOTE: this callback is run on all cluster nodes and is awaited
+%% for before cluster setup proceeds.
 %% @end
 %%--------------------------------------------------------------------
 -spec before_listeners_start() -> ok | {error, Reason :: term()}.
@@ -197,7 +198,8 @@ before_listeners_start() ->
 %% NOTE: this callback blocks the application supervisor and must not be used to
 %% interact with the main supervision tree.
 %%
-%% This callback is executed on all cluster nodes.
+%% NOTE: this callback is run on a cluster node that is being turned off
+%% independently of other cluster nodes (no synchronization is performed).
 %% @end
 %%--------------------------------------------------------------------
 -spec after_listeners_stop() -> ok | {error, Reason :: term()}.
