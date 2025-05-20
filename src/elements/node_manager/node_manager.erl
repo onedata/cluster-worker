@@ -776,16 +776,30 @@ cluster_init_step(?UPGRADE_CLUSTER) ->
         false ->
             ok
     end;
+cluster_init_step(?PREPARE_FOR_LISTENERS_START) ->
+    % this step internally requires calls to node manager, hence it is processed asynchronously
+    spawn(fun() ->
+        Result = try
+            init_workers([?LISTENER_MANAGER_WORKER_SPEC()]),
+            ok = listener_manager_worker:apply_before_listeners_start_procedures(),
+            success
+        catch Class:Reason:Stacktrace ->
+            ?error_exception("Failed to prepare for listeners start", Class, Reason, Stacktrace),
+            failure
+        end,
+        report_step_result(?PREPARE_FOR_LISTENERS_START, Result)
+    end),
+    async;
 cluster_init_step(?START_LISTENERS) ->
     safe_mode:report_node_initialized(),
     gen_server2:cast(?NODE_MANAGER_NAME, report_db_and_workers_ready),
     % this step internally requires calls to node manager, hence it is processed asynchronously
     spawn(fun() ->
         Result = try
-            init_workers([?LISTENER_MANAGER_WORKER_SPEC()]),
+            ok = listener_manager_worker:start_listeners(),
             success
         catch Class:Reason:Stacktrace ->
-            ?error_exception("Failed to start the listener_manager_worker", Class, Reason, Stacktrace),
+            ?error_exception("Failed to start listeners", Class, Reason, Stacktrace),
             failure
         end,
         report_step_result(?START_LISTENERS, Result)

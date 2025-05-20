@@ -13,13 +13,16 @@
 -ifndef(GRAPH_SYNC_CW_HRL).
 -define(GRAPH_SYNC_CW_HRL, 1).
 
+
 -include_lib("ctool/include/graph_sync/gri.hrl").
+
 
 % Protocol version used for structures that may not change over time.
 -define(BASIC_PROTOCOL, 0).
 
 % Protocol versions currently supported by this software
 -define(SUPPORTED_PROTO_VERSIONS, [3, 4]).
+
 
 -record(gs_req_batch, {
     requests :: [gs_protocol:req_wrapper()]
@@ -132,5 +135,10 @@
 -define(AS_GROUP(GroupId), {asGroup, GroupId}).
 -define(AS_SPACE(SpaceId), {asSpace, SpaceId}).
 -define(AS_HARVESTER(HarvesterId), {asHarvester, HarvesterId}).
+
+
+% Message used to notify the caller pid by the GS worker pool that a request was processed
+-define(GS_WORKER_POOL_JOB_OUTCOME(OpaqueTerm), {gs_worker_pool_result, OpaqueTerm}).
+
 
 -endif.

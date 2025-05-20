@@ -84,23 +84,18 @@ unmock_callbacks(Config) ->
 
 assert_service_available() ->
     case application:get_env(?CLUSTER_WORKER_APP_NAME, mocked_service_availability, true) of
-        false -> throw(?ERR_SERVICE_UNAVAILABLE);
+        false -> throw(?ERR_SERVICE_UNAVAILABLE(?err_ctx()));
         true -> ok
     end.
 
 
-verify_handshake_auth({token, ?USER_1_TOKEN}, _, _) ->
-    {ok, ?USER(?USER_1)};
-verify_handshake_auth({token, ?USER_2_TOKEN}, _, _) ->
-    {ok, ?USER(?USER_2)};
-verify_handshake_auth({token, ?PROVIDER_1_TOKEN}, _, _) ->
-    {ok, ?PROVIDER(?PROVIDER_1)};
-verify_handshake_auth({token, ?USER_1_TOKEN_REQUIRING_COOKIES}, _, ?DUMMY_COOKIES) ->
-    {ok, ?USER(?USER_1)};
-verify_handshake_auth(undefined, _, _) ->
-    {ok, ?NOBODY};
-verify_handshake_auth(_, _, _) ->
-    ?ERR_UNAUTHORIZED(undefined).
+verify_handshake_auth(ClientAuth, PeerIp, Cookies) ->
+    try
+        AuthWithIdentity = client_auth_to_auth(ClientAuth, Cookies),
+        {ok, AuthWithIdentity#auth{peer_ip = PeerIp}}
+    catch _:_ ->
+        ?ERR_UNAUTHORIZED(?err_ctx())
+    end.
 
 
 % Proto version 3 does not support additional auth override options
@@ -120,20 +115,18 @@ verify_auth_override(_Auth, AuthOverride) ->
 
     case CorrectData of
         false ->
-            ?ERR_UNAUTHORIZED(undefined);
+            ?ERR_UNAUTHORIZED(?err_ctx());
         true ->
-            try
-                {ok, client_auth_to_auth(ClientAuth)}
-            catch _:_ ->
-                ?ERR_UNAUTHORIZED(undefined)
-            end
+            verify_handshake_auth(ClientAuth, PeerIp, undefined)
     end.
 
 
-client_auth_to_auth({token, ?USER_1_TOKEN}) -> ?USER(?USER_1);
-client_auth_to_auth({token, ?USER_2_TOKEN}) -> ?USER(?USER_2);
-client_auth_to_auth({token, ?PROVIDER_1_TOKEN}) -> ?PROVIDER(?PROVIDER_1);
-client_auth_to_auth(nobody) -> ?NOBODY.
+client_auth_to_auth({token, ?USER_1_TOKEN}, _) -> ?USER(?USER_1);
+client_auth_to_auth({token, ?USER_1_TOKEN_REQUIRING_COOKIES}, ?DUMMY_COOKIES) -> ?USER(?USER_1);
+client_auth_to_auth({token, ?USER_2_TOKEN}, _) -> ?USER(?USER_2);
+client_auth_to_auth({token, ?PROVIDER_1_TOKEN}, _) -> ?PROVIDER(?PROVIDER_1);
+client_auth_to_auth(nobody, _) -> ?NOBODY;
+client_auth_to_auth(undefined, _) -> ?NOBODY.
 
 
 client_connected(_Auth, _) -> ok.
@@ -188,16 +181,18 @@ is_authorized(_, _, _, _, _) ->
 handle_rpc(_, ?USER(?USER_1), <<"user1Fun">>, Args) ->
     {ok, Args};
 handle_rpc(_, _, <<"user1Fun">>, _Args) ->
-    ?ERR_FORBIDDEN(undefined);
+    ?ERR_FORBIDDEN(?err_ctx());
 handle_rpc(_, ?USER(?USER_2), <<"user2Fun">>, Args) ->
     {ok, Args};
 handle_rpc(_, _, <<"user2Fun">>, _Args) ->
-    ?ERR_FORBIDDEN(undefined);
+    ?ERR_FORBIDDEN(?err_ctx());
 handle_rpc(_, _, <<"veryLongOperation">>, Args) ->
     timer:sleep(15000 + rand:uniform(10000)),
     {ok, Args};
+handle_rpc(_, _, <<"crashingOperation">>, _Args) ->
+    error(simulated_crash);
 handle_rpc(_, _, _, _) ->
-    ?ERR_RPC_UNDEFINED.
+    ?ERR_RPC_UNDEFINED(?err_ctx()).
 
 
 handle_graph_request(Auth, AuthHint, #gri{type = od_user, id = UserId, aspect = instance}, get, _Data, VersionedEntity) ->
@@ -213,7 +208,7 @@ handle_graph_request(Auth, AuthHint, #gri{type = od_user, id = UserId, aspect = 
         ?USER(UserId) -> {ok, Result};
         ?USER(_OtherUser) ->
             case AuthHint of
-                undefined -> ?ERR_FORBIDDEN(undefined);
+                undefined -> ?ERR_FORBIDDEN(?err_ctx());
                 ?THROUGH_SPACE(?SPACE_1) -> {ok, Result}
             end
     end;
@@ -231,12 +226,12 @@ handle_graph_request(Auth, _, #gri{type = od_user, id = UserId, aspect = instanc
                     end),
                     ok;
                 #{<<"name">> := _} ->
-                    ?ERR_BAD_VALUE_STRING(<<"name">>);
+                    ?ERR_BAD_VALUE_STRING(?err_ctx(), <<"name">>);
                 _ ->
-                    ?ERR_MISSING_REQUIRED_VALUE(<<"name">>)
+                    ?ERR_MISSING_REQUIRED_VALUE(?err_ctx(), <<"name">>)
             end;
         _ ->
-            ?ERR_FORBIDDEN(undefined)
+            ?ERR_FORBIDDEN(?err_ctx())
     end;
 handle_graph_request(Auth, _, #gri{type = od_user, id = UserId, aspect = instance}, delete, _Data, _Entity) ->
     case Auth of
@@ -250,7 +245,7 @@ handle_graph_request(Auth, _, #gri{type = od_user, id = UserId, aspect = instanc
             end),
             ok;
         _ ->
-            ?ERR_FORBIDDEN(undefined)
+            ?ERR_FORBIDDEN(?err_ctx())
     end;
 
 handle_graph_request(?USER(UserId), AuthHint, #gri{type = od_group, id = undefined, aspect = instance}, create, Data, _Entity) ->
@@ -259,7 +254,7 @@ handle_graph_request(?USER(UserId), AuthHint, #gri{type = od_group, id = undefin
         ?AS_USER(UserId) ->
             {ok, resource, {#gri{type = od_group, id = ?GROUP_1, aspect = instance}, {#{<<"name">> => ?GROUP_1_NAME}, 1}}};
         _ ->
-            ?ERR_FORBIDDEN(undefined)
+            ?ERR_FORBIDDEN(?err_ctx())
     end;
 
 handle_graph_request(?USER(?USER_1), _AuthHint, #gri{type = od_group, id = ?GROUP_1, aspect = int_value}, create, Data, _Entity) ->
@@ -272,7 +267,7 @@ handle_graph_request(?USER(UserId), AuthHint, #gri{type = od_space, id = undefin
         ?AS_USER(UserId) ->
             {ok, resource, {#gri{type = od_space, id = ?SPACE_1, aspect = instance}, {#{<<"name">> => ?SPACE_1_NAME}, 1}}};
         _ ->
-            ?ERR_FORBIDDEN(undefined)
+            ?ERR_FORBIDDEN(?err_ctx())
     end;
 handle_graph_request(?USER(?USER_1), _, #gri{type = od_space, id = ?SPACE_1, aspect = instance}, get, _Data, _Entity) ->
     {ok, {#{<<"name">> => ?SPACE_1_NAME}, 1}};
@@ -290,13 +285,13 @@ handle_graph_request(Auth, _AuthHint, #gri{type = od_user, id = UserId, aspect =
     case Auth of
         ?ROOT -> {ok, {#{<<"nameSubstring">> => NameSubstring}, Revision}};
         ?USER(UserId) -> {ok, {#{<<"nameSubstring">> => NameSubstring}, Revision}};
-        _ -> ?ERR_FORBIDDEN(undefined)
+        _ -> ?ERR_FORBIDDEN(?err_ctx())
     end;
 
 handle_graph_request(Auth, _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, create, _, _) ->
     case is_authorized(Auth, undefined, GRI, create, {#{}, 1}) of
         false ->
-            ?ERR_FORBIDDEN(undefined);
+            ?ERR_FORBIDDEN(?err_ctx());
         {true, #gri{scope = ResScope}} ->
             Data = ?HANDLE_SERVICE_DATA(<<"pub1">>, <<"sha1">>, <<"pro1">>, <<"pri1">>),
             {ok, resource, {GRI#gri{scope = ResScope}, {?LIMIT_HANDLE_SERVICE_DATA(ResScope, Data), 1}}}
@@ -312,7 +307,7 @@ handle_graph_request(Auth, _, GRI = #gri{type = od_handle_service, id = ?HANDLE_
     end,
     case is_authorized(Auth, undefined, GRI, get, {#{}, Revision}) of
         false ->
-            ?ERR_FORBIDDEN(undefined);
+            ?ERR_FORBIDDEN(?err_ctx());
         {true, GRI} ->
             {ok, {?LIMIT_HANDLE_SERVICE_DATA(GRI#gri.scope, Data), Revision}};
         {true, ResultGRI = #gri{scope = Scope}} ->
@@ -336,7 +331,7 @@ handle_graph_request(Auth, _, #gri{type = od_share, id = ?SHARE, aspect = instan
         {?NOBODY, public} ->
             {ok, {Data, Revision}};
         {?NOBODY, _} ->
-            ?ERR_FORBIDDEN(undefined)
+            ?ERR_FORBIDDEN(?err_ctx())
     end;
 
 handle_graph_request(_, _, _, _, _, _) ->
