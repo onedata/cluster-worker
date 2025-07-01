@@ -318,11 +318,15 @@
             % This includes the time spent in the queue and during actual processing.
             % If this time is exceeded, the request is considered timed out.
             {graph_sync_request_processing_timeout_sec, 60},
+            % Toggles stale request pruning.
+            % NOTE: If disabled, no requests are pruned, potentially leading to memory bloat.
+            {graph_sync_stale_request_pruning_enabled, true},
             % The time after which a request received from the client — but not yet processed
             % or marked as timed out — is considered stale and removed.
             % In such cases, a timeout error is sent to the client.
             % This mechanism acts as a fallback and is only triggered if the regular timeout
             % detection fails, which should generally not occur.
+            % NOTE: Ignored if graph_sync_stale_request_pruning_enabled == false.
             % NOTE: This value MUST be greater than the processing timeout defined above.
             {graph_sync_stale_request_threshold_sec, 120},
 

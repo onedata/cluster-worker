@@ -78,6 +78,7 @@
 -define(MAX_CONCURRENT_REQUESTS, ?ENV(graph_sync_max_concurrent_requests, 4)).
 -define(THROTTLING_FACTOR, ?ENV(graph_sync_throttling_factor, 2)).
 -define(CALL_TIMEOUT, timer:seconds(?ENV(graph_sync_request_processing_timeout_sec, 60))).
+-define(STALE_REQUEST_PRUNING_ENABLED, ?ENV(graph_sync_stale_request_pruning_enabled, true)).
 -define(STALE_REQUEST_THRESHOLD, timer:seconds(?ENV(graph_sync_stale_request_threshold_sec, 120))).
 
 
@@ -201,7 +202,18 @@ process_outcome(
 
 -spec prune_stale_requests(tenant(), gs_session:data()) ->
     {[gs_protocol:resp_wrapper()], {throttling_recommendation(), tenant()}}.
-prune_stale_requests(#tenant{pending_requests = PendingRequests} = Tenant, SessionData) ->
+prune_stale_requests(Tenant, SessionData) ->
+    case ?STALE_REQUEST_PRUNING_ENABLED of
+        true ->
+            prune_stale_requests_internal(Tenant, SessionData);
+        false ->
+            {[], calculate_throttling_recommendation(Tenant, SessionData)}
+    end.
+
+%% @private
+-spec prune_stale_requests_internal(tenant(), gs_session:data()) ->
+    {[gs_protocol:resp_wrapper()], {throttling_recommendation(), tenant()}}.
+prune_stale_requests_internal(#tenant{pending_requests = PendingRequests} = Tenant, SessionData) ->
     StaleReqs = maps:filter(fun(_RequestId, #pending_request{job_posted_stopwatch = Stopwatch}) ->
         stopwatch:read_millis(Stopwatch) > ?STALE_REQUEST_THRESHOLD
     end, PendingRequests),
