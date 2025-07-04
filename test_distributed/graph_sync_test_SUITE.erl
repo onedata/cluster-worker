@@ -186,7 +186,7 @@ async_req_test_base(Config, ProtoVersion) ->
 
     ?assertEqual(
         {ok, #gs_resp_rpc{result = #{<<"someDummy">> => <<"arguments127">>}}},
-        await_response(async_request_long_operation(Client1))
+        await_result(async_request_long_operation(Client1))
     ).
 
 
@@ -620,8 +620,8 @@ parallel_requests_test_base(Config, ProtoVersion) ->
                 }
             }),
             receive
-                {response, RequestId, Response} ->
-                    ?assertMatch({ok, _}, Response)
+                {result, RequestId, Result} ->
+                    ?assertMatch({ok, _}, Result)
             after
                 timer:seconds(60) ->
                     error(gather_timeout)
@@ -1153,7 +1153,7 @@ timed_out_request_test_base(Config, ProtoVersion) ->
 
     Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
 
-    ?assertEqual(?ERROR_TIMEOUT, await_response(async_request_long_operation(Client1))).
+    ?assertEqual(?ERROR_TIMEOUT, await_result(async_request_long_operation(Client1))).
 
 
 crashed_request_test(Config) ->
@@ -1208,14 +1208,14 @@ stale_request_pruning_test_base(Config, ProtoVersion) ->
 
     % stale requests should be pruned and the ERROR_TIMEOUT error should be returned
     lists:foreach(fun(LongReqId) ->
-        ?assertEqual(?ERROR_TIMEOUT, await_response(LongReqId))
+        ?assertEqual(?ERROR_TIMEOUT, await_result(LongReqId))
     end, LongRequests),
 
     % regular (quick) graph requests should not be affected
     lists:foreach(fun(GraphReqId) ->
         ?assertMatch(
             {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
-            await_response(GraphReqId)
+            await_result(GraphReqId)
         )
     end, GraphRequests).
 
@@ -1597,10 +1597,10 @@ async_request_long_operation(Client) ->
     }).
 
 
-await_response(Id) ->
+await_result(Id) ->
     receive
-        {response, Id, Resp} ->
-            Resp
+        {result, Id, Result} ->
+            Result
     after
         timer:seconds(60) ->
             error(receive_timeout)

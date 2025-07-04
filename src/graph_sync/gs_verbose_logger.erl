@@ -436,7 +436,7 @@ format_time_elapsed(Stopwatch) ->
     Secs = TotalMicros div 1000000,
     Millis = (TotalMicros rem 1000000) div 1000,
     Micros = TotalMicros rem 1000,
-    str_utils:format_bin("~2.10.0b.~3.10.0b,~3.10.0b s", [Secs, Millis, Micros]).
+    str_utils:format_bin("~B.~3.10.0b,~3.10.0b s", [Secs, Millis, Micros]).
 
 
 %% @private
@@ -525,7 +525,7 @@ format_data_dump_if_enabled(Data) ->
 %% @private
 -spec format_json_prettily(json_utils:json_term()) -> binary().
 format_json_prettily(Json) ->
-    jiffy:encode(Json, [pretty]).
+    json_utils:encode(Json, [pretty]).
 
 
 %% @private
