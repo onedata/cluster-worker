@@ -35,7 +35,7 @@
 -export([single_error_log/2, single_error_log/3, single_error_log/4,
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
--export([are_db_and_workers_ready/0, get_cluster_status/0, get_cluster_status/1]).
+-export([get_cluster_status/0, get_cluster_status/1]).
 -export([is_cluster_healthy/0]).
 -export([get_cluster_ips/0]).
 -export([reschedule_service_healthcheck/4]).
@@ -402,9 +402,6 @@ handle_call(healthcheck, _From, State) ->
 handle_call({healthcheck, Component}, _From, State) ->
     {reply, perform_healthcheck(Component, State), State};
 
-handle_call(are_db_and_workers_ready, _From, State) ->
-    {reply, State#state.db_and_workers_ready, State};
-
 handle_call(disable_task_control, _From, State) ->
     {reply, ok, State#state{task_control = false}};
 
@@ -457,9 +454,6 @@ handle_cast(?INIT_STEP_MSG(Step), State) ->
             report_step_result(Step, failure)
     end,
     {noreply, State};
-
-handle_cast(report_db_and_workers_ready, State) ->
-    {noreply, State#state{db_and_workers_ready = true}};
 
 handle_cast(report_cluster_ready, State) ->
     {noreply, State#state{cluster_ready = true}};
@@ -777,6 +771,7 @@ cluster_init_step(?UPGRADE_CLUSTER) ->
             ok
     end;
 cluster_init_step(?PREPARE_FOR_LISTENERS_START) ->
+    safe_mode:report_node_initialized(),
     % this step internally requires calls to node manager, hence it is processed asynchronously
     spawn(fun() ->
         Result = try
@@ -791,8 +786,6 @@ cluster_init_step(?PREPARE_FOR_LISTENERS_START) ->
     end),
     async;
 cluster_init_step(?START_LISTENERS) ->
-    safe_mode:report_node_initialized(),
-    gen_server2:cast(?NODE_MANAGER_NAME, report_db_and_workers_ready),
     % this step internally requires calls to node manager, hence it is processed asynchronously
     spawn(fun() ->
         Result = try
@@ -1301,19 +1294,6 @@ get_ip_address() ->
         undefined -> {127, 0, 0, 1}; % should be overriden by onepanel during deployment
         _ -> {127, 0, 0, 1}
     end.
-
-
--spec are_db_and_workers_ready() -> boolean().
-are_db_and_workers_ready() ->
-    % cache only the positive result as after the first initialization
-    % this does not change anymore
-    {ok, Result} = node_cache:acquire({?MODULE, ?FUNCTION_NAME}, fun() ->
-        case gen_server2:call(?NODE_MANAGER_NAME, are_db_and_workers_ready) of
-            true -> {ok, true, infinity};
-            false -> {ok, false, 0}
-        end
-    end),
-    Result.
 
 
 %%--------------------------------------------------------------------
