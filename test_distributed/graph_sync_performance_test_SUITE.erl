@@ -467,10 +467,14 @@ end_per_suite(_Config) ->
 
 
 init_per_testcase(_, Config) ->
+    Nodes = ?config(cluster_worker_nodes, Config),
+    {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, init, [5]),
     Config.
 
 
-end_per_testcase(_, _Config) ->
+end_per_testcase(_, Config) ->
+    Nodes = ?config(cluster_worker_nodes, Config),
+    {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, stop, []),
     ok.
 
 
