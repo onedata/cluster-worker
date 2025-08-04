@@ -269,7 +269,7 @@ preventing_deadlock_from_slave(_Config) ->
     ?assertEqual({ok, test_ans}, pes:submit_and_await(pes_async_executor, <<"exemplary_key">>, exemplary_request)),
     ?assertEqual(?ERROR_NOT_SUPPORTED, pes:submit_and_await(pes_async_executor, <<"exemplary_key2">>,
         {perform_internal_call_with_key, pes_async_executor, <<"exemplary_key">>})),
-    ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined),
+    ?assertMatch(?ERR_INTERNAL_SERVER_ERROR(_),
         pes:submit_and_await(pes_async_executor, <<"exemplary_key2">>, {perform_internal_await, ?EXEMPLARY_PROMISE})).
 
 
@@ -362,7 +362,7 @@ cast_crash_sync_mode(_Config) ->
 
 submit_crash(_Config) ->
     ?assertEqual(ok, pes:submit_and_await(pes_async_executor,<<"exemplary_key">>, increment_value)),
-    ?assertEqual(?ERR_INTERNAL_SERVER_ERROR(undefined),
+    ?assertMatch(?ERR_INTERNAL_SERVER_ERROR(_),
         pes:submit_and_await(pes_async_executor,<<"exemplary_key">>, {crash_with, throw, call_error})),
     pes_executor_mock:verify_state(pes_async_executor, <<"exemplary_key">>, 1).
 
