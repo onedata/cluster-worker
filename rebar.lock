@@ -53,7 +53,7 @@
  {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.9">>},2},
  {<<"gui">>,
   {git,"ssh://git@git.onedata.org:7999/vfs/gui.git",
-       {ref,"db2af9d7c74f1a2ba96c90d973b845abf22daffa"}},
+       {ref,"c2affdc9eab1de8c13e157eab1ac4ef3829e82d9"}},
   0},
  {<<"hackney">>,
   {git,"https://github.com/benoitc/hackney",
