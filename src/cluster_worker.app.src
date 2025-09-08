@@ -298,6 +298,57 @@
             % How many parallel processes (maximum) can be spawned to process one batch of
             % GraphSync messages. The limit is per a single GraphSync connection.
             {graph_sync_batch_parallelism, 10},
+            % How many requests can be posted simultaneously by one GS connection.
+            {graph_sync_max_concurrent_requests, 4},
+            % Clients that post a lot of requests are throttled using a simple mechanism;
+            % if their queue exceeds the graph_sync_max_concurrent_requests, an artificial
+            % delay is applied for every request, before the request is placed in the
+            % global queue. The delay follows this formula:
+            %   throttling_factor * queue_size // graph_sync_max_concurrent_requests [ms].
+            %   (where // means floor division a.k.a. the 'div' operator)
+            % For example, in this case:
+            %   * throttling_factor: 2
+            %   * queue_size: 8
+            %   * graph_sync_max_concurrent_requests: 4
+            % the delay would be 4ms, applied to every request until the queue size changes.
+            {graph_sync_throttling_factor, 2},
+            % The maximum time allowed for handling a request received from the client.
+            % This includes the time spent in the queue and during actual processing.
+            % If this time is exceeded, the request is considered timed out.
+            {graph_sync_request_processing_timeout_sec, 60},
+            % Toggles stale request pruning.
+            % NOTE: If disabled, no requests are pruned, potentially leading to memory bloat.
+            {graph_sync_stale_request_pruning_enabled, true},
+            % The time after which a request received from the client — but not yet processed
+            % or marked as timed out — is considered stale and removed.
+            % In such cases, a timeout error is sent to the client.
+            % This mechanism acts as a fallback and is only triggered if the regular timeout
+            % detection fails, which should generally not occur.
+            % NOTE: Ignored if graph_sync_stale_request_pruning_enabled == false.
+            % NOTE: This value MUST be greater than the processing timeout defined above.
+            {graph_sync_stale_request_threshold_sec, 120},
+
+            % Toggles the verbose logging and sets the severity with which it's performed.
+            % Possible values:
+            %   * none    - no logs are produced
+            %   * debug   - all logs are produced on the debug level
+            %   * regular - logs are produced on standard severity levels
+            %               (info, notice, warning, error)
+            {graph_sync_verbose_logs_severity, none},
+            % Allows filtering only the logs concerning a specific identity. Not applied
+            % if set to undefined. Otherwise, should be a list of binaries, where a binary
+            % is equal to the representation of a specific subject produced by
+            % aai:serialize_subject/1, e.g. [<<"usr-123">>, <<"prv-xyz">>, <<"nobody">>]
+            {graph_sync_verbose_logs_identity_filter, undefined},
+            % Should client credentials (tokens, cookies) be printed in the verbose logs.
+            % WARNING: will print sensitive and private information!!!
+            {graph_sync_verbose_logs_print_credentials, false},
+            % Should errors be printed completely in the verbose logs (otherwise, only
+            % the error ID and module/line is printed).
+            {graph_sync_verbose_logs_print_errors, false},
+            % Should request/response/push data be printed in the verbose logs.
+            % WARNING: may cause A LOT of I/O and even crash the application.
+            {graph_sync_verbose_logs_print_data, false},
 
             %% ===================================================================
             %% EXOMETER

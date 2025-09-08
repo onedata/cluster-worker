@@ -19,6 +19,12 @@
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
+
+%% API
+-export([apply_before_listeners_start_procedures/0]).
+-export([start_listeners/0]).
+
+
 %% worker_plugin_behaviour callbacks
 -export([init/1, handle/1, cleanup/0]).
 
@@ -26,26 +32,38 @@
 
 
 %%%===================================================================
+%%% API
+%%%===================================================================
+
+
+-spec apply_before_listeners_start_procedures() -> ok.
+apply_before_listeners_start_procedures() ->
+    worker_proxy:call(?MODULE, {apply, fun apply_before_listeners_start_procedures_internal/0}).
+
+
+-spec start_listeners() -> ok.
+start_listeners() ->
+    worker_proxy:call(?MODULE, {apply, fun start_listeners_internal/0}).
+
+
+%%%===================================================================
 %%% worker_plugin_behaviour callbacks
 %%%===================================================================
+
 
 -spec init(Args :: term()) ->
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init([]) ->
-    apply_before_listeners_start_procedures(),
-
-    lists:foreach(fun(Module) ->
-        ok = erlang:apply(Module, start, [])
-    end, listeners()),
-
     {ok, #{}}.
 
 
--spec handle(ping | healthcheck | {init_models, list()}) -> pong | ok.
+-spec handle(ping | healthcheck | {init_models, list()} | {apply, fun(() -> term())}) -> pong | ok.
 handle(ping) ->
     pong;
 handle(healthcheck) ->
     ok;
+handle({apply, Fun}) ->
+    Fun();
 handle(Request) ->
     ?log_bad_request(Request).
 
@@ -73,20 +91,27 @@ cleanup() ->
 
     apply_after_listeners_stop_procedures().
 
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
+
 %% @private
--spec listeners() -> Listeners :: [atom()].
-listeners() ->
-    ?CALL_PLUGIN(listeners, []).
+-spec start_listeners_internal() -> ok.
+start_listeners_internal() ->
+    ?info("Starting listeners..."),
+    lists:foreach(fun(Module) ->
+        ok = erlang:apply(Module, start, [])
+    end, listeners()).
 
 
 %% @private
 %% @doc callback called by listener_manager_worker
--spec apply_before_listeners_start_procedures() -> ok | no_return().
-apply_before_listeners_start_procedures() ->
+%% NOTE: these procedures are run on all cluster nodes and are awaited
+%%       for before cluster setup proceeds
+-spec apply_before_listeners_start_procedures_internal() -> ok | no_return().
+apply_before_listeners_start_procedures_internal() ->
     ?info("Executing 'before_listeners_start' procedures..."),
     try
         ok = ?CALL_PLUGIN(before_listeners_start, []),
@@ -100,6 +125,8 @@ apply_before_listeners_start_procedures() ->
 
 %% @private
 %% @doc callback called by listener_manager_worker
+%% NOTE: these procedures are run on a cluster node that is being turned off
+%%       independently of other cluster nodes (no synchronization is performed).
 -spec apply_after_listeners_stop_procedures() -> ok.
 apply_after_listeners_stop_procedures() ->
     ?info("Executing 'after_listeners_stop' procedures..."),
@@ -110,3 +137,9 @@ apply_after_listeners_stop_procedures() ->
         ?error_exception(Class, Reason, Stacktrace)
         % do not crash here as we need to shut down regardless of the problems
     end.
+
+
+%% @private
+-spec listeners() -> Listeners :: [atom()].
+listeners() ->
+    ?CALL_PLUGIN(listeners, []).

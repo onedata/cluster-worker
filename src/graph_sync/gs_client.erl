@@ -103,6 +103,7 @@ start_link(URL, Auth, SupportedVersions, PushCallback, Opts) ->
                     Error
             after
                 ?GS_CLIENT_HANDSHAKE_TIMEOUT ->
+                    ?error("Timeout during GS handshake"),
                     Pid ! terminate,
                     ?ERROR_TIMEOUT
             end;
@@ -153,9 +154,7 @@ websocket_handle({text, Data}, _, #state{protocol_version = ProtoVer} = State) -
         handle_message(DecodedRecord, State)
     catch
         Type:Message:Stacktrace ->
-            ?error_stacktrace("Unexpected error in GS client - ~tp:~tp", [
-                Type, Message
-            ], Stacktrace),
+            ?error_exception(Type, Message, Stacktrace),
             {ok, State}
     end;
 
@@ -207,7 +206,7 @@ websocket_info({queue_request, #gs_req{id = Id} = Request, Pid}, _, State) ->
             {reply, {text, json_utils:encode(JSONMap)}, NewState};
         {error, _} = Error ->
             ?error("Discarding GS request as it cannot be encoded: ~tp", [Error]),
-            Pid ! {response, Id, Error},
+            Pid ! {result, Id, Error},
             {ok, State}
     end;
 
@@ -353,10 +352,11 @@ sync_request(ClientRef, #gs_req_unsub{} = UnsubReq) ->
 sync_request(ClientRef, Request) ->
     Id = async_request(ClientRef, Request),
     receive
-        {response, Id, Response} ->
-            Response
+        {result, Id, Result} ->
+            Result
     after
         ?GS_CLIENT_REQUEST_TIMEOUT ->
+            ?error("Timeout waiting for GS response, id: ~ts", [Id]),
             ?ERROR_TIMEOUT
     end.
 
@@ -365,7 +365,7 @@ sync_request(ClientRef, Request) ->
 %% @doc
 %% Sends an asynchronous request to GS server using given GS client instance.
 %% Returns the request Id. Caller process should expect an answer in form
-%% {response, Id, Response} (Response can be {error, _} or {ok, #gs_resp_*}).
+%% {result, Id, Result} (Result can be {error, _} or {ok, #gs_resp_*}).
 %% @end
 %%--------------------------------------------------------------------
 -spec async_request(client_ref(), gs_protocol:req_wrapper()) ->
@@ -415,12 +415,15 @@ handle_message(
     }};
 
 handle_message(#gs_resp{id = Id} = GSResp, State) ->
-    CallingProcess = maps:get(Id, State#state.promises),
-    case GSResp of
-        #gs_resp{success = false, error = Error} ->
-            CallingProcess ! {response, Id, Error};
-        #gs_resp{success = true, response = Resp} ->
-            CallingProcess ! {response, Id, {ok, Resp}}
+    case maps:find(Id, State#state.promises) of
+        error ->
+            ?warning("Received GS response for a stale request, id: ~ts", [Id]);
+        {ok, CallingProcess} ->
+            Result = case GSResp of
+                #gs_resp{success = false, error = Error} -> Error;
+                #gs_resp{success = true, response = Resp} -> {ok, Resp}
+            end,
+            CallingProcess ! {result, Id, Result}
     end,
     {ok, State#state{
         promises = maps:remove(Id, State#state.promises)

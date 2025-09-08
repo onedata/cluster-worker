@@ -19,6 +19,19 @@
 -include_lib("ctool/include/logging.hrl").
 
 
+%% API
+-export([supported_versions/0]).
+-export([greatest_common_version/2]).
+-export([encode/2]).
+-export([decode/2]).
+
+-export([generate_success_response/2, generate_success_response/3]).
+-export([generate_error_response/2, generate_error_response/3]).
+-export([generate_error_push_message/1]).
+
+-export([auth_hint_to_nullable_binary/1, nullable_binary_to_auth_hint/1]).
+
+
 -type req_wrapper() :: #gs_req{}.
 -type batch_req() :: #gs_req_batch{}.
 -type handshake_req() :: #gs_req_handshake{}.
@@ -190,16 +203,6 @@ graph_update_result() | graph_delete_result().
     json_map/0
 ]).
 
-%% API
--export([supported_versions/0]).
--export([greatest_common_version/2]).
--export([encode/2]).
--export([decode/2]).
--export([
-    generate_success_response/2,
-    generate_error_response/2,
-    generate_error_push_message/1
-]).
 
 %%%===================================================================
 %%% API
@@ -294,34 +297,31 @@ decode(ProtocolVersion, JSONMap) ->
     end.
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Creates a #gs_resp{} record with message id matching given request and a
-%% success response.
-%% @end
-%%--------------------------------------------------------------------
 -spec generate_success_response(req_wrapper(), resp()) -> resp_wrapper().
 generate_success_response(#gs_req{id = Id, subtype = Subtype}, Response) ->
+    generate_success_response(Id, Subtype, Response).
+
+-spec generate_success_response(message_id(), message_subtype(), resp()) -> resp_wrapper().
+generate_success_response(RequestId, RequestSubtype, Response) ->
     #gs_resp{
-        id = Id,
-        subtype = Subtype,
+        id = RequestId,
+        subtype = RequestSubtype,
         success = true,
         response = Response
     }.
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Creates a #gs_resp{} record with message id matching given request and an
-%% error response.
-%% @end
-%%--------------------------------------------------------------------
 -spec generate_error_response(req_wrapper(), errors:error()) ->
     resp_wrapper().
 generate_error_response(#gs_req{id = Id, subtype = Subtype}, Error) ->
+    generate_error_response(Id, Subtype, Error).
+
+-spec generate_error_response(message_id(), message_subtype(), errors:error()) ->
+    resp_wrapper().
+generate_error_response(RequestId, RequestSubtype, Error) ->
     #gs_resp{
-        id = Id,
-        subtype = Subtype,
+        id = RequestId,
+        subtype = RequestSubtype,
         success = false,
         error = Error
     }.
@@ -339,6 +339,40 @@ generate_error_push_message(Error) ->
         subtype = error, message = #gs_push_error{
             error = Error
         }}.
+
+
+-spec auth_hint_to_nullable_binary(undefined | auth_hint()) -> null | binary().
+auth_hint_to_nullable_binary(undefined) -> null;
+auth_hint_to_nullable_binary(?THROUGH_USER(UserId)) -> <<"throughUser:", UserId/binary>>;
+auth_hint_to_nullable_binary(?THROUGH_GROUP(GroupId)) -> <<"throughGroup:", GroupId/binary>>;
+auth_hint_to_nullable_binary(?THROUGH_SPACE(SpaceId)) -> <<"throughSpace:", SpaceId/binary>>;
+auth_hint_to_nullable_binary(?THROUGH_PROVIDER(ProvId)) -> <<"throughProvider:", ProvId/binary>>;
+auth_hint_to_nullable_binary(?THROUGH_HANDLE_SERVICE(HSId)) -> <<"throughHandleService:", HSId/binary>>;
+auth_hint_to_nullable_binary(?THROUGH_HANDLE(HandleId)) -> <<"throughHandle:", HandleId/binary>>;
+auth_hint_to_nullable_binary(?THROUGH_HARVESTER(HarvesterId)) -> <<"throughHarvester:", HarvesterId/binary>>;
+auth_hint_to_nullable_binary(?THROUGH_CLUSTER(ClusterId)) -> <<"throughCluster:", ClusterId/binary>>;
+auth_hint_to_nullable_binary(?THROUGH_ATM_INVENTORY(AtmInventoryId)) -> <<"throughAtmInventory:", AtmInventoryId/binary>>;
+auth_hint_to_nullable_binary(?AS_USER(UserId)) -> <<"asUser:", UserId/binary>>;
+auth_hint_to_nullable_binary(?AS_GROUP(GroupId)) -> <<"asGroup:", GroupId/binary>>;
+auth_hint_to_nullable_binary(?AS_SPACE(SpaceId)) -> <<"asSpace:", SpaceId/binary>>;
+auth_hint_to_nullable_binary(?AS_HARVESTER(HarvesterId)) -> <<"asHarvester:", HarvesterId/binary>>.
+
+
+-spec nullable_binary_to_auth_hint(null | binary()) -> undefined | auth_hint().
+nullable_binary_to_auth_hint(null) -> undefined;
+nullable_binary_to_auth_hint(<<"throughUser:", UserId/binary>>) -> ?THROUGH_USER(UserId);
+nullable_binary_to_auth_hint(<<"throughGroup:", GroupId/binary>>) -> ?THROUGH_GROUP(GroupId);
+nullable_binary_to_auth_hint(<<"throughSpace:", SpaceId/binary>>) -> ?THROUGH_SPACE(SpaceId);
+nullable_binary_to_auth_hint(<<"throughProvider:", ProvId/binary>>) -> ?THROUGH_PROVIDER(ProvId);
+nullable_binary_to_auth_hint(<<"throughHandleService:", HSId/binary>>) -> ?THROUGH_HANDLE_SERVICE(HSId);
+nullable_binary_to_auth_hint(<<"throughHandle:", HandleId/binary>>) -> ?THROUGH_HANDLE(HandleId);
+nullable_binary_to_auth_hint(<<"throughHarvester:", HarvesterId/binary>>) -> ?THROUGH_HARVESTER(HarvesterId);
+nullable_binary_to_auth_hint(<<"throughCluster:", ClusterId/binary>>) -> ?THROUGH_CLUSTER(ClusterId);
+nullable_binary_to_auth_hint(<<"throughAtmInventory:", AtmInventoryId/binary>>) -> ?THROUGH_ATM_INVENTORY(AtmInventoryId);
+nullable_binary_to_auth_hint(<<"asUser:", UserId/binary>>) -> ?AS_USER(UserId);
+nullable_binary_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId);
+nullable_binary_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId);
+nullable_binary_to_auth_hint(<<"asHarvester:", HarvesterId/binary>>) -> ?AS_HARVESTER(HarvesterId).
 
 
 %%%===================================================================
@@ -421,7 +455,7 @@ encode_request_graph(_, #gs_req_graph{} = Req) ->
         <<"operation">> => operation_to_string(Operation),
         <<"data">> => utils:undefined_to_null(Data),
         <<"subscribe">> => Subscribe,
-        <<"authHint">> => auth_hint_to_json(AuthHint)
+        <<"authHint">> => auth_hint_to_nullable_binary(AuthHint)
     }.
 
 
@@ -572,7 +606,7 @@ encode_push_nosub(_, #gs_push_nosub{} = Message) ->
     } = Message,
     #{
         <<"gri">> => gri:serialize(GRI),
-        <<"authHint">> => auth_hint_to_json(AuthHint),
+        <<"authHint">> => auth_hint_to_nullable_binary(AuthHint),
         <<"reason">> => nosub_reason_to_str(Reason)
     }.
 
@@ -652,7 +686,7 @@ decode_request_graph(_, PayloadJSON) ->
         operation = string_to_operation(maps:get(<<"operation">>, PayloadJSON)),
         data = utils:null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
         subscribe = maps:get(<<"subscribe">>, PayloadJSON, false),
-        auth_hint = json_to_auth_hint(maps:get(<<"authHint">>, PayloadJSON, null))
+        auth_hint = nullable_binary_to_auth_hint(maps:get(<<"authHint">>, PayloadJSON, null))
     }.
 
 
@@ -795,7 +829,7 @@ decode_push_nosub(_, PayloadJSON) ->
     AuthHint = maps:get(<<"authHint">>, PayloadJSON, null),
     #gs_push_nosub{
         gri = gri:deserialize(GRI),
-        auth_hint = json_to_auth_hint(AuthHint),
+        auth_hint = nullable_binary_to_auth_hint(AuthHint),
         reason = str_to_nosub_reason(Reason)
     }.
 
@@ -925,42 +959,6 @@ string_to_operation(<<"create">>) -> create;
 string_to_operation(<<"get">>) -> get;
 string_to_operation(<<"update">>) -> update;
 string_to_operation(<<"delete">>) -> delete.
-
-
-%% @private
--spec auth_hint_to_json(undefined | auth_hint()) -> null | json_map().
-auth_hint_to_json(undefined) -> null;
-auth_hint_to_json(?THROUGH_USER(UserId)) -> <<"throughUser:", UserId/binary>>;
-auth_hint_to_json(?THROUGH_GROUP(GroupId)) -> <<"throughGroup:", GroupId/binary>>;
-auth_hint_to_json(?THROUGH_SPACE(SpaceId)) -> <<"throughSpace:", SpaceId/binary>>;
-auth_hint_to_json(?THROUGH_PROVIDER(ProvId)) -> <<"throughProvider:", ProvId/binary>>;
-auth_hint_to_json(?THROUGH_HANDLE_SERVICE(HSId)) -> <<"throughHandleService:", HSId/binary>>;
-auth_hint_to_json(?THROUGH_HANDLE(HandleId)) -> <<"throughHandle:", HandleId/binary>>;
-auth_hint_to_json(?THROUGH_HARVESTER(HarvesterId)) -> <<"throughHarvester:", HarvesterId/binary>>;
-auth_hint_to_json(?THROUGH_CLUSTER(ClusterId)) -> <<"throughCluster:", ClusterId/binary>>;
-auth_hint_to_json(?THROUGH_ATM_INVENTORY(AtmInventoryId)) -> <<"throughAtmInventory:", AtmInventoryId/binary>>;
-auth_hint_to_json(?AS_USER(UserId)) -> <<"asUser:", UserId/binary>>;
-auth_hint_to_json(?AS_GROUP(GroupId)) -> <<"asGroup:", GroupId/binary>>;
-auth_hint_to_json(?AS_SPACE(SpaceId)) -> <<"asSpace:", SpaceId/binary>>;
-auth_hint_to_json(?AS_HARVESTER(HarvesterId)) -> <<"asHarvester:", HarvesterId/binary>>.
-
-
-%% @private
--spec json_to_auth_hint(null | json_map()) -> undefined | auth_hint().
-json_to_auth_hint(null) -> undefined;
-json_to_auth_hint(<<"throughUser:", UserId/binary>>) -> ?THROUGH_USER(UserId);
-json_to_auth_hint(<<"throughGroup:", GroupId/binary>>) -> ?THROUGH_GROUP(GroupId);
-json_to_auth_hint(<<"throughSpace:", SpaceId/binary>>) -> ?THROUGH_SPACE(SpaceId);
-json_to_auth_hint(<<"throughProvider:", ProvId/binary>>) -> ?THROUGH_PROVIDER(ProvId);
-json_to_auth_hint(<<"throughHandleService:", HSId/binary>>) -> ?THROUGH_HANDLE_SERVICE(HSId);
-json_to_auth_hint(<<"throughHandle:", HandleId/binary>>) -> ?THROUGH_HANDLE(HandleId);
-json_to_auth_hint(<<"throughHarvester:", HarvesterId/binary>>) -> ?THROUGH_HARVESTER(HarvesterId);
-json_to_auth_hint(<<"throughCluster:", ClusterId/binary>>) -> ?THROUGH_CLUSTER(ClusterId);
-json_to_auth_hint(<<"throughAtmInventory:", AtmInventoryId/binary>>) -> ?THROUGH_ATM_INVENTORY(AtmInventoryId);
-json_to_auth_hint(<<"asUser:", UserId/binary>>) -> ?AS_USER(UserId);
-json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId);
-json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId);
-json_to_auth_hint(<<"asHarvester:", HarvesterId/binary>>) -> ?AS_HARVESTER(HarvesterId).
 
 
 %% @private
