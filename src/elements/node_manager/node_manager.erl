@@ -771,7 +771,12 @@ cluster_init_step(?UPGRADE_CLUSTER) ->
             ok
     end;
 cluster_init_step(?PREPARE_FOR_LISTENERS_START) ->
-    safe_mode:report_node_initialized(),
+    case ?CALL_PLUGIN(cluster_init_safe_mode_disabling_method, []) of
+        implicit_before_listeners_start ->
+            safe_mode:report_node_initialized();
+        explicit ->
+            ok
+    end,
     % this step internally requires calls to node manager, hence it is processed asynchronously
     spawn(fun() ->
         Result = try
