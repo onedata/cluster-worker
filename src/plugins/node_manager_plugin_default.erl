@@ -221,10 +221,11 @@ listeners() -> [
 %%--------------------------------------------------------------------
 %% @doc
 %% Decides how safe mode that's applied on cluster init will be disabled:
-%%   * implicit_before_listeners_start - the node manager will disable
+%%   * implicit_before_listeners_start - the node manager will automatically disable
 %%     safe mode before starting the listeners.
 %%   * explicit - the implementing application MUST call safe_mode:report_node_initialized/0
-%%     explicitly when the cluster is ready and operational.
+%%     explicitly when the current node is ready and operational. WARNING: MUST be called
+%%     on each of the cluster nodes!
 %% @end
 %%--------------------------------------------------------------------
 -spec cluster_init_safe_mode_disabling_method() -> implicit_before_listeners_start | explicit.
