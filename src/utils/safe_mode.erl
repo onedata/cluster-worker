@@ -16,7 +16,7 @@
 %%% for a single node. Since cluster-worker-based apps work in distributed manner,
 %%% it does not make sense to have different safe mode settings on different nodes.
 %%%
-%%% There are 3 possible states of safe mode:
+%%% There are 4 possible states of safe mode:
 %%%     * AWAITING_CLUSTER_INIT_STATE - implicit state (safe mode is implicitly enabled),
 %%%         before the cluster is ready and fully operational
 %%%         (it is possible to whitelist PIDs that are excluded from safe mode limitations).
