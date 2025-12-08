@@ -8,7 +8,7 @@
 %%% @doc
 %%% This module provides functions to manipulate safe mode in the cluster.
 %%% Enabled safe mode denotes that the cluster is in init or maintenance
-%%% state and should not handle requests. NOTE that it's merely a indicator
+%%% state and should not handle requests. NOTE that it's merely an indicator
 %%% and proper mechanisms MUST be implemented in all relevant places to
 %%% read the safe mode state and react properly.
 %%%
@@ -180,10 +180,7 @@ set_state_on_current_node(State) ->
 %% @private
 -spec transition_allowed(state(), state()) -> boolean().
 transition_allowed(?AWAITING_CLUSTER_INIT_STATE, ?NODE_INITIALIZED_STATE) -> true;
-transition_allowed(?AWAITING_CLUSTER_INIT_STATE, _) -> false;
 transition_allowed(?NODE_INITIALIZED_STATE, ?DISABLED_STATE) -> true;
-transition_allowed(?NODE_INITIALIZED_STATE, _) -> false;
 transition_allowed(?DISABLED_STATE, ?MANUALLY_ENABLED_STATE) -> true;
-transition_allowed(?DISABLED_STATE, _) -> false;
 transition_allowed(?MANUALLY_ENABLED_STATE, ?DISABLED_STATE) -> true;
-transition_allowed(?MANUALLY_ENABLED_STATE, _) -> false.
+transition_allowed(_, _) -> false.
