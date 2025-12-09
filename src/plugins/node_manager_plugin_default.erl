@@ -29,6 +29,7 @@
 -export([upgrade_cluster/1]).
 -export([before_listeners_start/0, after_listeners_stop/0]).
 -export([listeners/0]).
+-export([cluster_init_safe_mode_disabling_method/0]).
 -export([handle_call/3, handle_cast/2, handle_info/2, code_change/3]).
 -export([clear_memory/1]).
 -export([modules_with_exometer/0, exometer_reporters/0]).
@@ -215,6 +216,22 @@ after_listeners_stop() ->
 listeners() -> [
     nagios_listener
 ].
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Decides how safe mode that's applied on cluster init will be disabled:
+%%   * implicit_before_listeners_start - the node manager will automatically disable
+%%     safe mode before starting the listeners.
+%%   * explicit - the implementing application MUST call safe_mode:report_node_initialized/0
+%%     explicitly when the current node is ready and operational. WARNING: MUST be called
+%%     on each of the cluster nodes!
+%% @end
+%%--------------------------------------------------------------------
+-spec cluster_init_safe_mode_disabling_method() -> implicit_before_listeners_start | explicit.
+cluster_init_safe_mode_disabling_method() ->
+    implicit_before_listeners_start.
+
 
 %%--------------------------------------------------------------------
 %% @private
