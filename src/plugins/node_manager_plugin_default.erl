@@ -53,7 +53,7 @@
 -spec cluster_generations() -> 
     [{node_manager:cluster_generation(), onedata:release_version()}].
 cluster_generations() ->
-    [{1, ?LINE_19_02}].
+    [{1, <<"19.02.1">>}].
 
 %%--------------------------------------------------------------------
 %% @doc
