@@ -330,10 +330,8 @@ conn_ref(#state{session_data = #gs_session{conn_ref = ConnRef}}) ->
 ) ->
     {cowboy_websocket:commands(), state()}.
 reply_and_update_wp_tenant(State, Commands, NewWPTenant) ->
-    CommandsWithActive = case gs_worker_pool:current_throttling_recommendation(NewWPTenant) of
-        start_throttling -> [{active, false} | Commands];
-        resume_processing -> [{active, true} | Commands]
+    CommandsWithActive = case gs_worker_pool:current_backpressure_recommendation(NewWPTenant) of
+        back_off -> [{active, false} | Commands];
+        accept_requests -> [{active, true} | Commands]
     end,
     {CommandsWithActive, State#state{worker_pool_tenant = NewWPTenant}}.
-
-

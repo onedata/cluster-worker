@@ -307,7 +307,7 @@
             % (rounded up to an integer to the number of pool slots):
             %   0.0 -> exactly 1 request processed on pool at the same time
             %   1.0 -> WARN: the connection can saturate the pool with its requests, and possibly block it.
-            % Connections that post more requests than allowed are throttled - the requests
+            % Connections that post more requests than allowed are backpressurized - the requests
             % await completion of the previous ones using a simple mechanism of repeated
             % resubmission attempts in intervals until the pool can take them.
             {graph_sync_max_pool_usage_per_connection, 0.05},

@@ -17,10 +17,10 @@
 %%% are treated as different tenants). All tenants share the common
 %%% processing resources of the pool.
 %%%
-%%% This module also handles throttling of connections that post too many
+%%% This module also handles backpressure of connections that post too many
 %%% concurrent requests, in two ways:
 %%%
-%%%   * Gives throttling_recommendation() to the WebSocket handler
+%%%   * Gives backpressure_recommendation() to the WebSocket handler
 %%%     so it may go into passive mode if the client is sending
 %%%     too many requests. This mechanism works in best-effort
 %%%     manner as some messages may be already in the buffer, so
@@ -47,7 +47,7 @@
 %% Tenant interfacing API
 -export([max_concurrent_requests/0]).
 -export([new_tenant/0]).
--export([current_throttling_recommendation/1]).
+-export([current_backpressure_recommendation/1]).
 -export([queue_job/2]).
 -export([dispatch_jobs/2]).
 -export([process_outcome/3]).
@@ -58,7 +58,7 @@
 
 
 % see the module doc
--type throttling_recommendation() :: start_throttling | resume_processing.
+-type backpressure_recommendation() :: back_off | accept_requests.
 
 % represents a request that was posted to the worker pool
 -record(posted_job, {
@@ -68,10 +68,10 @@
 
 % see the module doc
 -record(tenant, {
-    current_throttling_recommendation = resume_processing :: throttling_recommendation(),
+    current_backpressure_recommendation = accept_requests :: backpressure_recommendation(),
     posted_jobs = #{} :: #{gs_protocol:message_id() => #posted_job{}},
     queued_jobs = queue:new() :: queue:queue(gs_protocol:req_wrapper()),
-    next_continued_throttling_log_at = 0 :: time:millis()
+    next_continued_backpressure_log_at = 0 :: time:millis()
 }).
 -type tenant() :: #tenant{}.
 -export_type([tenant/0]).
@@ -88,7 +88,7 @@
 -define(MAX_CONCURRENT_REQUESTS, ?ENV(graph_sync_max_concurrent_requests, 1)).
 
 -define(NOW_MILLIS(), global_clock:timestamp_millis()).
--define(CONTINUED_THROTTLING_LOG_INTENSITY_MILLIS, ?ENV(graph_sync_continued_throttling_log_intensity_millis, 10000)).
+-define(CONTINUED_BACKPRESSURE_LOG_INTENSITY_MILLIS, ?ENV(graph_sync_continued_backpressure_log_intensity_millis, 10000)).
 
 -define(POOL_NAME, ?MODULE).
 
@@ -125,8 +125,8 @@ new_tenant() ->
     #tenant{}.
 
 
--spec current_throttling_recommendation(tenant()) -> throttling_recommendation().
-current_throttling_recommendation(#tenant{current_throttling_recommendation = CTR}) ->
+-spec current_backpressure_recommendation(tenant()) -> backpressure_recommendation().
+current_backpressure_recommendation(#tenant{current_backpressure_recommendation = CTR}) ->
     CTR.
 
 
@@ -140,17 +140,17 @@ queue_job(Tenant = #tenant{queued_jobs = QueuedJobs}, RequestWrapper) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Attempts to post all queued jobs. In case the maximum pool usage of a
-%% single tenant is exceeded, it throttles the tenant: resigns and sends
+%% single tenant is exceeded, it backpressurizes the tenant: resigns and sends
 %% a delayed notification to the called pid to attempt resubmission later.
 %% @end
 %%--------------------------------------------------------------------
 -spec dispatch_jobs(tenant(), gs_session:data()) -> tenant().
 dispatch_jobs(Tenant0, SessionData) ->
-    Tenant1 = calculate_throttling_recommendation(Tenant0, SessionData),
+    Tenant1 = calculate_backpressure_recommendation(Tenant0, SessionData),
     case Tenant1 of
-        #tenant{current_throttling_recommendation = start_throttling} ->
+        #tenant{current_backpressure_recommendation = back_off} ->
             Tenant1;
-        #tenant{current_throttling_recommendation = resume_processing, queued_jobs = QueuedJobs} ->
+        #tenant{current_backpressure_recommendation = accept_requests, queued_jobs = QueuedJobs} ->
             case queue:out(QueuedJobs) of
                 {empty, QueuedJobs} ->
                     Tenant1;
@@ -311,12 +311,12 @@ post_job_to_pool(#tenant{posted_jobs = PostedJobs} = Tenant, SessionData, #gs_re
 
 
 %% @private
--spec calculate_throttling_recommendation(tenant(), gs_session:data()) ->
+-spec calculate_backpressure_recommendation(tenant(), gs_session:data()) ->
     tenant().
-calculate_throttling_recommendation(#tenant{
+calculate_backpressure_recommendation(#tenant{
     posted_jobs = PostedJobs,
     queued_jobs = QueuedJobs,
-    current_throttling_recommendation = CTR
+    current_backpressure_recommendation = CTR
 } = Tenant, SessionData) ->
     NowMillis = ?NOW_MILLIS(),
     PostedJobCount = maps:size(PostedJobs),
@@ -324,23 +324,23 @@ calculate_throttling_recommendation(#tenant{
     MaxRequests = ?MAX_CONCURRENT_REQUESTS,
 
     if
-        CTR == resume_processing, PostedJobCount >= MaxRequests, QueueSize > 0 ->
-            gs_verbose_logger:report_throttling_triggered(SessionData, PostedJobCount, QueueSize),
+        CTR == accept_requests, PostedJobCount >= MaxRequests, QueueSize > 0 ->
+            gs_verbose_logger:report_backpressure_triggered(SessionData, PostedJobCount, QueueSize),
             Tenant#tenant{
-                current_throttling_recommendation = start_throttling,
-                next_continued_throttling_log_at = NowMillis + ?CONTINUED_THROTTLING_LOG_INTENSITY_MILLIS
+                current_backpressure_recommendation = back_off,
+                next_continued_backpressure_log_at = NowMillis + ?CONTINUED_BACKPRESSURE_LOG_INTENSITY_MILLIS
             };
 
-        CTR == start_throttling, PostedJobCount =< MaxRequests div 2 ->
-            gs_verbose_logger:report_throttling_stopped(SessionData, PostedJobCount, QueueSize),
+        CTR == back_off, PostedJobCount =< MaxRequests div 2 ->
+            gs_verbose_logger:report_backpressure_stopped(SessionData, PostedJobCount, QueueSize),
             Tenant#tenant{
-                current_throttling_recommendation = resume_processing
+                current_backpressure_recommendation = accept_requests
             };
 
-        CTR == start_throttling, NowMillis > Tenant#tenant.next_continued_throttling_log_at ->
-            gs_verbose_logger:report_throttling_continues(SessionData, PostedJobCount, QueueSize),
+        CTR == back_off, NowMillis > Tenant#tenant.next_continued_backpressure_log_at ->
+            gs_verbose_logger:report_backpressure_continues(SessionData, PostedJobCount, QueueSize),
             Tenant#tenant{
-                next_continued_throttling_log_at = NowMillis + ?CONTINUED_THROTTLING_LOG_INTENSITY_MILLIS
+                next_continued_backpressure_log_at = NowMillis + ?CONTINUED_BACKPRESSURE_LOG_INTENSITY_MILLIS
             };
 
         true ->

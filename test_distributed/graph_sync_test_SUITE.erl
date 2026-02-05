@@ -50,7 +50,7 @@
     timed_out_request_test/1,
     crashed_request_test/1,
     stale_request_pruning_test/1,
-    throttling_test/1,
+    backpressure_test/1,
 
     session_persistence_test/1,
     subscriptions_persistence_test/1,
@@ -80,7 +80,7 @@
     timed_out_request_test,
     crashed_request_test,
     stale_request_pruning_test,
-    throttling_test,
+    backpressure_test,
 
     session_persistence_test,
     subscriptions_persistence_test,
@@ -1217,10 +1217,10 @@ stale_request_pruning_test_base(Config, ProtoVersion) ->
     end, GraphRequests).
 
 
-throttling_test(Config) ->
-    [throttling_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+backpressure_test(Config) ->
+    [backpressure_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
 
-throttling_test_base(Config, ProtoVersion) ->
+backpressure_test_base(Config, ProtoVersion) ->
     Nodes = ?config(cluster_worker_nodes, Config),
 
     WorkerPoolSize = 6,
@@ -1229,22 +1229,22 @@ throttling_test_base(Config, ProtoVersion) ->
     {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, stop, []),
     {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, init, [WorkerPoolSize]),
 
-    ThrottledClient = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+    BackpressurizedClient = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
     WellBehavedClient = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
     User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
         <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_1, aspect = instance}),
         <<"revision">> => 1
     },
 
-    % these take ~20 seconds; send (2 * pool size) requests to test that they are properly throttled
+    % these take ~20 seconds; send (2 * pool size) requests to test that they are properly back-pressured
     LongRequests = lists_utils:generate(fun(_) ->
-        async_request_long_operation(ThrottledClient)
+        async_request_long_operation(BackpressurizedClient)
     end, WorkerPoolSize * 2),
 
     % wait to make sure all above requests have been sent
     timer:sleep(5000),
 
-    % below requests are quick and should make it to the pool (the throttled client must not
+    % below requests are quick and should make it to the pool (the back-pressured client must not
     % be able to take all the processing slots, as we set graph_sync_max_pool_usage_per_connection
     % to the 80% of the pool)
     GraphRequests = lists_utils:generate(fun(_) ->
@@ -1262,7 +1262,7 @@ throttling_test_base(Config, ProtoVersion) ->
         )
     end, GraphRequests),
     % make sure the requests were processed before the long lasting ones have ended,
-    % which proves that the throttling and queueing works
+    % which proves that the backpressure and queueing works
     ?assert(stopwatch:read_seconds(Stopwatch) < 8),
 
     % at some point, the long lasting ones should finish too
