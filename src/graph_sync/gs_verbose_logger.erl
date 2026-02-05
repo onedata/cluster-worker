@@ -25,7 +25,7 @@
 %% API
 -export([report_handshake_success/4, report_handshake_failure/4]).
 -export([report_heartbeat/1, report_connection_terminated/1]).
--export([report_throttling_triggered/2, report_throttling_stopped/2, report_request_throttled/3]).
+-export([report_backpressure_triggered/3, report_backpressure_continues/3, report_backpressure_stopped/3]).
 -export([report_cannot_decode_request/5]).
 -export([report_message_pushed/2]).
 
@@ -65,7 +65,7 @@
 report_handshake_success(ClientAuth, PeerIp, Cookies, SessionData) ->
     Identity = SessionData#gs_session.auth#auth.subject,
     dispatch_log(notice, SessionData, fun() ->
-        str_utils:format("HANDSHAKE SUCCESS     [~ts] [~ts] [~ts] [~ts] [~ts] [~ts] [~ts]", [
+        str_utils:format("HANDSHAKE SUCCESS      [~ts] [~ts] [~ts] [~ts] [~ts] [~ts] [~ts]", [
             format_ip(PeerIp),
             format_identity(Identity),
             format_session_id(SessionData#gs_session.id),
@@ -86,7 +86,7 @@ report_handshake_success(ClientAuth, PeerIp, Cookies, SessionData) ->
     ok.
 report_handshake_failure(ClientAuth, PeerIp, Cookies, HandshakeError) ->
     dispatch_log(error, #subject{type = nobody}, fun() ->
-        str_utils:format("HANDSHAKE FAILURE     [~ts] [~ts] [~ts] SENDING REPLY: ~ts~ts", [
+        str_utils:format("HANDSHAKE FAILURE      [~ts] [~ts] [~ts] SENDING REPLY: ~ts~ts", [
             format_ip(PeerIp),
             format_client_auth(ClientAuth),
             format_cookies(Cookies),
@@ -99,7 +99,7 @@ report_handshake_failure(ClientAuth, PeerIp, Cookies, HandshakeError) ->
 -spec report_heartbeat(gs_session:data()) -> ok.
 report_heartbeat(SessionData) ->
     dispatch_log(info, SessionData, fun() ->
-        str_utils:format("HEARTBEAT RECEIVED    [~ts] [~ts] [~ts] [~ts]", [
+        str_utils:format("HEARTBEAT RECEIVED     [~ts] [~ts] [~ts] [~ts]", [
             format_ip(SessionData#gs_session.auth#auth.peer_ip),
             format_identity(SessionData),
             format_session_id(SessionData#gs_session.id),
@@ -108,42 +108,44 @@ report_heartbeat(SessionData) ->
     end).
 
 
--spec report_throttling_triggered(gs_session:data(), non_neg_integer()) -> ok.
-report_throttling_triggered(SessionData, QueueSize) ->
+-spec report_backpressure_triggered(gs_session:data(), non_neg_integer(), non_neg_integer()) -> ok.
+report_backpressure_triggered(SessionData, PostedJobCount, QueueSize) ->
     dispatch_log(warning, SessionData, fun() ->
-        str_utils:format("THROTTLING TRIGGERED  [~ts] [~ts] [~ts] [~ts] (queue size: ~B)", [
+        str_utils:format("BACKPRESSURE TRIGGERED [~ts] [~ts] [~ts] [~ts] (posted: ~B, queued: ~B)", [
             format_ip(SessionData#gs_session.auth#auth.peer_ip),
             format_identity(SessionData),
             format_session_id(SessionData#gs_session.id),
             format_conn_ref(SessionData#gs_session.conn_ref),
+            PostedJobCount,
             QueueSize
         ])
     end).
 
 
--spec report_throttling_stopped(gs_session:data(), non_neg_integer()) -> ok.
-report_throttling_stopped(SessionData, QueueSize) ->
+-spec report_backpressure_continues(gs_session:data(), non_neg_integer(), non_neg_integer()) -> ok.
+report_backpressure_continues(SessionData, PostedJobCount, QueueSize) ->
+    dispatch_log(warning, SessionData, fun() ->
+        str_utils:format("BACKPRESSURE CONTINUES [~ts] [~ts] [~ts] [~ts] (posted: ~B, queued: ~B)", [
+            format_ip(SessionData#gs_session.auth#auth.peer_ip),
+            format_identity(SessionData),
+            format_session_id(SessionData#gs_session.id),
+            format_conn_ref(SessionData#gs_session.conn_ref),
+            PostedJobCount,
+            QueueSize
+        ])
+    end).
+
+
+-spec report_backpressure_stopped(gs_session:data(), non_neg_integer(), non_neg_integer()) -> ok.
+report_backpressure_stopped(SessionData, PostedJobCount, QueueSize) ->
     dispatch_log(info, SessionData, fun() ->
-        str_utils:format("THROTTLING STOPPED    [~ts] [~ts] [~ts] [~ts] (queue size: ~B)", [
+        str_utils:format("BACKPRESSURE STOPPED   [~ts] [~ts] [~ts] [~ts] (posted: ~B, queued: ~B)", [
             format_ip(SessionData#gs_session.auth#auth.peer_ip),
             format_identity(SessionData),
             format_session_id(SessionData#gs_session.id),
             format_conn_ref(SessionData#gs_session.conn_ref),
+            PostedJobCount,
             QueueSize
-        ])
-    end).
-
-
--spec report_request_throttled(gs_session:data(), non_neg_integer(), non_neg_integer()) -> ok.
-report_request_throttled(SessionData, QueueSize, Delay) ->
-    dispatch_log(warning, SessionData, fun() ->
-        str_utils:format("REQUEST THROTTLED     [~ts] [~ts] [~ts] [~ts] (queue size: ~B): ~B ms", [
-            format_ip(SessionData#gs_session.auth#auth.peer_ip),
-            format_identity(SessionData),
-            format_session_id(SessionData#gs_session.id),
-            format_conn_ref(SessionData#gs_session.conn_ref),
-            QueueSize,
-            Delay
         ])
     end).
 
@@ -151,7 +153,7 @@ report_request_throttled(SessionData, QueueSize, Delay) ->
 -spec report_connection_terminated(gs_session:data()) -> ok.
 report_connection_terminated(SessionData) ->
     dispatch_log(warning, SessionData, fun() ->
-        str_utils:format("CONNECTION TERMINATED [~ts] [~ts] [~ts] [~ts]", [
+        str_utils:format("CONNECTION TERMINATED  [~ts] [~ts] [~ts] [~ts]", [
             format_ip(SessionData#gs_session.auth#auth.peer_ip),
             format_identity(SessionData),
             format_session_id(SessionData#gs_session.id),
@@ -186,7 +188,7 @@ report_cannot_decode_request(SessionData, Data, Class, Reason, Stacktrace) ->
 -spec report_message_pushed(gs_session:data(), gs_protocol:push_wrapper()) -> ok.
 report_message_pushed(SessionData, PushWrapper) ->
     dispatch_log(notice, SessionData, fun() ->
-        str_utils:format("SENDING PUSH MESSAGE  [~ts] [~ts] [~ts] ~ts", [
+        str_utils:format("SENDING PUSH MESSAGE   [~ts] [~ts] [~ts] ~ts", [
             format_ip(SessionData#gs_session.auth#auth.peer_ip),
             format_identity(SessionData),
             format_session_id(SessionData#gs_session.id),
