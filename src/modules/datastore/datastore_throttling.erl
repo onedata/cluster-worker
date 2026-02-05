@@ -440,8 +440,6 @@ get_config_value(Name, Config, Defaults) ->
 %%--------------------------------------------------------------------
 -spec log_monitoring_stats(Format :: io:format(), Args :: [term()]) -> ok.
 log_monitoring_stats(Format, Args) ->
-    LogFile = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_log_file,
-        "/tmp/throttling_monitoring.log"),
-    MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        throttling_log_file_max_size, 524288000), % 500 MB
+    LogFile = cluster_worker:get_env(throttling_log_file, "/tmp/throttling_monitoring.log"),
+    MaxSize = cluster_worker:get_env(throttling_log_file_max_size, 10485760),  % 10 MB
     onedata_logger:log_with_rotation(LogFile, Format, Args, MaxSize).

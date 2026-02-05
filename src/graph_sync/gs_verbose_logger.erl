@@ -25,7 +25,7 @@
 %% API
 -export([report_handshake_success/4, report_handshake_failure/4]).
 -export([report_heartbeat/1, report_connection_terminated/1]).
--export([report_throttling_triggered/2, report_throttling_stopped/2, report_request_throttled/3]).
+-export([report_throttling_triggered/3, report_throttling_continues/3, report_throttling_stopped/3]).
 -export([report_cannot_decode_request/5]).
 -export([report_message_pushed/2]).
 
@@ -108,42 +108,44 @@ report_heartbeat(SessionData) ->
     end).
 
 
--spec report_throttling_triggered(gs_session:data(), non_neg_integer()) -> ok.
-report_throttling_triggered(SessionData, QueueSize) ->
+-spec report_throttling_triggered(gs_session:data(), non_neg_integer(), non_neg_integer()) -> ok.
+report_throttling_triggered(SessionData, PostedJobCount, QueueSize) ->
     dispatch_log(warning, SessionData, fun() ->
-        str_utils:format("THROTTLING TRIGGERED  [~ts] [~ts] [~ts] [~ts] (queue size: ~B)", [
+        str_utils:format("THROTTLING TRIGGERED  [~ts] [~ts] [~ts] [~ts] (posted: ~B, queued: ~B)", [
             format_ip(SessionData#gs_session.auth#auth.peer_ip),
             format_identity(SessionData),
             format_session_id(SessionData#gs_session.id),
             format_conn_ref(SessionData#gs_session.conn_ref),
+            PostedJobCount,
             QueueSize
         ])
     end).
 
 
--spec report_throttling_stopped(gs_session:data(), non_neg_integer()) -> ok.
-report_throttling_stopped(SessionData, QueueSize) ->
+-spec report_throttling_continues(gs_session:data(), non_neg_integer(), non_neg_integer()) -> ok.
+report_throttling_continues(SessionData, PostedJobCount, QueueSize) ->
+    dispatch_log(warning, SessionData, fun() ->
+        str_utils:format("THROTTLING CONTINUES  [~ts] [~ts] [~ts] [~ts] (posted: ~B, queued: ~B)", [
+            format_ip(SessionData#gs_session.auth#auth.peer_ip),
+            format_identity(SessionData),
+            format_session_id(SessionData#gs_session.id),
+            format_conn_ref(SessionData#gs_session.conn_ref),
+            PostedJobCount,
+            QueueSize
+        ])
+    end).
+
+
+-spec report_throttling_stopped(gs_session:data(), non_neg_integer(), non_neg_integer()) -> ok.
+report_throttling_stopped(SessionData, PostedJobCount, QueueSize) ->
     dispatch_log(info, SessionData, fun() ->
-        str_utils:format("THROTTLING STOPPED    [~ts] [~ts] [~ts] [~ts] (queue size: ~B)", [
+        str_utils:format("THROTTLING STOPPED    [~ts] [~ts] [~ts] [~ts] (posted: ~B, queued: ~B)", [
             format_ip(SessionData#gs_session.auth#auth.peer_ip),
             format_identity(SessionData),
             format_session_id(SessionData#gs_session.id),
             format_conn_ref(SessionData#gs_session.conn_ref),
+            PostedJobCount,
             QueueSize
-        ])
-    end).
-
-
--spec report_request_throttled(gs_session:data(), non_neg_integer(), non_neg_integer()) -> ok.
-report_request_throttled(SessionData, QueueSize, Delay) ->
-    dispatch_log(warning, SessionData, fun() ->
-        str_utils:format("REQUEST THROTTLED     [~ts] [~ts] [~ts] [~ts] (queue size: ~B): ~B ms", [
-            format_ip(SessionData#gs_session.auth#auth.peer_ip),
-            format_identity(SessionData),
-            format_session_id(SessionData#gs_session.id),
-            format_conn_ref(SessionData#gs_session.conn_ref),
-            QueueSize,
-            Delay
         ])
     end).
 

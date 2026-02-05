@@ -50,6 +50,7 @@
     timed_out_request_test/1,
     crashed_request_test/1,
     stale_request_pruning_test/1,
+    throttling_test/1,
 
     session_persistence_test/1,
     subscriptions_persistence_test/1,
@@ -79,6 +80,7 @@
     timed_out_request_test,
     crashed_request_test,
     stale_request_pruning_test,
+    throttling_test,
 
     session_persistence_test,
     subscriptions_persistence_test,
@@ -631,9 +633,9 @@ parallel_requests_test_base(Config, ProtoVersion) ->
     end, Clients),
 
     MeasurementDump = str_utils:join_binary([<<"">>] ++ lists:map(fun({Ordinal, Millis}) ->
-        str_utils:format_bin("#~2..0b -> ~B millis", [Ordinal, Millis])
+        str_utils:format_bin("#~2..0b -> ~B ms", [Ordinal, Millis])
     end, lists:enumerate(MeasurementsMillis)), <<"\n">>),
-    ct:pal("Parallel requests: ~B clients, ~B requests each, (avg: ~tp millis):~ts", [
+    ct:pal("Parallel requests: ~B clients, ~B requests each, total times: (avg: ~tp ms)~ts", [
         ClientCount,
         RequestCountPerClient,
         lists:sum(MeasurementsMillis) div length(MeasurementsMillis),
@@ -1184,11 +1186,6 @@ stale_request_pruning_test_base(Config, ProtoVersion) ->
 
     NumberOfRequestsOfEachType = 10,
 
-    % this test need a larger worker pool, otherwise it becomes saturated with the
-    % long lasting requests and all the requests are treated as stale
-    {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, stop, []),
-    {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, init, [2 * NumberOfRequestsOfEachType]),
-
     Client = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
     User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
         <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_1, aspect = instance}),
@@ -1218,6 +1215,60 @@ stale_request_pruning_test_base(Config, ProtoVersion) ->
             await_result(GraphReqId)
         )
     end, GraphRequests).
+
+
+throttling_test(Config) ->
+    [throttling_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+throttling_test_base(Config, ProtoVersion) ->
+    Nodes = ?config(cluster_worker_nodes, Config),
+
+    WorkerPoolSize = 6,
+    test_utils:set_env(Nodes, cluster_worker, graph_sync_max_pool_usage_per_connection, 0.8),
+
+    {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, stop, []),
+    {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, init, [WorkerPoolSize]),
+
+    ThrottledClient = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+    WellBehavedClient = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+    User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"revision">> => 1
+    },
+
+    % these take ~20 seconds; send (2 * pool size) requests to test that they are properly throttled
+    LongRequests = lists_utils:generate(fun(_) ->
+        async_request_long_operation(ThrottledClient)
+    end, WorkerPoolSize * 2),
+
+    % wait to make sure all above requests have been sent
+    timer:sleep(5000),
+
+    % below requests are quick and should make it to the pool (the throttled client must not
+    % be able to take all the processing slots, as we set graph_sync_max_pool_usage_per_connection
+    % to the 80% of the pool)
+    GraphRequests = lists_utils:generate(fun(_) ->
+        gs_client:async_request(WellBehavedClient, #gs_req{subtype = graph, request = #gs_req_graph{
+            operation = get,
+            gri = #gri{type = od_user, id = ?USER_1, aspect = instance}
+        }})
+    end, WorkerPoolSize * 2),
+
+    Stopwatch = stopwatch:start(),
+    lists:foreach(fun(GraphReqId) ->
+        ?assertMatch(
+            {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
+            await_result(GraphReqId)
+        )
+    end, GraphRequests),
+    % make sure the requests were processed before the long lasting ones have ended,
+    % which proves that the throttling and queueing works
+    ?assert(stopwatch:read_seconds(Stopwatch) < 8),
+
+    % at some point, the long lasting ones should finish too
+    lists:foreach(fun(LongReqId) ->
+        ?assertEqual({ok, #gs_resp_rpc{result = #{<<"someDummy">> => <<"arguments127">>}}}, await_result(LongReqId))
+    end, LongRequests).
 
 
 
@@ -1602,7 +1653,7 @@ await_result(Id) ->
         {result, Id, Result} ->
             Result
     after
-        timer:seconds(60) ->
+        timer:seconds(90) ->
             error(receive_timeout)
     end.
 
@@ -1661,12 +1712,13 @@ init_per_suite(Config) ->
 init_per_testcase(_, Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
     % set the defaults (some tests manipulate this config)
+    test_utils:set_env(Nodes, cluster_worker, graph_sync_max_pool_usage_per_connection, 0.05),
     test_utils:set_env(Nodes, cluster_worker, graph_sync_stale_request_threshold_sec, 120),
     test_utils:set_env(Nodes, cluster_worker, graph_sync_websocket_keepalive, timer:seconds(15)),
     test_utils:set_env(Nodes, cluster_worker, graph_sync_request_processing_timeout_sec, 60),
     test_utils:set_env(Nodes, cluster_worker, graph_sync_verbose_logs_identity_filter, undefined),
 
-    {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, init, [5]),
+    {_, []} = utils:rpc_multicall(Nodes, gs_worker_pool, init, [200]),
 
     Config.
 

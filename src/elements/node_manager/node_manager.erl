@@ -217,8 +217,7 @@ single_error_log(LogKey, Log, Args, FreezeTime) ->
 -spec log_monitoring_stats(LogFile :: string(),
     Format :: io:format(), Args :: [term()]) -> ok.
 log_monitoring_stats(LogFile, Format, Args) ->
-    MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        monitoring_log_file_max_size, 524288000), % 500 MB
+    MaxSize = cluster_worker:get_env(monitoring_log_file_max_size, 104857600),  % 100 MB
     onedata_logger:log_with_rotation(LogFile, Format, Args, MaxSize).
 
 
