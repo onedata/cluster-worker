@@ -217,8 +217,7 @@ single_error_log(LogKey, Log, Args, FreezeTime) ->
 -spec log_monitoring_stats(LogFile :: string(),
     Format :: io:format(), Args :: [term()]) -> ok.
 log_monitoring_stats(LogFile, Format, Args) ->
-    MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        monitoring_log_file_max_size, 524288000), % 500 MB
+    MaxSize = cluster_worker:get_env(monitoring_log_file_max_size, 104857600),  % 100 MB
     onedata_logger:log_with_rotation(LogFile, Format, Args, MaxSize).
 
 
@@ -771,7 +770,12 @@ cluster_init_step(?UPGRADE_CLUSTER) ->
             ok
     end;
 cluster_init_step(?PREPARE_FOR_LISTENERS_START) ->
-    safe_mode:report_node_initialized(),
+    case ?CALL_PLUGIN(cluster_init_safe_mode_disabling_method, []) of
+        implicit_before_listeners_start ->
+            safe_mode:report_node_initialized();
+        explicit ->
+            ok
+    end,
     % this step internally requires calls to node manager, hence it is processed asynchronously
     spawn(fun() ->
         Result = try
@@ -1406,8 +1410,7 @@ handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
 
 -spec is_cluster_healthy() -> boolean().
 is_cluster_healthy() ->
-    {_, {AppStatus, _}} = get_cluster_status(),
-    case AppStatus of
-        ok -> true;
+    case get_cluster_status() of
+        {_, {ok = _AppStatus, _}} -> true;
         _ -> false
     end.
