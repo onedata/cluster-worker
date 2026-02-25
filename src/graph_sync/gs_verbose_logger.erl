@@ -176,7 +176,7 @@ report_cannot_decode_request(SessionData, Data, Class, Reason, Stacktrace) ->
                 format_identity(SessionData),
                 format_session_id(SessionData#gs_session.id),
                 format_conn_ref(SessionData#gs_session.conn_ref),
-                lager:pr_stacktrace(Stacktrace),
+                onedata_logger:pr_stacktrace(Stacktrace),
                 Class,
                 Reason,
                 format_data_dump_if_enabled(Data)
@@ -336,7 +336,7 @@ dispatch_log(Severity, Identity, LogFun) ->
                 debug -> debug;
                 regular -> Severity
             end,
-            ?log(onedata_logger:loglevel_atom_to_int(LogLevel), LogFun(), [])
+            ?log(LogLevel, LogFun(), [])
     end.
 
 

@@ -27,12 +27,10 @@
             % ctool already requires those apps below, but they are here
             % for awareness of them being used in the project and
             % to make sure they are started before the application.
-            lager,
             hackney,
             cowboy,
             worker_pool,
             exometer_core,
-            exometer_lager,
             exometer_graphite
         ]},
         {mod, {cluster_worker_app, []}},
@@ -364,9 +362,9 @@
             % to apply - use exometer_utils:init_exometer_counters()
             {excluded_exometer_modules, [datastore_router]},
 
-            % Should lager reporter be on
-            {exometer_lager_reporter, false},
-            % Logging level of lager reporter
+            % Should logger reporter be on
+            {exometer_logger_reporter, false},
+            % Logging level of logger reporter
             {exometer_logging_level, debug},
             {exometer_data_points_number, 100},
 

@@ -37,7 +37,6 @@
 #
 # # Grep around in the paths for various items.
 # echo "$epaths" | grep 'riak_core ring_creation_size'
-# echo "$epaths" | grep "lager handlers lager_file_backend" | grep info
 #
 # # Use the epath function to get directly at settings
 # epath 'riak_core ring_creation_size' "$epaths"

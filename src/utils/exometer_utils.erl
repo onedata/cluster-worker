@@ -20,7 +20,7 @@
   extend_counter_name/1]).
 
 -define(EXOMETER_REPORTERS, [
-  {exometer_report_lager, ?MODULE},
+  {exometer_report_logger, ?MODULE},
   {exometer_report_graphite, ?MODULE}
 ]).
 
@@ -124,7 +124,7 @@ reset(Param) ->
 %%--------------------------------------------------------------------
 -spec init_reports([{Param :: list(), Report :: [atom()]}]) -> ok.
 init_reports(Reports) ->
-  init_reports(Reports, [exometer_report_lager, exometer_report_graphite]).
+  init_reports(Reports, [exometer_report_logger, exometer_report_graphite]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -177,11 +177,11 @@ init_exometer_reporters(InitReports) ->
     false -> ?EXOMETER_REPORTERS -- [{exometer_report_graphite, ?MODULE}]
   end,
 
-  LagerOn = application:get_env(?CLUSTER_WORKER_APP_NAME,
-    exometer_lager_reporter, false),
-  ExpectedReporters00 = case LagerOn of
+  LoggerOn = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    exometer_logger_reporter, false),
+  ExpectedReporters00 = case LoggerOn of
     true -> ExpectedReporters0;
-    false -> ExpectedReporters0 -- [{exometer_report_lager, ?MODULE}]
+    false -> ExpectedReporters0 -- [{exometer_report_logger, ?MODULE}]
   end,
 
   ExpectedReporters = ExpectedReporters00 ++
@@ -229,10 +229,10 @@ init_exometer_reports() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec init_reporter(atom()) -> ok.
-init_reporter(exometer_report_lager) ->
+init_reporter(exometer_report_logger) ->
   Level = application:get_env(?CLUSTER_WORKER_APP_NAME,
     exometer_logging_level, debug),
-  ok = exometer_report:add_reporter(exometer_report_lager, [
+  ok = exometer_report:add_reporter(exometer_report_logger, [
     {type_map,[{'_',integer}]},
     {level, Level}
   ]);
@@ -300,21 +300,21 @@ init_report(Param, Report, Reporters) ->
   Name = extend_counter_name(Param),
   case is_counter_excluded(Param) of
     true ->
-      LagerOn = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        exometer_lager_reporter, false),
-      case LagerOn andalso lists:member(exometer_report_lager, Reporters) of
+      LoggerOn = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_logger_reporter, false),
+      case LoggerOn andalso lists:member(exometer_report_logger, Reporters) of
         true ->
-          exometer_report:unsubscribe(exometer_report_lager, Name, Report),
+          exometer_report:unsubscribe(exometer_report_logger, Name, Report),
           ok;
         false ->
           ok
       end;
     _ ->
-      LagerOn = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        exometer_lager_reporter, false),
-      case LagerOn andalso lists:member(exometer_report_lager, Reporters) of
+      LoggerOn = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_logger_reporter, false),
+      case LoggerOn andalso lists:member(exometer_report_logger, Reporters) of
         true ->
-          exometer_report:subscribe(exometer_report_lager, Name,
+          exometer_report:subscribe(exometer_report_logger, Name,
             Report, application:get_env(?CLUSTER_WORKER_APP_NAME,
               exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL));
         false ->
