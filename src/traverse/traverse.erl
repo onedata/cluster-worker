@@ -202,7 +202,7 @@ init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Options) -
 
 -spec is_pool_started(pool()) -> boolean().
 is_pool_started(PoolName) ->
-    AllPools = lists:map(fun([{pool, PoolName} | _]) -> PoolName end, worker_pool:stats()),
+    AllPools = lists:map(fun([{pool, P} | _]) -> P end, worker_pool:stats()),
     lists:member(?MASTER_POOL_NAME(PoolName), AllPools) andalso lists:member(?SLAVE_POOL_NAME(PoolName), AllPools).
 
 

@@ -66,6 +66,7 @@
 %% API
 -export([new/0, new_from_digest/1]).
 -export([new_adjacent_to/1, build_adjacent/2, adjacent_from_digest/2]).
+-export([gen_legacy_key/2]).
 -export([remove_extension/2]).
 -export([any_responsible_node/1, primary_responsible_node/1, get_chash_seed/1]).
 
@@ -158,6 +159,19 @@ adjacent_from_digest(DigestComponents, Original) when size(Original) > 0 ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Generates a datastore key based on provided seed and other datastore key
+%% according to the procedure that was used in versions pre 19.02.1.
+%% NOTE: Should only be used in code that requires retaining the legacy ids.
+%% In other cases, new_from_digest/1 should be used.
+%% @end
+%%--------------------------------------------------------------------
+-spec gen_legacy_key(binary(), key()) -> key().
+gen_legacy_key(Seed, Key) ->
+    digest([Seed, Key]).
+
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Removes Extension from given OriginalKey that was created using build_adjacent/2.
 %% NOTE: if a legacy Original key is given, extension removal is not supported.
 %% @end
@@ -214,22 +228,10 @@ get_chash_seed(Key) ->
             CHashLabel
     end.
 
+
 %% ====================================================================
 %% Internal functions
 %% ====================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Generates a datastore key based on provided seed and other datastore key
-%% according to the procedure that was used in versions pre 19.02.1.
-%% NOTE: Should only be used in code that requires retaining the legacy ids.
-%% In other cases, new_from_digest/1 should be used.
-%% @end
-%%--------------------------------------------------------------------
--spec gen_legacy_key(binary(), key()) -> key().
-gen_legacy_key(Seed, Key) ->
-    digest([Seed, Key]).
 
 
 %% @private
