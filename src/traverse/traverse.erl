@@ -738,16 +738,22 @@ maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskId, Executor, #{
     case Delegated == Done + Failed of
         true ->
             % VFS-5532 - can never be equal in case of description saving error
-            ok = case Canceled of
-                true -> task_callback(CallbackModule, task_canceled, TaskId, PoolName);
-                _ -> task_callback(CallbackModule, task_finished, TaskId, PoolName)
-            end,
+            try
+                ok = case Canceled of
+                    true -> task_callback(CallbackModule, task_canceled, TaskId, PoolName);
+                    _ -> task_callback(CallbackModule, task_finished, TaskId, PoolName)
+                end,
 
-            case traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, false, graceful) of
-                ok -> check_task_list_and_run(PoolName, Executor, []);
-                {error, already_finished} -> ok
+                case traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, false, graceful) of
+                    ok -> check_task_list_and_run(PoolName, Executor, []);
+                    {error, already_finished} -> ok
+                end
+            catch Class:Error:Stacktrace ->
+                ?error_stacktrace(Class, Error, Stacktrace),
+                check_task_list_and_run(PoolName, Executor, [])
             end;
-        _ -> ok
+        _ -> 
+            ok
     end.
 
 -spec check_task_list_and_run(pool(), environment_id(), [traverse:group()]) -> ok.
