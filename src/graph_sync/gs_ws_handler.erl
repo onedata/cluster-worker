@@ -172,17 +172,14 @@ websocket_handle({text, Data}, #pre_handshake_state{
 
 websocket_handle({text, Data}, #state{
     session_data = SessionData,
-    worker_pool_tenant = WPTenant
+    worker_pool_tenant = WPTenant0
 } = State) ->
     _ResponseMsg = case decode_request(State, Data) of
         {ok, Request} ->
+            WPTenant1 = gs_worker_pool:queue_job(WPTenant0, Request),
             % the result will be sent to this process as a message ?GS_WORKER_POOL_JOB_OUTCOME(Outcome)
-            {ThrottlingRecommendation, UpdatedWPTenant} = gs_worker_pool:post_job(WPTenant, SessionData, Request),
-            Commands = case ThrottlingRecommendation of
-                start_throttling -> [{active, false}];
-                resume_processing -> []
-            end,
-            {Commands, State#state{worker_pool_tenant = UpdatedWPTenant}};
+            WPTenant2 = gs_worker_pool:dispatch_jobs(WPTenant1, SessionData),
+            reply_and_update_wp_tenant(State, [], WPTenant2);
         {error, _} = Error ->
             PushErrorMsg = gs_protocol:generate_error_push_message(Error),
             gs_verbose_logger:report_message_pushed(SessionData, PushErrorMsg),
@@ -219,36 +216,22 @@ websocket_handle(Msg, State) ->
 -spec websocket_info(term(), state()) -> {cowboy_websocket:commands(), state()}.
 websocket_info(?GS_WORKER_POOL_JOB_OUTCOME(_) = Outcome, #state{
     session_data = SessionData,
-    worker_pool_tenant = WorkerPoolTenant
+    worker_pool_tenant = WPTenant
 } = State) ->
-    {ResponseMessage, {ThrottlingRecommendation, UpdatedWorkerPoolTenant}} = gs_worker_pool:process_outcome(
-        WorkerPoolTenant, SessionData, Outcome
-    ),
+    {ResponseMessage, UpdatedWPTenant} = gs_worker_pool:process_outcome(WPTenant, SessionData, Outcome),
     ReplyCommands = [{text, encode_message(State, ResponseMessage)}],
-
-    CommandsWithActive = case ThrottlingRecommendation of
-        resume_processing -> [{active, true} | ReplyCommands];
-        start_throttling -> ReplyCommands
-    end,
-
-    {CommandsWithActive, State#state{worker_pool_tenant = UpdatedWorkerPoolTenant}};
+    reply_and_update_wp_tenant(State, ReplyCommands, UpdatedWPTenant);
 
 websocket_info(keepalive, #state{session_data = SessionData, worker_pool_tenant = WPTenant} = State) ->
     % the keepalive timer is also used to periodically check for stale requests
-    {ResponseMessages, {ThrottlingRecommendation, UpdatedWPTenant}} = gs_worker_pool:prune_stale_requests(
-        WPTenant, SessionData
-    ),
+    {ResponseMessages, UpdatedWPTenant} = gs_worker_pool:prune_stale_requests(WPTenant, SessionData),
     ReplyCommands = lists:map(fun(ResponseMessage) ->
         {text, encode_message(State, ResponseMessage)}
     end, ResponseMessages),
 
-    CommandsWithActiveAndPing = case ThrottlingRecommendation of
-        resume_processing -> [{active, true}, ping | ReplyCommands];
-        start_throttling -> [ping | ReplyCommands]
-    end,
-
     erlang:send_after(?KEEPALIVE_INTERVAL_MILLIS, self(), keepalive),
-    {CommandsWithActiveAndPing, State#state{worker_pool_tenant = UpdatedWPTenant}};
+
+    reply_and_update_wp_tenant(State, [ping | ReplyCommands], UpdatedWPTenant);
 
 websocket_info({push, Msg}, State) ->
     gs_verbose_logger:report_message_pushed(State#state.session_data, Msg),
@@ -339,3 +322,16 @@ conn_ref(#state{session_data = #gs_session{conn_ref = ConnRef}}) ->
     ConnRef.
 
 
+%% @private
+-spec reply_and_update_wp_tenant(
+    state(),
+    cowboy_websocket:commands(),
+    gs_worker_pool:tenant()
+) ->
+    {cowboy_websocket:commands(), state()}.
+reply_and_update_wp_tenant(State, Commands, NewWPTenant) ->
+    CommandsWithActive = case gs_worker_pool:current_backpressure_recommendation(NewWPTenant) of
+        back_off -> [{active, false} | Commands];
+        accept_requests -> [{active, true} | Commands]
+    end,
+    {CommandsWithActive, State#state{worker_pool_tenant = NewWPTenant}}.
