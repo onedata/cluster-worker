@@ -8,7 +8,7 @@
 %%% @doc
 %%% Handles logging to the journal log file - a non-rotated log containing
 %%% entries related to application stopping and starting. The log is placed
-%%% in the lager's log_root, which depends on the config of the master
+%%% in the logger's log_root, which depends on the config of the master
 %%% application that uses cluster-worker.
 %%% @end
 %%%--------------------------------------------------------------------
@@ -27,7 +27,7 @@
 
 -spec log(string()) -> ok.
 log(Message) ->
-    {Date, Time} = lager_util:format_time(lager_util:maybe_utc(lager_util:localtime_ms())),
+    {Date, Time} = format_time(erlang:localtime()),
     write_to_log_file("[~ts ~ts] ~ts~n", [Date, Time, Message]).
 
 
@@ -49,5 +49,13 @@ write_to_log_file(Format, Args) ->
 %% @private
 -spec log_file() -> string().
 log_file() ->
-    LogRoot = application:get_env(lager, log_root, "/tmp"),
+    LogRoot = application:get_env(ctool, log_root, "/tmp"),
     filename:join(LogRoot, ?JOURNAL_LOG_FILE_NAME).
+
+
+%% @private
+-spec format_time(calendar:datetime()) -> {string(), string()}.
+format_time({{Year, Month, Day}, {Hour, Minute, Second}}) ->
+    DateStr = io_lib:format("~4..0B-~2..0B-~2..0B", [Year, Month, Day]),
+    TimeStr = io_lib:format("~2..0B:~2..0B:~2..0B", [Hour, Minute, Second]),
+    {DateStr, TimeStr}.
