@@ -67,6 +67,8 @@ get_record_struct(1) ->
 %%   revision. If at least one tree root has been selected from local forest
 %%   returns Mutated as 'true' with causes change broadcast, otherwise Mutated
 %%   equals 'false'.
+%% * a forest that is not synced locally (ignore_in_changes = true) stays
+%%   not synced after the merge.
 %% @end
 %%--------------------------------------------------------------------
 -spec resolve_conflict(ctx(), doc(), doc()) -> {boolean(), doc()} | ignore.
@@ -74,7 +76,7 @@ resolve_conflict(_Ctx, #document{value = Forest}, #document{value = Forest}) ->
     ignore;
 resolve_conflict(_Ctx,
     RemoteDoc = #document{value = RemoteForest},
-    _LocalDoc = #document{value = LocalForest}
+    LocalDoc = #document{value = LocalForest}
 ) ->
     #links_forest{trees = RemoteTrees} = RemoteForest,
     #links_forest{trees = LocalTrees} = LocalForest,
@@ -100,8 +102,13 @@ resolve_conflict(_Ctx,
                 end
         end
     end, {false, #{}}, TreeIds),
-    Doc = RemoteDoc#document{value = RemoteForest#links_forest{
-        trees = MergedTrees2
-    }},
+    IgnoreInChanges = case LocalDoc of
+        #document{ignore_in_changes = true} -> true;
+        _ -> RemoteDoc#document.ignore_in_changes
+    end,
+    Doc = RemoteDoc#document{
+        value = RemoteForest#links_forest{trees = MergedTrees2},
+        ignore_in_changes = IgnoreInChanges
+    },
     {Mutated2, Doc}.
 
